@@ -1068,7 +1068,14 @@ fn pr_from_raw(p: RawPr) -> PullRequest {
         author: p.user.map(|u| u.login).unwrap_or_default(),
         head: p.head.name,
         head_sha: p.head.sha,
-        head_repo: p.head.repo.map(|r| r.full_name),
+        // Only set when the head lives in another repository (a fork).
+        head_repo: {
+            let base = p.base.repo.as_ref().map(|r| r.full_name.as_str());
+            p.head
+                .repo
+                .map(|r| r.full_name)
+                .filter(|h| Some(h.as_str()) != base)
+        },
         base: p.base.name,
         draft: p.draft,
         url: p.html_url,

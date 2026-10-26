@@ -374,53 +374,56 @@ pub fn tags(
 ) -> bool {
     let p = *pal(ui);
     let mut changed = false;
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-        let mut remove = None;
-        for (i, item) in items.iter().enumerate() {
-            let g = ui.painter().layout_no_wrap(
-                item.clone(),
-                FontId::new(size::SMALL, medium()),
-                p.text,
-            );
-            let (rect, resp) =
-                ui.allocate_exact_size(vec2(g.size().x + 34.0, 24.0), Sense::click());
-            ui.painter().rect(
-                rect,
-                CornerRadius::same(radius::M),
-                if resp.hovered() { p.hover } else { p.raised },
-                Stroke::new(1.0, p.border),
-                egui::StrokeKind::Inside,
-            );
-            ui.painter().galley(
-                pos2(rect.left() + 10.0, rect.center().y - g.size().y / 2.0),
-                g,
-                p.text,
-            );
-            icons::paint(
-                ui.painter(),
-                Icon::Close,
-                pos2(rect.right() - 12.0, rect.center().y),
-                10.0,
-                if resp.hovered() {
-                    p.text_strong
-                } else {
-                    p.text_3
-                },
-            );
-            if resp
-                .on_hover_text("Remove")
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .clicked()
-            {
-                remove = Some(i);
+    // No chips: no row (an empty wrapped row would leave a gap above the input).
+    if !items.is_empty() {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+            let mut remove = None;
+            for (i, item) in items.iter().enumerate() {
+                let g = ui.painter().layout_no_wrap(
+                    item.clone(),
+                    FontId::new(size::SMALL, medium()),
+                    p.text,
+                );
+                let (rect, resp) =
+                    ui.allocate_exact_size(vec2(g.size().x + 34.0, 24.0), Sense::click());
+                ui.painter().rect(
+                    rect,
+                    CornerRadius::same(radius::M),
+                    if resp.hovered() { p.hover } else { p.raised },
+                    Stroke::new(1.0, p.border),
+                    egui::StrokeKind::Inside,
+                );
+                ui.painter().galley(
+                    pos2(rect.left() + 10.0, rect.center().y - g.size().y / 2.0),
+                    g,
+                    p.text,
+                );
+                icons::paint(
+                    ui.painter(),
+                    Icon::Close,
+                    pos2(rect.right() - 12.0, rect.center().y),
+                    10.0,
+                    if resp.hovered() {
+                        p.text_strong
+                    } else {
+                        p.text_3
+                    },
+                );
+                if resp
+                    .on_hover_text("Remove")
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    remove = Some(i);
+                }
             }
-        }
-        if let Some(i) = remove {
-            items.remove(i);
-            changed = true;
-        }
-    });
+            if let Some(i) = remove {
+                items.remove(i);
+                changed = true;
+            }
+        });
+    }
     let resp = input(ui, (id_salt, "tags"), buffer, InputOpts::new(hint));
     let commit = |items: &mut Vec<String>, value: &str| -> bool {
         let v = value.trim().trim_start_matches('@').to_owned();

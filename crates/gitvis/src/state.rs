@@ -107,7 +107,7 @@ impl ActivityKind {
         match self {
             ActivityKind::Op => "Operations",
             ActivityKind::Read => "Reads",
-            ActivityKind::Api => "GitHub API",
+            ActivityKind::Api => "API calls",
             ActivityKind::Scan => "Scans",
         }
     }

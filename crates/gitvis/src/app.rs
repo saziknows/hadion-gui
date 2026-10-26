@@ -3358,6 +3358,18 @@ impl GitVis {
             Action::CloseRepo(idx) => self.close_repo(idx),
             Action::Activate(idx) => {
                 if idx < self.repos.len() {
+                    // Home is one page for all repositories: switching tabs
+                    // while it shows keeps it, and the repository left
+                    // behind goes back to its graph.
+                    if idx != self.active
+                        && self
+                            .repos
+                            .get(self.active)
+                            .is_some_and(|r| r.page == Page::Home)
+                    {
+                        self.repos[self.active].page = Page::Graph;
+                        self.repos[idx].page = Page::Home;
+                    }
                     self.active = idx;
                 }
             }

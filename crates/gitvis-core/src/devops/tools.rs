@@ -265,6 +265,12 @@ fn version_line(tool: Tool, text: &str) -> String {
         .map(str::trim)
         .filter(|l| !l.is_empty())
         .collect();
+    if tool == Tool::Az {
+        // `az version -o tsv` prints tab-separated versions: `2.91.0 2.91.0 1.1.0`.
+        if let Some(v) = lines.first().and_then(|l| l.split_whitespace().next()) {
+            return format!("azure-cli {v}");
+        }
+    }
     if tool == Tool::Kubectl {
         // `clientVersion:\n  gitVersion: v1.30.2`
         if let Some(l) = lines.iter().find(|l| l.starts_with("gitVersion:")) {
@@ -290,5 +296,9 @@ mod tests {
         let text = "clientVersion:\n  buildDate: x\n  gitVersion: v1.30.2\n";
         assert_eq!(version_line(Tool::Kubectl, text), "v1.30.2");
         assert_eq!(version_line(Tool::Npm, "\n10.8.1\n"), "10.8.1");
+        assert_eq!(
+            version_line(Tool::Az, "2.91.0\t2.91.0\t1.1.0\n"),
+            "azure-cli 2.91.0"
+        );
     }
 }
