@@ -1,7 +1,22 @@
 //! GitLab (through `glab api`) and Azure DevOps (through `az`): merge
 //! requests and pipelines for repositories whose remote is not on GitHub.
 //!
-//! [`detect`] recognises the remote; the adapters live in the submodules.
+//! [`detect`] recognises the remote; the adapters live in the submodules:
+//! - [`gitlab`]: `glab api` request builders (and unauthenticated `curl`
+//!   for public projects), JSON → [`model`].
+//! - [`azure`]: `az repos pr …`, `az pipelines …`, `az devops invoke`
+//!   argument builders, JSON → [`model`].
+//! - [`cli`]: a described call ([`cli::Call`]) and its runner, recorded
+//!   like a GitHub API call.
+//! - [`trace`]: GitLab job traces and Azure logs as foldable sections.
+//! - [`tools`]: which CLI is installed and signed in.
+
+pub mod azure;
+pub mod cli;
+pub mod gitlab;
+pub mod model;
+pub mod tools;
+pub mod trace;
 
 /// Which forge a remote points at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
