@@ -17,13 +17,12 @@ use egui::{
 
 use gitvis_core::github::{Annotation, CheckRun, GitHubData, Job, Outcome, RateLimit, WorkflowRun};
 use gitvis_core::joblog::{LogKind, LogLine};
-use gitvis_core::ops::GitOp;
 use gitvis_core::{Oid, Snapshot};
 
 use crate::devops::{Console, ci};
 use crate::format;
 use crate::state::{
-    Action, ChecksState, Dialog, GitHubPage, LogState, RepoState, RunDetail, RunFilter, Settings,
+    Action, ChecksState, GitHubPage, LogState, RepoState, RunDetail, RunFilter, Settings,
 };
 use crate::theme::{Palette, Tone, medium, pal, semibold, size, space};
 use crate::views::icons::{self, Icon, IconButton, outcome_dot};
@@ -67,7 +66,6 @@ pub fn visible_runs<'a>(data: &'a GitHubData, page: &GitHubPage) -> Vec<&'a Work
 struct Cx<'a> {
     data: &'a GitHubData,
     snap: Option<&'a Snapshot>,
-    busy: bool,
     now: i64,
     /// `ui.input().time`, for the running-arc animation.
     t: f64,
@@ -157,58 +155,71 @@ pub fn show(
         ci::show_tab(ui, repo, tab, console, settings, actions);
         return;
     }
-    let RepoState {
-        github,
-        github_remote,
-        github_error,
-        gh_page,
-        snapshot,
-        busy,
-        ..
-    } = repo;
-    if github_remote.is_none() {
-        return;
-    }
-    let t = ui.input(|i| i.time);
-
-    if let Some(err) = github_error.as_deref()
-        && github.is_none()
+    let compare_open = repo
+        .devops
+        .ci
+        .compare
+        .as_ref()
+        .is_some_and(|c| Some(c.bad) == repo.gh_page.selected_run);
     {
-        empty_pane(ui, |ui| {
-            let body = format!(
-                "{err}\n\ngitvis talks to GitHub through the gh CLI: run `gh auth login` in a terminal, then retry."
-            );
-            if kit::empty_state(
-                ui,
-                Icon::Warning,
-                "Could not reach GitHub",
-                &body,
-                Some((Icon::Fetch, "Retry")),
-            ) {
-                actions.push(Action::RefreshGitHub);
-            }
-        });
-        return;
-    }
-    let Some(data) = github.as_ref() else {
-        empty_pane(ui, |ui| {
-            ui.add_space((ui.available_height() * 0.3).min(200.0));
-            ui.vertical_centered(|ui| {
-                ui.set_max_width(320.0);
-                kit::loading(ui, "Loading pull requests and workflow runs…");
+        let RepoState {
+            github,
+            github_remote,
+            github_error,
+            gh_page,
+            snapshot,
+            devops,
+            ..
+        } = &mut *repo;
+        if github_remote.is_none() {
+            return;
+        }
+        let t = ui.input(|i| i.time);
+
+        if let Some(err) = github_error.as_deref()
+            && github.is_none()
+        {
+            empty_pane(ui, |ui| {
+                let body = format!(
+                    "{err}\n\ngitvis talks to GitHub through the gh CLI: run `gh auth login` in a terminal, then retry."
+                );
+                if kit::empty_state(
+                    ui,
+                    Icon::Warning,
+                    "Could not reach GitHub",
+                    &body,
+                    Some((Icon::Fetch, "Retry")),
+                ) {
+                    actions.push(Action::RefreshGitHub);
+                }
             });
-        });
-        return;
-    };
-    let cx = Cx {
-        data,
-        snap: snapshot.as_ref(),
-        busy: busy.is_some(),
-        now,
-        t,
-        dark: settings.dark,
-    };
-    actions_tab(ui, &cx, gh_page, actions);
+            return;
+        }
+        let Some(data) = github.as_ref() else {
+            empty_pane(ui, |ui| {
+                ui.add_space((ui.available_height() * 0.3).min(200.0));
+                ui.vertical_centered(|ui| {
+                    ui.set_max_width(320.0);
+                    kit::loading(ui, "Loading pull requests and workflow runs…");
+                });
+            });
+            return;
+        };
+        let cx = Cx {
+            data,
+            snap: snapshot.as_ref(),
+            now,
+            t,
+            dark: settings.dark,
+        };
+        let ci = &mut devops.ci;
+        list_pane(ui, "gh_runs", |ui| runs_list(ui, &cx, gh_page, ci, actions));
+        if !compare_open {
+            actions_tab(ui, &cx, gh_page, ci, actions);
+            return;
+        }
+    }
+    ci::show_compare(ui, repo, actions);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -248,16 +259,30 @@ fn page_head(
         sub.push(s);
     }
     kit::page_header(ui, title, &sub.join("  ·  "), |ui| {
-        if loading {
+        let tip = match tab {
+            ci::Tab::Runs => "Refresh pull requests, runs and the selected run's jobs",
+            ci::Tab::Workflows => {
+                "Re-read the workflow files, refresh the runs and the selected workflow's history"
+            }
+            ci::Tab::Artifacts => "Reload the artifact list",
+            ci::Tab::Caches => "Reload the cache usage and entries",
+            ci::Tab::Validate => "Check the workflow files again",
+            ci::Tab::Local => "Look for act and Docker again and re-read the workflow files",
+        };
+        if loading && tab == ci::Tab::Runs {
             ui.add_space(6.0);
             ui.add(egui::Spinner::new().size(14.0));
             ui.add_space(6.0);
         } else if IconButton::icon(Icon::Fetch)
             .show(ui)
-            .on_hover_text("Refresh pull requests, runs and the selected run's jobs")
+            .on_hover_text(tip)
             .clicked()
         {
-            actions.push(Action::RefreshGitHub);
+            actions.push(if tab == ci::Tab::Runs {
+                Action::RefreshGitHub
+            } else {
+                ci::Act::Refresh(tab).into()
+            });
         }
         if IconButton::icon(Icon::External)
             .show(ui)
@@ -402,9 +427,13 @@ fn caption(p: &Palette, text: impl Into<String>) -> RichText {
 // Runs
 // ---------------------------------------------------------------------------
 
-fn actions_tab(ui: &mut Ui, cx: &Cx, page: &mut GitHubPage, actions: &mut Vec<Action>) {
-    list_pane(ui, "gh_runs", |ui| runs_list(ui, cx, page, actions));
-
+fn actions_tab(
+    ui: &mut Ui,
+    cx: &Cx,
+    page: &mut GitHubPage,
+    ci: &mut ci::State,
+    actions: &mut Vec<Action>,
+) {
     let Some(run_id) = page.selected_run else {
         empty_pane(ui, |ui| {
             kit::empty_state(
@@ -475,14 +504,61 @@ fn actions_tab(ui: &mut Ui, cx: &Cx, page: &mut GitHubPage, actions: &mut Vec<Ac
             });
     }
 
+    // A run's artifacts are fetched once, when it is first shown.
+    if ci.run_artifacts.get(&run_id).is_none_or(|l| l.unloaded()) {
+        actions.push(
+            ci::Act::LoadRunArtifacts {
+                run: run_id,
+                force: false,
+            }
+            .into(),
+        );
+    }
+    let ci = &*ci;
     detail_pane(ui, ("gh_run", run_id), |ui| {
-        run_header(ui, cx, run, detail, actions);
-        jobs_section(ui, cx, run, detail, actions);
+        run_header(ui, cx, run, detail, ci, actions);
+        jobs_section(ui, cx, run, detail, ci, actions);
+        ci::runs::artifacts_section(
+            ui,
+            run,
+            ci.run_artifacts.get(&run_id),
+            &ci.downloads,
+            cx.now,
+            actions,
+        );
         run_facts(ui, cx, run, detail, actions);
     });
 }
 
-fn runs_list(ui: &mut Ui, cx: &Cx, page: &mut GitHubPage, actions: &mut Vec<Action>) {
+/// The pick box at the left of a run row.
+fn pick_box(ui: &Ui, rect: Rect, picked: bool, hovered: bool) {
+    let p = *pal(ui);
+    let bx = Rect::from_center_size(
+        pos2(rect.left() + 17.0, rect.top() + 18.0),
+        vec2(14.0, 14.0),
+    );
+    if picked {
+        ui.painter()
+            .rect_filled(bx, CornerRadius::same(crate::theme::radius::S), p.accent);
+        icons::paint(ui.painter(), Icon::Check, bx.center(), 10.0, Color32::WHITE);
+    } else {
+        ui.painter().rect(
+            bx,
+            CornerRadius::same(crate::theme::radius::S),
+            Color32::TRANSPARENT,
+            Stroke::new(1.0, if hovered { p.text_3 } else { p.border_strong }),
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
+fn runs_list(
+    ui: &mut Ui,
+    cx: &Cx,
+    page: &mut GitHubPage,
+    ci: &mut ci::State,
+    actions: &mut Vec<Action>,
+) {
     let hint = format!("Filter {} runs", format::count(cx.data.runs.len()));
     search_field(ui, "gh_run_filter", &mut page.run_filter, &hint);
     ui.add_space(space::S);
@@ -508,6 +584,7 @@ fn runs_list(ui: &mut Ui, cx: &Cx, page: &mut GitHubPage, actions: &mut Vec<Acti
         }
     });
     ui.add_space(space::S);
+    ci::runs::bulk_bar(ui, &ci.picked, &cx.data.runs, actions);
 
     let runs = visible_runs(cx.data, page);
     if runs.is_empty() {
@@ -529,6 +606,9 @@ fn runs_list(ui: &mut Ui, cx: &Cx, page: &mut GitHubPage, actions: &mut Vec<Acti
         ui.ctx().request_repaint_after(Duration::from_millis(90));
     }
     let selected = page.selected_run;
+    let picking = !ci.picked.is_empty();
+    let picked = &ci.picked;
+    let busy_runs = &ci.busy_runs;
     kit::list(
         ui,
         "gh_runs_list",
@@ -549,10 +629,17 @@ fn runs_list(ui: &mut Ui, cx: &Cx, page: &mut GitHubPage, actions: &mut Vec<Acti
                 .or(run.created)
                 .map(|s| format::relative(s, cx.now))
                 .unwrap_or_default();
-            let badges = run_badges(run);
+            let mut badges = run_badges(run);
+            if let Some(b) = busy_runs.get(&run.id) {
+                badges.insert(0, (short_busy(b), Tone::Accent));
+            }
+            let is_picked = picked.contains(&run.id);
+            let hovered = ui.rect_contains_pointer(rect);
+            // A pick column on the left; the row content moves right of it.
+            let content = Rect::from_min_max(pos2(rect.left() + 24.0, rect.top()), rect.max);
             kit::paint_row(
                 ui,
-                rect,
+                content,
                 &kit::Row::new(run_title(run))
                     .leading(kit::Leading::Dot(Color32::TRANSPARENT))
                     .subtitle(&subtitle)
@@ -560,22 +647,61 @@ fn runs_list(ui: &mut Ui, cx: &Cx, page: &mut GitHubPage, actions: &mut Vec<Acti
                     .badges(&badges),
                 selected == Some(run.id),
             );
+            if is_picked || picking || hovered {
+                pick_box(ui, rect, is_picked, hovered);
+            }
             outcome_dot(
                 ui.painter(),
                 run.outcome(),
-                pos2(rect.left() + 19.0, rect.top() + 18.0),
+                pos2(content.left() + 19.0, rect.top() + 18.0),
                 6.0,
                 cx.t,
             );
             if resp.clicked() {
-                actions.push(Action::OpenRun {
-                    run: run.id,
-                    job: None,
-                });
+                let on_box = resp
+                    .interact_pointer_pos()
+                    .is_some_and(|p| p.x < rect.left() + 30.0);
+                if on_box {
+                    actions.push(
+                        ci::Act::Pick {
+                            run: run.id,
+                            mode: ci::PickMode::Toggle,
+                        }
+                        .into(),
+                    );
+                } else if !ci::runs::click_pick(ui, run.id, actions) {
+                    actions.push(Action::OpenRun {
+                        run: run.id,
+                        job: None,
+                    });
+                }
             }
-            resp.context_menu(|ui| run_menu(ui, cx, run, actions));
+            resp.context_menu(|ui| {
+                run_menu(
+                    ui,
+                    cx,
+                    run,
+                    is_picked,
+                    busy_runs.contains_key(&run.id),
+                    actions,
+                )
+            });
         },
     );
+}
+
+/// `Cancel 3 runs` → `Cancelling…` style badge text for a change in flight.
+fn short_busy(label: &str) -> String {
+    let l = label.to_ascii_lowercase();
+    if l.starts_with("cancel") || l.starts_with("force") {
+        "Cancelling…".to_owned()
+    } else if l.starts_with("re-run") {
+        "Re-running…".to_owned()
+    } else if l.starts_with("delete") {
+        "Deleting…".to_owned()
+    } else {
+        "Working…".to_owned()
+    }
 }
 
 /// Only the state that matters: failure, running, a re-run attempt.
@@ -591,8 +717,15 @@ fn run_badges(run: &WorkflowRun) -> Vec<(String, Tone)> {
     b
 }
 
-fn run_menu(ui: &mut Ui, cx: &Cx, run: &WorkflowRun, actions: &mut Vec<Action>) {
-    ui.set_min_width(240.0);
+fn run_menu(
+    ui: &mut Ui,
+    cx: &Cx,
+    run: &WorkflowRun,
+    picked: bool,
+    busy: bool,
+    actions: &mut Vec<Action>,
+) {
+    ui.set_min_width(280.0);
     if ui.button("Show run").clicked() {
         actions.push(Action::OpenRun {
             run: run.id,
@@ -612,7 +745,7 @@ fn run_menu(ui: &mut Ui, cx: &Cx, run: &WorkflowRun, actions: &mut Vec<Action>) 
         ui.close();
     }
     ui.separator();
-    rerun_items(ui, cx, run, actions);
+    ci::runs::run_menu(ui, run, &cx.data.runs, busy, picked, actions);
     ui.separator();
     if ui.button("Copy run URL").clicked() {
         actions.push(Action::Copy(run.url.clone()));
@@ -622,53 +755,9 @@ fn run_menu(ui: &mut Ui, cx: &Cx, run: &WorkflowRun, actions: &mut Vec<Action>) 
         actions.push(Action::Copy(run.sha.clone()));
         ui.close();
     }
-}
-
-fn rerun_items(ui: &mut Ui, cx: &Cx, run: &WorkflowRun, actions: &mut Vec<Action>) {
-    if !run.is_running() {
-        if ui
-            .add_enabled(!cx.busy, egui::Button::new("Re-run all jobs"))
-            .clicked()
-        {
-            actions.push(Action::Run(GitOp::GhRunRerun {
-                id: run.id,
-                failed_only: false,
-            }));
-            ui.close();
-        }
-        if run.is_failure()
-            && ui
-                .add_enabled(!cx.busy, egui::Button::new("Re-run failed jobs"))
-                .clicked()
-        {
-            actions.push(Action::Run(GitOp::GhRunRerun {
-                id: run.id,
-                failed_only: true,
-            }));
-            ui.close();
-        }
-    } else if ui
-        .add_enabled(
-            !cx.busy,
-            egui::Button::new(RichText::new("Cancel run…").color(pal(ui).danger)),
-        )
-        .clicked()
-    {
-        actions.push(Action::Dialog(cancel_dialog(run)));
+    if ui.button("Copy run id").clicked() {
+        actions.push(Action::Copy(run.id.to_string()));
         ui.close();
-    }
-}
-
-fn cancel_dialog(run: &WorkflowRun) -> Dialog {
-    Dialog::Confirm {
-        title: format!("Cancel {} #{}?", run.name, run.run_number),
-        body: format!(
-            "{}\n\nRunning jobs are stopped; queued jobs are skipped.",
-            run.title
-        ),
-        confirm: "Cancel run".into(),
-        danger: true,
-        ops: vec![GitOp::GhRunCancel { id: run.id }],
     }
 }
 
@@ -697,15 +786,24 @@ fn run_header(
     cx: &Cx,
     run: &WorkflowRun,
     detail: &RunDetail,
+    ci: &ci::State,
     actions: &mut Vec<Action>,
 ) {
     let p = *pal(ui);
     let outcome = run.outcome();
+    let busy = ci.busy_runs.get(&run.id);
     title_row(
         ui,
         run_title(run),
         |ui, r| outcome_dot(ui.painter(), outcome, r.center(), 8.0, cx.t),
         |ui| {
+            let more = IconButton::new(Icon::ChevronDown, "More")
+                .compact()
+                .show(ui)
+                .on_hover_text("Debug re-runs, force cancel, delete logs, delete run");
+            egui::Popup::menu(&more)
+                .id(egui::Id::unique(("gh_run_more", run.id)))
+                .show(|ui| ci::runs::more_menu(ui, run, busy.is_some(), actions));
             if IconButton::icon(Icon::External)
                 .compact()
                 .show(ui)
@@ -734,42 +832,58 @@ fn run_header(
             {
                 actions.push(Action::RefreshRun(run.id));
             }
-            if run.is_running() {
+            if let Some(label) = busy {
+                ui.add_space(4.0);
+                ui.label(small(&p, short_busy(label)));
+                ui.add(egui::Spinner::new().size(13.0));
+                ui.add_space(4.0);
+            } else if run.is_running() {
                 if IconButton::new(Icon::Stop, "Cancel")
                     .compact()
                     .danger()
-                    .enabled(!cx.busy)
                     .show(ui)
-                    .on_hover_text("gh run cancel")
+                    .on_hover_text("POST actions/runs/{id}/cancel")
                     .clicked()
                 {
-                    actions.push(Action::Dialog(cancel_dialog(run)));
+                    actions.push(
+                        ci::Act::AskCancel {
+                            run: run.id,
+                            force: false,
+                        }
+                        .into(),
+                    );
                 }
             } else {
                 if IconButton::new(Icon::Rerun, "Re-run all")
                     .compact()
-                    .enabled(!cx.busy)
                     .show(ui)
-                    .on_hover_text("gh run rerun")
+                    .on_hover_text("POST actions/runs/{id}/rerun")
                     .clicked()
                 {
-                    actions.push(Action::Run(GitOp::GhRunRerun {
-                        id: run.id,
-                        failed_only: false,
-                    }));
+                    actions.push(
+                        ci::Act::AskRerun {
+                            run: run.id,
+                            failed_only: false,
+                            debug: false,
+                        }
+                        .into(),
+                    );
                 }
-                if run.is_failure()
+                if (run.is_failure() || outcome == Outcome::Cancelled)
                     && IconButton::new(Icon::Rerun, "Re-run failed")
                         .compact()
-                        .enabled(!cx.busy)
                         .show(ui)
-                        .on_hover_text("gh run rerun --failed")
+                        .on_hover_text("POST actions/runs/{id}/rerun-failed-jobs")
                         .clicked()
                 {
-                    actions.push(Action::Run(GitOp::GhRunRerun {
-                        id: run.id,
-                        failed_only: true,
-                    }));
+                    actions.push(
+                        ci::Act::AskRerun {
+                            run: run.id,
+                            failed_only: true,
+                            debug: false,
+                        }
+                        .into(),
+                    );
                 }
             }
         },
@@ -791,6 +905,22 @@ fn run_header(
             kit::badge(ui, &format!("Attempt {}", run.attempt), Tone::Neutral);
         }
     });
+    if run.is_failure() {
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            ui.add_space(28.0);
+            if IconButton::new(Icon::Chart, "Compare with the last green run")
+                .compact()
+                .show(ui)
+                .on_hover_text(
+                    "Commits, files and a normalised log diff against the newest earlier passing run of this workflow on this branch",
+                )
+                .clicked()
+            {
+                actions.push(ci::Act::CompareOpen(run.id).into());
+            }
+        });
+    }
 }
 
 /// Trigger, branch, commit, actor, timing and ids of a run.
@@ -940,6 +1070,7 @@ fn jobs_section(
     cx: &Cx,
     run: &WorkflowRun,
     detail: &mut RunDetail,
+    ci: &ci::State,
     actions: &mut Vec<Action>,
 ) {
     let p = *pal(ui);
@@ -1036,7 +1167,7 @@ fn jobs_section(
         });
         ui.add_space(2.0);
     }
-    ui.scope(|ui| jobs_rows(ui, cx, run, &jobs, detail, actions));
+    ui.scope(|ui| jobs_rows(ui, cx, run, &jobs, detail, ci, actions));
 }
 
 fn jobs_rows(
@@ -1045,6 +1176,7 @@ fn jobs_rows(
     run: &WorkflowRun,
     jobs: &[Job],
     detail: &mut RunDetail,
+    ci: &ci::State,
     actions: &mut Vec<Action>,
 ) {
     let mut toggles: Vec<u64> = Vec::new();
@@ -1089,7 +1221,14 @@ fn jobs_rows(
             toggles.push(job.id);
         }
         resp.context_menu(|ui| {
-            ui.set_min_width(220.0);
+            ui.set_min_width(260.0);
+            ci::runs::job_menu(
+                ui,
+                run,
+                job,
+                ci::runs::job_busy(ci, job.id) || ci.busy_runs.contains_key(&run.id),
+                actions,
+            );
             if ui.button("Show log").clicked() {
                 actions.push(Action::ShowLog {
                     run: run.id,
