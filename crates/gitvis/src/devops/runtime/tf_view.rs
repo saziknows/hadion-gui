@@ -284,7 +284,7 @@ fn root_list(
         return;
     }
     let p = *pal(ui);
-    let rows: Vec<(String, String, String, Vec<(String, Tone)>)> = roots
+    let rows: Vec<(String, String, String, common::Badges)> = roots
         .iter()
         .enumerate()
         .map(|(i, r)| {
@@ -569,7 +569,7 @@ fn last_result(runs: Option<&RootRuns>, cmd: Command, now: i64) -> Option<(Strin
             let f = r.fmt.as_ref()?;
             if f.error.is_some() {
                 (format!("Failed · {}", ago(f.at)), Tone::Danger)
-            } else if f.files.is_empty() {
+            } else if f.ok || f.files.is_empty() {
                 (format!("Formatted · {}", ago(f.at)), Tone::Success)
             } else {
                 (
@@ -749,7 +749,7 @@ fn results(
     if let Some(d) = &r.drift {
         order.push((d.at, Command::Drift));
     }
-    order.sort_by(|a, b| b.0.cmp(&a.0));
+    order.sort_by_key(|o| std::cmp::Reverse(o.0));
     for (_, cmd) in order {
         match cmd {
             Command::Validate => validation_section(ui, cx, r, actions),

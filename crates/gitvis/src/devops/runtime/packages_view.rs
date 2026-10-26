@@ -263,7 +263,7 @@ fn package_list(ui: &mut Ui, cx: &Cx, pkg: &mut PkgState, actions: &mut Vec<Acti
     }
     let Some(Ok(l)) = &pkg.listing else { return };
     let p = *pal(ui);
-    let rows: Vec<(String, String, String, Vec<(String, Tone)>)> = vis
+    let rows: Vec<(String, String, String, common::Badges)> = vis
         .iter()
         .map(|x| {
             let repo = match x.repository_name() {

@@ -920,10 +920,10 @@ fn walk(root: &Path) -> Vec<String> {
                 {
                     stack.push((e.path(), depth + 1));
                 }
-            } else if is_config(&name) || is_tfvars(&name) || name == ".terraform.lock.hcl" {
-                if let Ok(rel) = e.path().strip_prefix(root) {
-                    out.push(rel.to_string_lossy().replace('\\', "/"));
-                }
+            } else if (is_config(&name) || is_tfvars(&name) || name == ".terraform.lock.hcl")
+                && let Ok(rel) = e.path().strip_prefix(root)
+            {
+                out.push(rel.to_string_lossy().replace('\\', "/"));
             }
             if out.len() >= MAX_FILES {
                 return out;
@@ -1494,8 +1494,7 @@ fn resource_line(line: &str) -> Option<ResourceChange> {
 fn unbox(line: &str) -> &str {
     let t = line.trim_end();
     let t = t.strip_prefix('│').unwrap_or(t);
-    let t = t.strip_prefix(' ').unwrap_or(t);
-    t
+    t.strip_prefix(' ').unwrap_or(t)
 }
 
 /// `Error: …` / `Warning: …` blocks with their detail lines.
@@ -1873,10 +1872,8 @@ pub fn parse_fmt(text: &str) -> Vec<String> {
         {
             continue;
         }
-        if is_config(t) || is_tfvars(t) {
-            if !out.contains(&t.to_owned()) {
-                out.push(t.to_owned());
-            }
+        if (is_config(t) || is_tfvars(t)) && !out.iter().any(|o| o == t) {
+            out.push(t.to_owned());
         }
     }
     out

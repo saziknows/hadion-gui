@@ -11,7 +11,7 @@ use gitvis_core::{Commit, Oid, Snapshot, repo};
 use super::{Act, RefCache};
 use crate::devops::console::Console;
 use crate::format;
-use crate::state::{Action, RepoId};
+use crate::state::Action;
 use crate::theme::{pal, size, space};
 use crate::views::icons::{Icon, IconButton};
 use crate::views::kit::{self, Tone};
@@ -22,8 +22,6 @@ pub struct Cx<'a> {
     pub now: i64,
     pub github: bool,
     pub workdir: PathBuf,
-    pub repo: RepoId,
-    pub relative: bool,
 }
 
 impl Cx<'_> {
@@ -36,6 +34,9 @@ impl Cx<'_> {
         self.snap.is_some_and(|s| s.index_of.contains_key(&id))
     }
 }
+
+/// Badges of a list row.
+pub type Badges = Vec<(String, Tone)>;
 
 /// `3m ago`.
 pub fn ago(t: Option<i64>, now: i64) -> String {
@@ -281,13 +282,6 @@ pub fn error_block(
             }
         }
     });
-}
-
-/// A loading line under a header.
-pub fn loading_line(ui: &mut Ui, text: &str) {
-    Frame::NONE
-        .inner_margin(Margin::symmetric(24, 10))
-        .show(ui, |ui| kit::loading(ui, text));
 }
 
 /// Short text for a match: `commit 9a9d91b · 3 commits behind origin/main`.

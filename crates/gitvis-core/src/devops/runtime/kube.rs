@@ -1600,7 +1600,7 @@ pub fn parse_events(bytes: &[u8]) -> Result<Vec<Event>, String> {
             }
         })
         .collect();
-    out.sort_by(|a, b| b.last.cmp(&a.last));
+    out.sort_by_key(|e| std::cmp::Reverse(e.last));
     Ok(out)
 }
 
@@ -1802,7 +1802,7 @@ pub fn parse_rollout_history(text: &str) -> Vec<Revision> {
             .map(str::to_owned);
         out.push(Revision { number: n, cause });
     }
-    out.sort_by(|a, b| b.number.cmp(&a.number));
+    out.sort_by_key(|r| std::cmp::Reverse(r.number));
     out
 }
 

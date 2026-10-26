@@ -1756,7 +1756,7 @@ pub fn show_tab(
     repo: &mut RepoState,
     tab: ShipTab,
     console: &Console,
-    settings: &Settings,
+    _settings: &Settings,
     actions: &mut Vec<Action>,
 ) {
     let RepoState {
@@ -1765,7 +1765,6 @@ pub fn show_tab(
         devops,
         github_remote,
         workdir,
-        id,
         ..
     } = repo;
     let rt = &mut devops.runtime;
@@ -1775,8 +1774,6 @@ pub fn show_tab(
         now: now(),
         github: github_remote.is_some(),
         workdir: workdir.clone(),
-        repo: *id,
-        relative: settings.relative_dates,
     };
     match tab {
         ShipTab::Packages => packages_view::show(ui, &cx, rt, actions),

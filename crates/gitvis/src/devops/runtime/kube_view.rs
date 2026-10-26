@@ -473,13 +473,14 @@ fn workload_list(ui: &mut Ui, cx: &Cx, k: &mut KubeState, actions: &mut Vec<Acti
         return;
     }
     let p = *pal(ui);
-    let rows: Vec<(
+    type WorkloadRow = (
         (kube::WorkloadKind, String),
         String,
         String,
         Tone,
-        Vec<(String, Tone)>,
-    )> = vis
+        common::Badges,
+    );
+    let rows: Vec<WorkloadRow> = vis
         .iter()
         .map(|w| {
             let r = kube::rollout(w);
@@ -1138,7 +1139,7 @@ fn pod_detail(ui: &mut Ui, cx: &Cx, k: &KubeState, p: &Pod, actions: &mut Vec<Ac
             if IconButton::new(Icon::Terminal, "Logs")
                 .compact()
                 .show(ui)
-                .on_hover_text(&format!(
+                .on_hover_text(format!(
                     "kubectl logs {} -c {name} --tail=500{}",
                     p.name,
                     if k.log.follow { " -f" } else { "" }
