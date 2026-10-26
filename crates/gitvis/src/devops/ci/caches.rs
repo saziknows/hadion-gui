@@ -123,6 +123,35 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                 widgets::list_state(ui, load, "the caches", "Loading the caches…");
                 return;
             }
+            if let Some(l) = load.ok() {
+                let order = match l.sort {
+                    CacheSort::LastUsed => "most recently used first",
+                    CacheSort::Size => "largest first",
+                    CacheSort::Created => "newest first",
+                };
+                let refs = group_by_ref(&l.items).len();
+                widgets::note(
+                    ui,
+                    &if load.loading {
+                        "Sorting again…".to_owned()
+                    } else if view == CacheView::Refs {
+                        format!(
+                            "{} holding {}, largest first",
+                            format::plural(refs, "ref", "refs"),
+                            format::plural(l.items.len(), "cache", "caches")
+                        )
+                    } else if (l.total as usize) > l.items.len() {
+                        format!(
+                            "{} of {} entries, {order}",
+                            format::count(l.items.len()),
+                            format::count(l.total as usize)
+                        )
+                    } else {
+                        format!("{} entries, {order}", format::count(l.items.len()))
+                    },
+                );
+                ui.add_space(4.0);
+            }
             if items.is_empty() {
                 kit::muted(
                     ui,

@@ -119,7 +119,19 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             tools_section(ui, &act.tools, tools.as_ref(), actions);
-            kit::section(ui, "Jobs", Some(jobs.len()));
+            let can_list = tools.as_ref().is_some_and(|t| t.act.is_some());
+            kit::section_with(ui, "Jobs", Some(jobs.len()), |ui| {
+                if can_list
+                    && !act.list.loading
+                    && IconButton::icon(Icon::Fetch)
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Run act -l again")
+                        .clicked()
+                {
+                    actions.push(Act::ListActJobs.into());
+                }
+            });
             if from_act {
                 widgets::note(ui, "From act -l");
             } else if local_load.loading {
