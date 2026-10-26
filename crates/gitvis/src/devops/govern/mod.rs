@@ -596,10 +596,32 @@ fn sev_summary(items: impl Iterator<Item = Severity>) -> String {
     }
 }
 
+/// Is this alerts error "switched off / no access" rather than a failure?
+fn alerts_unavailable(e: &str) -> bool {
+    let l = e.to_ascii_lowercase();
+    l.contains("disabled")
+        || l.contains("not enabled")
+        || l.contains("no analysis found")
+        || l.contains("advanced security must be enabled")
+        || l.contains("(http 403)")
+        || l.contains("(http 404)")
+}
+
 impl Msg {
     /// One line for the activity log (`Err` when the work failed).
     pub fn summary(&self) -> Result<String, String> {
         let err = |e: &String| Err(e.clone());
+        // Alerts that are switched off, or not visible to this account, are a
+        // fact about the repository that the page explains, not a failure:
+        // logging them as errors would put a red mark in the status bar every
+        // time the page opens.
+        let alerts_err = |e: &String| {
+            if alerts_unavailable(e) {
+                Ok(format!("not available: {e}"))
+            } else {
+                Err(e.clone())
+            }
+        };
         match self {
             Msg::Access(Ok(a)) => Ok(format!(
                 "{}: role {}, default branch {}, {}",
@@ -614,13 +636,13 @@ impl Msg {
                 count(v.len(), "Dependabot alert", "Dependabot alerts"),
                 sev_summary(v.iter().map(|a| a.severity))
             )),
-            Msg::Dependabot(Err(e)) => err(e),
+            Msg::Dependabot(Err(e)) => alerts_err(e),
             Msg::Code(Ok(v)) => Ok(format!(
                 "{}{}",
                 count(v.len(), "code scanning alert", "code scanning alerts"),
                 sev_summary(v.iter().map(|a| a.severity()))
             )),
-            Msg::Code(Err(e)) => err(e),
+            Msg::Code(Err(e)) => alerts_err(e),
             Msg::Snippet(n, s) => Ok(format!(
                 "Code of alert #{n}: {}",
                 match s {
