@@ -610,7 +610,11 @@ fn pending_banner(ui: &mut Ui, repo: &RepoState, actions: &mut Vec<Action>) {
                         .family(theme::semibold())
                         .color(p.text_strong),
                 );
-                if conflicts > 0 {
+                if pending == Pending::Bisect {
+                    ui.label(
+                        RichText::new("mark commits good or bad on the Tools page").color(p.text_2),
+                    );
+                } else if conflicts > 0 {
                     ui.label(
                         RichText::new(format!(
                             "{} to resolve",
@@ -623,6 +627,32 @@ fn pending_banner(ui: &mut Ui, repo: &RepoState, actions: &mut Vec<Action>) {
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
+                    if pending == Pending::Bisect {
+                        // A bisect has nothing to continue: open it, or end it.
+                        if IconButton::text("Reset bisect")
+                            .danger()
+                            .enabled(!busy)
+                            .show(ui)
+                            .on_hover_text("git bisect reset: go back to where the bisect started")
+                            .clicked()
+                        {
+                            actions.push(Action::Run(GitOp::Abort(pending)));
+                        }
+                        if IconButton::new(Icon::Bug, "Open bisect")
+                            .primary(true)
+                            .show(ui)
+                            .clicked()
+                        {
+                            actions.push(Action::ShowPage(crate::state::Page::Workbench));
+                            actions.push(
+                                crate::devops::workbench::Act::SetTab(
+                                    crate::devops::workbench::Tab::Bisect,
+                                )
+                                .into(),
+                            );
+                        }
+                        return;
+                    }
                     if IconButton::text("Abort")
                         .danger()
                         .enabled(!busy)
