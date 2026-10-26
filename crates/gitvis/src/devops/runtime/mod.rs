@@ -970,7 +970,17 @@ fn run_tf(cx: &mut Ctx, repo: &mut RepoState, root: String, cmd: Command) {
         tf.plan_files.insert(id, p);
     }
     tf.roots.entry(root).or_default().last.insert(cmd, id);
-    tf.shown_run = Some(id);
+    // Validate prints JSON that the tab shows parsed; its console output
+    // stays one click away ("Show output") instead of covering the result.
+    if cmd != Command::Validate {
+        tf.shown_run = Some(id);
+    } else if tf.shown_run.is_some_and(|r| {
+        tf.run_index
+            .get(&r)
+            .is_some_and(|(_, c, _)| *c == Command::Validate)
+    }) {
+        tf.shown_run = None;
+    }
 }
 
 fn selected_write(k: &KubeState, kind: WriteKind) -> Option<(Target, KubeWrite, String)> {
@@ -1577,10 +1587,12 @@ pub fn on_console_done(cx: &mut Ctx, repo: &mut RepoState, run: &ConsoleRun) {
                 Err(e) => e.clone(),
             };
             entry.validation = Some(ValidationResult {
+                // "The configuration has errors" says nothing a validation
+                // result does not show already.
                 cause: if result.as_ref().is_ok_and(|v| v.valid) {
                     None
                 } else {
-                    cause(&detail_text)
+                    cause(&detail_text).filter(|c| !c.starts_with("The configuration has errors"))
                 },
                 result,
                 at,
@@ -1729,6 +1741,8 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         "tf-plan" => Act::TfRunSelected(Command::Plan),
         "tf-drift" => Act::TfRunSelected(Command::Drift),
         "tf-rescan" => Act::TfRescan,
+        "tf-console" => Act::TfShowRun(None),
+        "k8s-hide-logs" => Act::KubeHideLogs,
         _ => return None,
     };
     Some(vec![act.into()])

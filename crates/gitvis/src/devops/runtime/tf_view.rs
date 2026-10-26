@@ -394,6 +394,118 @@ fn root_detail(
     } else {
         cx.workdir.join(&info.dir)
     };
+    if !touched.is_empty() {
+        kit::callout_with(
+            ui,
+            Tone::Accent,
+            &format!(
+                "{} touch this root",
+                format::plural(touched.len(), "changed file", "changed files")
+            ),
+            "",
+            |ui| {
+                for f in touched.iter().take(12) {
+                    ui.label(kit::mono(f).color(pal(ui).text));
+                }
+                if touched.len() > 12 {
+                    common::note(ui, &format!("and {} more", touched.len() - 12));
+                }
+            },
+        );
+    }
+
+    let runs = tf.roots.get(&info.dir);
+    let binary = tf.binary();
+    kit::section(ui, "Run", None);
+    common::buttons(ui, |ui| {
+        for cmd in Command::ALL {
+            let busy = running(console, runs, cmd);
+            let label = if busy {
+                format!("{}…", cmd.label())
+            } else if cmd == Command::Init {
+                "Init…".to_owned()
+            } else {
+                cmd.label().to_owned()
+            };
+            let resp = IconButton::text(&label)
+                .primary(cmd == Command::Validate)
+                .enabled(binary.is_some() && !busy)
+                .show(ui);
+            let tip = match binary {
+                None => "Install Terraform or OpenTofu first".to_owned(),
+                Some(b) => format!(
+                    "{}
+
+{}",
+                    cmd.explain(),
+                    terraform::spec(b, &dir_abs, cmd, None).display()
+                ),
+            };
+            if resp.on_hover_text(tip).clicked() {
+                actions.push(if cmd == Command::Init {
+                    Act::TfAskInit(info.dir.clone()).into()
+                } else {
+                    Act::TfRun {
+                        root: info.dir.clone(),
+                        cmd,
+                    }
+                    .into()
+                });
+            }
+        }
+    });
+    kit::secondary(
+        ui,
+        &format!(
+            "{}Format check and Validate stay on this machine. Init, Plan and Drift check use the network; Plan and Drift check also need the provider's credentials and access to the state backend. No lock is taken and nothing is ever applied.",
+            binary
+                .map(|b| format!("Runs {} in {}. ", b.word(), info.display_dir()))
+                .unwrap_or_default()
+        ),
+    );
+    let ran: Vec<Command> = Command::ALL
+        .into_iter()
+        .filter(|c| running(console, runs, *c) || last_result(runs, *c, cx.now).is_some())
+        .collect();
+    for cmd in ran {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            ui.allocate_ui_with_layout(
+                egui::vec2(110.0, 20.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.set_width(110.0);
+                    ui.label(
+                        RichText::new(cmd.label())
+                            .size(size::SMALL)
+                            .color(pal(ui).text_2),
+                    );
+                },
+            );
+            if running(console, runs, cmd) {
+                ui.add(egui::Spinner::new().size(12.0));
+                ui.label(
+                    RichText::new("running")
+                        .size(size::SMALL)
+                        .color(pal(ui).text_2),
+                );
+            } else if let Some((text, tone)) = last_result(runs, cmd, cx.now) {
+                kit::badge(ui, &text, tone);
+            }
+            if let Some(id) = runs.and_then(|r| r.last.get(&cmd))
+                && console.get(*id).is_some()
+                && tf.shown_run != Some(*id)
+                && kit::link(ui, "Show output").clicked()
+            {
+                actions.push(Act::TfShowRun(Some(*id)).into());
+            }
+        });
+    }
+
+    if let Some(r) = runs {
+        results(ui, cx, info, r, binary, actions);
+    }
+    kit::section(ui, "Root", None);
     kit::kv(ui, 130.0, |kv| {
         kv.row("Directory", |ui| {
             common::copy_line(ui, &dir_abs.display().to_string(), actions)
@@ -445,114 +557,6 @@ fn root_detail(
             );
         }
     });
-    if !touched.is_empty() {
-        kit::callout_with(
-            ui,
-            Tone::Accent,
-            &format!(
-                "{} touch this root",
-                format::plural(touched.len(), "changed file", "changed files")
-            ),
-            "",
-            |ui| {
-                for f in touched.iter().take(12) {
-                    ui.label(kit::mono(f).color(pal(ui).text));
-                }
-                if touched.len() > 12 {
-                    common::note(ui, &format!("and {} more", touched.len() - 12));
-                }
-            },
-        );
-    }
-
-    let runs = tf.roots.get(&info.dir);
-    let binary = tf.binary();
-    kit::section(ui, "Run", None);
-    if let Some(b) = binary {
-        kit::secondary(
-            ui,
-            &format!(
-                "Runs {} in {}. Output streams into the console below; results are parsed here. Nothing is ever applied.",
-                b.word(),
-                info.display_dir()
-            ),
-        );
-    }
-    for cmd in Command::ALL {
-        let busy = running(console, runs, cmd);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 10.0;
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(150.0, 30.0), egui::Sense::hover());
-            let mut child = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(rect)
-                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
-            );
-            let label = if busy {
-                format!("{}…", cmd.label())
-            } else {
-                cmd.label().to_owned()
-            };
-            let enabled = binary.is_some() && !busy;
-            let resp = IconButton::text(&label)
-                .primary(cmd == Command::Validate)
-                .enabled(enabled)
-                .show(&mut child);
-            let resp = if binary.is_none() {
-                resp.on_hover_text("Install Terraform or OpenTofu first")
-            } else {
-                resp.on_hover_text(
-                    terraform::spec(binary.unwrap_or_default(), &dir_abs, cmd, None).display(),
-                )
-            };
-            if resp.clicked() {
-                actions.push(if cmd == Command::Init {
-                    Act::TfAskInit(info.dir.clone()).into()
-                } else {
-                    Act::TfRun {
-                        root: info.dir.clone(),
-                        cmd,
-                    }
-                    .into()
-                });
-            }
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 1.0;
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    if cmd.network() {
-                        kit::badge(ui, "Network", Tone::Neutral);
-                    }
-                    if busy {
-                        ui.add(egui::Spinner::new().size(12.0));
-                    }
-                    if let Some((text, tone)) = last_result(runs, cmd, cx.now) {
-                        kit::badge(ui, &text, tone);
-                    }
-                    if let Some(id) = runs.and_then(|r| r.last.get(&cmd))
-                        && console.get(*id).is_some()
-                        && tf.shown_run != Some(*id)
-                        && kit::link(ui, "Show output").clicked()
-                    {
-                        actions.push(Act::TfShowRun(Some(*id)).into());
-                    }
-                });
-                ui.add(
-                    egui::Label::new(
-                        RichText::new(cmd.explain())
-                            .size(size::SMALL)
-                            .color(pal(ui).text_2),
-                    )
-                    .wrap(),
-                );
-            });
-        });
-        ui.add_space(2.0);
-    }
-
-    if let Some(r) = runs {
-        results(ui, cx, info, r, binary, actions);
-    }
     configuration(ui, root, actions);
 }
 
@@ -720,6 +724,7 @@ fn change_table(ui: &mut Ui, id: &str, list: &[ResourceChange]) {
     }
 }
 
+/// The results of the commands run in a root, newest first.
 fn results(
     ui: &mut Ui,
     cx: &Cx,
@@ -728,6 +733,39 @@ fn results(
     binary: Option<Binary>,
     actions: &mut Vec<Action>,
 ) {
+    let mut order: Vec<(i64, Command)> = Vec::new();
+    if let Some(v) = &r.validation {
+        order.push((v.at, Command::Validate));
+    }
+    if let Some(f) = &r.fmt {
+        order.push((f.at, Command::Fmt));
+    }
+    if let Some(i) = &r.init {
+        order.push((i.at, Command::Init));
+    }
+    if let Some(p) = &r.plan {
+        order.push((p.at, Command::Plan));
+    }
+    if let Some(d) = &r.drift {
+        order.push((d.at, Command::Drift));
+    }
+    order.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, cmd) in order {
+        match cmd {
+            Command::Validate => validation_section(ui, cx, r, actions),
+            Command::Fmt => fmt_section(ui, info, r, binary, actions),
+            Command::Init => init_section(ui, r, actions),
+            Command::Plan => {
+                if let Some(p) = &r.plan {
+                    plan_section(ui, cx, p, actions);
+                }
+            }
+            Command::Drift => drift_section(ui, cx, r, actions),
+        }
+    }
+}
+
+fn validation_section(ui: &mut Ui, cx: &Cx, r: &RootRuns, actions: &mut Vec<Action>) {
     if let Some(v) = &r.validation {
         kit::section(ui, "Validation", None);
         common::note(ui, &common::when(Some(v.at), cx.now));
@@ -753,6 +791,15 @@ fn results(
             }
         }
     }
+}
+
+fn fmt_section(
+    ui: &mut Ui,
+    info: &terraform::TfDir,
+    r: &RootRuns,
+    binary: Option<Binary>,
+    actions: &mut Vec<Action>,
+) {
     if let Some(f) = &r.fmt {
         kit::section(ui, "Format check", Some(f.files.len()));
         if let Some(e) = &f.error {
@@ -773,6 +820,9 @@ fn results(
             }
         }
     }
+}
+
+fn init_section(ui: &mut Ui, r: &RootRuns, actions: &mut Vec<Action>) {
     if let Some(i) = &r.init
         && !i.ok
     {
@@ -780,9 +830,9 @@ fn results(
         cause_box(ui, i.cause.as_deref());
         kit::code_block(ui, &i.tail, actions);
     }
-    if let Some(p) = &r.plan {
-        plan_section(ui, cx, p, actions);
-    }
+}
+
+fn drift_section(ui: &mut Ui, cx: &Cx, r: &RootRuns, actions: &mut Vec<Action>) {
     if let Some(d) = &r.drift {
         kit::section(ui, "Drift check", Some(d.text.drift.len()));
         common::note(
@@ -831,17 +881,19 @@ fn plan_section(ui: &mut Ui, cx: &Cx, p: &PlanResult, actions: &mut Vec<Action>)
         PlanOutcome::Failed => ("Failed", Tone::Danger),
         PlanOutcome::Stopped => ("Stopped", Tone::Neutral),
     };
-    kit::section_with(ui, "Plan", None, |ui| {
+    kit::section(ui, "Plan", None);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
         kit::badge(ui, label, tone);
+        common::note(
+            ui,
+            &format!(
+                "{} · {} · exit code 0 = no changes, 2 = changes, 1 = error",
+                common::when(Some(p.at), cx.now),
+                format::millis(p.ms)
+            ),
+        );
     });
-    common::note(
-        ui,
-        &format!(
-            "{} · {} · exit code 0 = no changes, 2 = changes, 1 = error",
-            common::when(Some(p.at), cx.now),
-            format::millis(p.ms)
-        ),
-    );
     match p.outcome {
         PlanOutcome::Failed => {
             cause_box(ui, p.cause.as_deref());

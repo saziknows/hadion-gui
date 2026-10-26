@@ -42,11 +42,27 @@ pub fn ago(t: Option<i64>, now: i64) -> String {
     t.map(|t| format::relative(t, now)).unwrap_or_default()
 }
 
-/// `2026-10-26 16:46 · 3m ago`.
+/// `2026-10-26 16:46 · 3m ago`, `2026-10-02 17:40 · 24 days ago`.
 pub fn when(t: Option<i64>, now: i64) -> String {
     match t {
-        Some(t) => format!("{}  ·  {}", format::absolute(t), format::relative(t, now)),
+        Some(t) => format!("{}  ·  {}", format::absolute(t), since(t, now)),
         None => "unknown".into(),
+    }
+}
+
+/// `3m ago` for recent times, `24 days ago`, `5 months ago`, `2 years ago`.
+pub fn since(t: i64, now: i64) -> String {
+    let d = now - t;
+    if d < 14 * 86_400 {
+        return format::relative(t, now);
+    }
+    let days = d / 86_400;
+    if days < 60 {
+        format!("{days} days ago")
+    } else if days < 730 {
+        format!("{} months ago", days / 30)
+    } else {
+        format!("{} years ago", days / 365)
     }
 }
 
@@ -178,7 +194,7 @@ pub fn console_panel(
     let avail = ui.available_height();
     egui::Panel::bottom(id)
         .resizable(true)
-        .default_size((avail * 0.45).max(200.0))
+        .default_size((avail * 0.34).max(200.0))
         .size_range(140.0..=(avail - 120.0).max(160.0))
         .frame(Frame::NONE.fill(fill))
         .show(ui, |ui| {

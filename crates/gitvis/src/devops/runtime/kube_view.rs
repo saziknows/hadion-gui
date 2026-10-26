@@ -717,51 +717,38 @@ fn workload_detail(
             Stat::new("pods failing", format::count(failing)).tone_if(failing > 0, Tone::Danger),
         ],
     );
-    kit::kv(ui, 120.0, |kv| {
-        kv.text("Resource", kit::mono(w.resource()));
-        kv.text("Namespace", w.namespace.as_str());
-        kv.text("Created", common::when(w.created, cx.now));
-        kv.text(
-            "Strategy",
-            match w.partition {
-                Some(p) if p > 0 => format!("{} (partition {p})", w.strategy),
-                _ => w.strategy.clone(),
-            },
-        );
-        if let Some(rev) = w.revision() {
-            kv.text("Revision", rev);
-        }
-        if !w.update_revision.is_empty() {
-            kv.text(
-                "Revisions",
-                format!(
-                    "current {} · update {}",
-                    w.current_revision, w.update_revision
-                ),
-            );
-        }
-        kv.text(
-            "Generation",
-            format!("{} (observed {})", w.generation, w.observed_generation),
-        );
-        if !w.selector.is_empty() {
-            kv.text("Selector", kit::mono(w.selector.to_arg()));
-        }
-        for c in &w.conditions {
-            kv.text(
-                &format!("{} ", c.kind),
-                format!(
-                    "{} · {}{}",
-                    c.status,
-                    c.reason,
-                    c.updated
-                        .or(c.changed)
-                        .map(|t| format!(" · {}", format::relative(t, cx.now)))
-                        .unwrap_or_default()
-                ),
-            );
+    kit::section_with(ui, "Pods", Some(pods.len()), |ui| {
+        if loading {
+            ui.add(egui::Spinner::new().size(13.0));
         }
     });
+    if let Some(Err(e)) = detail.and_then(|d| d.data.as_ref()).map(|d| &d.pods) {
+        kit::callout(ui, Tone::Danger, "kubectl get pods failed", e);
+    }
+    if pods.is_empty() {
+        common::note(
+            ui,
+            if w.desired == 0 {
+                "Scaled to zero: no pods."
+            } else {
+                "No pod matches the selector yet."
+            },
+        );
+    } else {
+        pod_table(ui, cx, k, &pods, actions);
+    }
+    if let Some(name) = &k.pod
+        && let Some(p) = pods.iter().find(|p| &p.name == name)
+    {
+        // Bring the pod's card into view when the selection changes.
+        let mem = ui.make_persistent_id("k8s_scrolled_pod");
+        let last: Option<String> = ui.data(|d| d.get_temp(mem));
+        if last.as_deref() != Some(name.as_str()) {
+            ui.scroll_to_cursor(Some(egui::Align::TOP));
+            ui.data_mut(|d| d.insert_temp(mem, name.clone()));
+        }
+        crate::views::form::card(ui, Tone::Neutral, |ui| pod_detail(ui, cx, k, p, actions));
+    }
 
     kit::section(
         ui,
@@ -856,32 +843,6 @@ fn workload_detail(
         });
     }
 
-    kit::section_with(ui, "Pods", Some(pods.len()), |ui| {
-        if loading {
-            ui.add(egui::Spinner::new().size(13.0));
-        }
-    });
-    if let Some(Err(e)) = detail.and_then(|d| d.data.as_ref()).map(|d| &d.pods) {
-        kit::callout(ui, Tone::Danger, "kubectl get pods failed", e);
-    }
-    if pods.is_empty() {
-        common::note(
-            ui,
-            if w.desired == 0 {
-                "Scaled to zero: no pods."
-            } else {
-                "No pod matches the selector yet."
-            },
-        );
-    } else {
-        pod_table(ui, cx, k, &pods, actions);
-    }
-    if let Some(name) = &k.pod
-        && let Some(p) = pods.iter().find(|p| &p.name == name)
-    {
-        crate::views::form::card(ui, Tone::Neutral, |ui| pod_detail(ui, cx, k, p, actions));
-    }
-
     let data = detail.and_then(|d| d.data.as_ref());
     kit::section(
         ui,
@@ -940,6 +901,53 @@ fn workload_detail(
             }
         }
     }
+
+    kit::section(ui, "Details", None);
+    kit::kv(ui, 120.0, |kv| {
+        kv.text("Resource", kit::mono(w.resource()));
+        kv.text("Namespace", w.namespace.as_str());
+        kv.text("Created", common::when(w.created, cx.now));
+        kv.text(
+            "Strategy",
+            match w.partition {
+                Some(p) if p > 0 => format!("{} (partition {p})", w.strategy),
+                _ => w.strategy.clone(),
+            },
+        );
+        if let Some(rev) = w.revision() {
+            kv.text("Revision", rev);
+        }
+        if !w.update_revision.is_empty() {
+            kv.text(
+                "Revisions",
+                format!(
+                    "current {} · update {}",
+                    w.current_revision, w.update_revision
+                ),
+            );
+        }
+        kv.text(
+            "Generation",
+            format!("{} (observed {})", w.generation, w.observed_generation),
+        );
+        if !w.selector.is_empty() {
+            kv.text("Selector", kit::mono(w.selector.to_arg()));
+        }
+        for c in &w.conditions {
+            kv.text(
+                &format!("{} ", c.kind),
+                format!(
+                    "{} · {}{}",
+                    c.status,
+                    c.reason,
+                    c.updated
+                        .or(c.changed)
+                        .map(|t| format!(" · {}", format::relative(t, cx.now)))
+                        .unwrap_or_default()
+                ),
+            );
+        }
+    });
 
     kit::section(ui, "Change", None);
     kit::secondary(
