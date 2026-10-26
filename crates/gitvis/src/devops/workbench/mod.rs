@@ -175,6 +175,8 @@ pub enum Act {
     LoadWorktrees,
     SelectWorktree(Option<String>),
     SelectWorktreeIndex(usize),
+    /// Fill the add form with a new branch name (scripts).
+    SetWorktreeBranch(String),
     AddWorktree,
     AddWorktreeConfirmed(String, AddMode),
     RemoveWorktree(String),
@@ -362,6 +364,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         Act::LoadWorktrees
         | Act::SelectWorktree(_)
         | Act::SelectWorktreeIndex(_)
+        | Act::SetWorktreeBranch(_)
         | Act::AddWorktree
         | Act::AddWorktreeConfirmed(..)
         | Act::RemoveWorktree(_)
@@ -427,6 +430,19 @@ fn show_tab(tab: Tab) -> Vec<Action> {
 /// `GITVIS_SCRIPT` commands this area understands.
 pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
     let num = arg.trim().parse::<usize>().ok();
+    // `tools-history`, `tools-rebase`, …: the same commands, for when
+    // another area answers to the short name first.
+    let cmd = match cmd.strip_prefix("tools-") {
+        Some(rest)
+            if matches!(
+                rest,
+                "task" | "rebase" | "bisect" | "history" | "worktrees" | "worktree"
+            ) =>
+        {
+            rest
+        }
+        _ => cmd,
+    };
     Some(match cmd {
         "tools" | "workbench" => vec![Action::ShowPage(Page::Workbench)],
         "tools-tab" => show_tab(Tab::from_name(arg)?),
@@ -461,6 +477,9 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         }
         "rebase-focus" => vec![Act::RebaseFocus(num).into()],
         "rebase-start" => vec![Act::StartRebase.into()],
+        // Opens the confirmation and runs the plan without waiting for
+        // it: scratch repositories only.
+        "rebase-run-now" => vec![Act::StartRebase.into(), Act::RunRebase.into()],
         "bisect" => show_tab(Tab::Bisect),
         "bisect-start" => vec![Act::StartBisect.into()],
         "bisect-mark" => {
@@ -496,7 +515,14 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
             v.push(Act::SelectWorktreeIndex(num?).into());
             v
         }
-        "worktree-add" => vec![Act::AddWorktree.into()],
+        "worktree-add" => {
+            let mut v = Vec::new();
+            if !arg.trim().is_empty() {
+                v.push(Act::SetWorktreeBranch(arg.trim().to_owned()).into());
+            }
+            v.push(Act::AddWorktree.into());
+            v
+        }
         "worktree-remove" => vec![Act::RemoveWorktree(arg.trim().to_owned()).into()],
         "prune-preview" => vec![Act::PrunePreview.into()],
         _ => return None,
@@ -610,5 +636,130 @@ pub fn rail_badge(repo: &RepoState, console: &Console) -> Option<(crate::theme::
         (Some(s), None) => Some((Tone::Warning, s.to_owned())),
         (None, Some(t)) => Some((Tone::Accent, t)),
         (None, None) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::devops::DevOpsAction;
+
+    fn acts(cmd: &str, arg: &str) -> Vec<Act> {
+        script(cmd, arg)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|a| match a {
+                Action::DevOps(DevOpsAction::Workbench(a)) => Some(a),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn script_commands() {
+        assert!(matches!(
+            acts("rebase-action", "2 squash").as_slice(),
+            [Act::RebaseStep(2, Step::Squash)]
+        ));
+        assert!(matches!(
+            acts("tools-tab", "worktrees").as_slice(),
+            [Act::SetTab(Tab::Worktrees)]
+        ));
+        assert!(matches!(
+            acts("history", "src/main.rs").as_slice(),
+            [Act::SetTab(Tab::History), Act::FileHistory(p)] if p == "src/main.rs"
+        ));
+        assert!(matches!(
+            acts("tools-history", "a.rs").as_slice(),
+            [Act::SetTab(Tab::History), Act::FileHistory(_)]
+        ));
+        assert!(matches!(
+            acts("task", "3").as_slice(),
+            [Act::SetTab(Tab::Tasks), Act::RunTaskIndex(3)]
+        ));
+        assert!(matches!(
+            acts("bisect-mark", "skip").as_slice(),
+            [Act::MarkBisect(Verdict::Skip)]
+        ));
+        assert!(script("bisect-mark", "maybe").is_none());
+        assert!(script("select-task", "x").is_none());
+        assert!(script("not-a-command", "").is_none());
+        assert_eq!(
+            script("tools", "").map(|v| v.len()),
+            Some(1),
+            "just the page"
+        );
+    }
+
+    #[test]
+    fn tab_names() {
+        for t in [
+            Tab::Tasks,
+            Tab::Console,
+            Tab::Rebase,
+            Tab::Bisect,
+            Tab::History,
+            Tab::Worktrees,
+        ] {
+            let name = match t {
+                Tab::Tasks => "tasks",
+                Tab::Console => "console",
+                Tab::Rebase => "rebase",
+                Tab::Bisect => "bisect",
+                Tab::History => "history",
+                Tab::Worktrees => "worktrees",
+            };
+            assert_eq!(Tab::from_name(name), Some(t));
+            assert!(!t.hint().is_empty());
+        }
+        assert_eq!(Tab::from_name("nope"), None);
+    }
+
+    #[test]
+    fn rail_badge_counts_running_runs() {
+        let repo = RepoState::new(7, std::path::PathBuf::from("."));
+        let mut console = Console::default();
+        assert!(rail_badge(&repo, &console).is_none());
+        console.add(
+            1,
+            Some(7),
+            "npm run dev".into(),
+            gitvis_core::devops::proc::ProcSpec::new("npm", "."),
+        );
+        console.add(
+            2,
+            Some(8),
+            "other repo".into(),
+            gitvis_core::devops::proc::ProcSpec::new("npm", "."),
+        );
+        let (tone, text) = rail_badge(&repo, &console).unwrap();
+        assert_eq!(tone, Tone::Accent);
+        assert_eq!(text, "1 task running");
+    }
+
+    #[test]
+    fn prefs_round_trip() {
+        let mut s = State::default();
+        s.favourites.push("npm::build".into());
+        s.touch_recent("npm::test");
+        s.touch_recent("npm::build");
+        s.touch_recent("npm::test");
+        assert_eq!(s.recent, vec!["npm::test", "npm::build"]);
+        for i in 0..(MAX_RECORDS + 5) {
+            s.record(RunRecord {
+                task: format!("t{i}"),
+                ..Default::default()
+            });
+        }
+        assert_eq!(s.records.len(), MAX_RECORDS);
+        assert_eq!(s.records[0].task, "t5", "the oldest go first");
+        let json = serde_json::to_string(&s.prefs()).unwrap();
+        let back: Prefs = serde_json::from_str(&json).unwrap();
+        let mut t = State::default();
+        t.apply_prefs(&back);
+        assert_eq!(t.favourites, s.favourites);
+        assert_eq!(t.records.len(), MAX_RECORDS);
+        let empty: Prefs = serde_json::from_str("{}").unwrap();
+        assert!(empty.favourites.is_empty());
     }
 }

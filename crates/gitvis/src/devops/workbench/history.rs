@@ -293,7 +293,9 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                     c.added,
                     c.deleted
                 );
-                if c.path != result.path {
+                if let Some(old) = &c.renamed_from {
+                    sub.push_str(&format!("  ·  renamed from {old}"));
+                } else if c.path != result.path {
                     sub.push_str(&format!("  ·  {}", c.path));
                 }
                 let meta = format::relative(c.time, now);

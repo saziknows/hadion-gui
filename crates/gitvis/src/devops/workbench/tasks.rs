@@ -129,9 +129,14 @@ fn detect_tools(cx: &mut Ctx, repo: &mut RepoState, wanted: Vec<Tool>) {
     });
 }
 
+/// Project files change; a list older than this is read again when the
+/// page is shown.
+const STALE_SECS: u64 = 60;
+
 pub fn shown(cx: &mut Ctx, repo: &mut RepoState) {
     let t = &repo.devops.workbench.tasks;
-    if t.discovery.is_none() && !t.loading {
+    let stale = t.at.is_none_or(|at| at.elapsed().as_secs() > STALE_SECS);
+    if (t.discovery.is_none() || stale) && !t.loading {
         discover_now(cx, repo);
     }
 }
@@ -432,17 +437,27 @@ pub fn show(
 fn group_label(d: &Discovery, dir: &str, repo_name: &str) -> (String, String) {
     let p = d.project(dir);
     let name = p.map(|p| p.name.clone()).unwrap_or_default();
+    let role = match p {
+        Some(p) if p.workspace => "workspace root",
+        Some(p) if p.member_of.is_some() => "workspace member",
+        _ => "",
+    };
+    let join = |a: &str, b: &str| match (a.is_empty(), b.is_empty()) {
+        (true, _) => b.to_owned(),
+        (_, true) => a.to_owned(),
+        _ => format!("{a}  ·  {b}"),
+    };
     if dir.is_empty() {
         let n = if name.is_empty() {
             repo_name.to_owned()
         } else {
             name
         };
-        (n, "repository root".to_owned())
+        (n, join("repository root", role))
     } else if name.is_empty() || name == dir.rsplit('/').next().unwrap_or(dir) {
-        (dir.to_owned(), String::new())
+        (dir.to_owned(), role.to_owned())
     } else {
-        (name, dir.to_owned())
+        (name, join(dir, role))
     }
 }
 

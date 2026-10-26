@@ -140,6 +140,15 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 _ => w.pending_select = Some(n),
             }
         }
+        Act::SetWorktreeBranch(name) => {
+            let main = main_path(repo);
+            let w = &mut repo.devops.workbench.worktrees;
+            let path = display(&default_path(&main, &name).to_string_lossy());
+            w.mode = Mode::NewBranch;
+            w.new_branch = name;
+            w.path = path.clone();
+            w.path_auto = path;
+        }
         Act::AddWorktree => {
             let w = &repo.devops.workbench.worktrees;
             let path = w.path.trim().to_owned();
