@@ -1,0 +1,57 @@
+{
+    "apiVersion": "v1",
+    "items": [
+        {
+            "apiVersion": "v1",
+            "kind": "Namespace",
+            "metadata": {
+                "creationTimestamp": "2026-09-19T08:10:00Z",
+                "name": "default"
+            },
+            "status": {
+                "phase": "Active"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Namespace",
+            "metadata": {
+                "creationTimestamp": "2026-09-19T08:10:00Z",
+                "name": "kube-system"
+            },
+            "status": {
+                "phase": "Active"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Namespace",
+            "metadata": {
+                "creationTimestamp": "2026-09-19T08:12:31Z",
+                "labels": {
+                    "kubernetes.io/metadata.name": "shop"
+                },
+                "name": "shop"
+            },
+            "status": {
+                "phase": "Active"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Namespace",
+            "metadata": {
+                "creationTimestamp": "2026-10-01T08:12:31Z",
+                "deletionTimestamp": "2026-10-26T18:00:00Z",
+                "name": "preview-pr-41"
+            },
+            "status": {
+                "phase": "Terminating"
+            }
+        }
+    ],
+    "kind": "List",
+    "metadata": {
+        "resourceVersion": ""
+    }
+}
