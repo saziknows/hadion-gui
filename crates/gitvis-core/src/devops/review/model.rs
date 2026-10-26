@@ -676,9 +676,12 @@ pub struct PrList {
     /// The authenticated user.
     pub viewer: String,
     /// Open pull requests whose review is requested from the viewer
-    /// (directly or through a team).
-    pub requested: Vec<u64>,
+    /// (directly or through a team), without mergeability.
+    pub requested: Vec<PrSummary>,
     pub requested_total: u64,
+    /// The viewer's open pull requests, without mergeability.
+    pub mine: Vec<PrSummary>,
+    pub mine_total: u64,
     /// Repository settings from GraphQL.
     pub meta: RepoMeta,
     /// Fetched without mergeability (the full query timed out).

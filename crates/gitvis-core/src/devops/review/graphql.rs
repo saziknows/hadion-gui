@@ -59,10 +59,14 @@ const REPO_FIELDS: &str = "
     viewerPermission viewerDefaultMergeMethod
     squashMergeCommitTitle squashMergeCommitMessage mergeCommitTitle mergeCommitMessage";
 
+/// Pull requests per search (review requested, mine).
+pub const SEARCH_FIRST: u32 = 50;
+
 /// The list query: one page of pull requests, the repository's merge
-/// settings, the viewer, and the pull requests waiting for the viewer's
-/// review. `light` leaves out `mergeable` / `mergeStateStatus`, which are
-/// what makes the query slow.
+/// settings, the viewer, and two searches that do not depend on paging:
+/// the open pull requests waiting for the viewer's review and the
+/// viewer's own (both without mergeability, which keeps them cheap).
+/// `light` leaves `mergeable` / `mergeStateStatus` out of the page too.
 pub fn list_query(light: bool) -> String {
     let fields = PR_FIELDS.replace(
         "{MERGE}",
@@ -72,8 +76,9 @@ pub fn list_query(light: bool) -> String {
             "mergeable mergeStateStatus"
         },
     );
+    let search_fields = PR_FIELDS.replace("{MERGE}", "");
     format!(
-        "query($owner: String!, $name: String!, $states: [PullRequestState!], $first: Int!, $after: String, $search: String!) {{
+        "query($owner: String!, $name: String!, $states: [PullRequestState!], $first: Int!, $after: String, $requested: String!, $mine: String!) {{
   rateLimit {{ cost remaining }}
   viewer {{ login }}
   repository(owner: $owner, name: $name) {{{REPO_FIELDS}
@@ -84,9 +89,15 @@ pub fn list_query(light: bool) -> String {
       }}
     }}
   }}
-  requested: search(query: $search, type: ISSUE, first: 100) {{
+  requested: search(query: $requested, type: ISSUE, first: {SEARCH_FIRST}) {{
     issueCount
-    nodes {{ ... on PullRequest {{ number }} }}
+    nodes {{ ... on PullRequest {{{search_fields}
+    }} }}
+  }}
+  mine: search(query: $mine, type: ISSUE, first: {SEARCH_FIRST}) {{
+    issueCount
+    nodes {{ ... on PullRequest {{{search_fields}
+    }} }}
   }}
 }}"
     )
@@ -94,7 +105,18 @@ pub fn list_query(light: bool) -> String {
 
 /// The search behind the "Review requested" filter.
 pub fn review_requested_search(gh: &Gh) -> String {
-    format!("is:pr is:open review-requested:@me repo:{}", gh.full_name())
+    format!(
+        "is:pr is:open review-requested:@me repo:{} sort:updated-desc",
+        gh.full_name()
+    )
+}
+
+/// The search behind the "Mine" filter.
+pub fn mine_search(gh: &Gh) -> String {
+    format!(
+        "is:pr is:open author:@me repo:{} sort:updated-desc",
+        gh.full_name()
+    )
 }
 
 pub fn list_variables(gh: &Gh, kind: ListKind, first: u32, after: Option<&str>) -> Value {
@@ -104,8 +126,21 @@ pub fn list_variables(gh: &Gh, kind: ListKind, first: u32, after: Option<&str>) 
         "states": kind.states(),
         "first": first,
         "after": after,
-        "search": review_requested_search(gh),
+        "requested": review_requested_search(gh),
+        "mine": mine_search(gh),
     })
+}
+
+fn search_items(v: &Value) -> Vec<PrSummary> {
+    v.get("nodes")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .map(PrSummary::from_json)
+                .filter(|p| p.number > 0)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Read the list query's `data`.
@@ -117,6 +152,7 @@ pub fn parse_list(data: &Value, light: bool) -> Result<PrList> {
     let prs = repo.get("pullRequests").cloned().unwrap_or(Value::Null);
     let page = prs.get("pageInfo").cloned().unwrap_or(Value::Null);
     let requested = data.get("requested").cloned().unwrap_or(Value::Null);
+    let mine = data.get("mine").cloned().unwrap_or(Value::Null);
     Ok(PrList {
         items: prs
             .get("nodes")
@@ -136,17 +172,10 @@ pub fn parse_list(data: &Value, light: bool) -> Result<PrList> {
             .get("viewer")
             .map(|v| s(v, "login"))
             .unwrap_or_default(),
-        requested: requested
-            .get("nodes")
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .map(|n| u(n, "number"))
-                    .filter(|n| *n > 0)
-                    .collect()
-            })
-            .unwrap_or_default(),
+        requested: search_items(&requested),
         requested_total: u(&requested, "issueCount"),
+        mine: search_items(&mine),
+        mine_total: u(&mine, "issueCount"),
         meta: RepoMeta::from_graphql(repo),
         light,
         cost: data.get("rateLimit").map(|r| u(r, "cost")),
@@ -372,7 +401,13 @@ mod tests {
         let full = list_query(false);
         assert!(full.contains("mergeable mergeStateStatus"));
         assert!(full.contains("statusCheckRollup"));
-        assert!(full.contains("review-requested") || full.contains("$search"));
+        assert!(full.contains("requested: search(query: $requested"));
+        assert!(full.contains("mine: search(query: $mine"));
+        assert_eq!(
+            full.matches("mergeStateStatus").count(),
+            1,
+            "only the page asks for mergeability, not the searches"
+        );
         let light = list_query(true);
         assert!(!light.contains("mergeStateStatus"));
         assert!(!light.contains("{MERGE}"));
@@ -380,7 +415,14 @@ mod tests {
         assert_eq!(v["states"], json!(["CLOSED", "MERGED"]));
         assert_eq!(v["after"], "abc");
         assert_eq!(v["first"], 20);
-        assert_eq!(v["search"], "is:pr is:open review-requested:@me repo:o/r");
+        assert_eq!(
+            v["requested"],
+            "is:pr is:open review-requested:@me repo:o/r sort:updated-desc"
+        );
+        assert_eq!(
+            v["mine"],
+            "is:pr is:open author:@me repo:o/r sort:updated-desc"
+        );
         assert_eq!(
             list_variables(&gh(), ListKind::Open, 5, None)["after"],
             Value::Null
@@ -401,7 +443,8 @@ mod tests {
                     "nodes": [{"number": 2, "title": "A", "isDraft": true}, {"number": 3, "title": "B"}]
                 }
             },
-            "requested": {"issueCount": 1, "nodes": [{"number": 3}, {}]}
+            "requested": {"issueCount": 1, "nodes": [{"number": 3, "title": "B"}, {}]},
+            "mine": {"issueCount": 0, "nodes": []}
         });
         let l = parse_list(&data, false).unwrap();
         assert_eq!(l.items.len(), 2);
@@ -409,7 +452,10 @@ mod tests {
         assert!(l.has_more);
         assert_eq!(l.end_cursor.as_deref(), Some("Y3Vy"));
         assert_eq!(l.viewer, "me");
-        assert_eq!(l.requested, vec![3]);
+        assert_eq!(l.requested.len(), 1);
+        assert_eq!(l.requested[0].number, 3);
+        assert_eq!(l.requested_total, 1);
+        assert!(l.mine.is_empty());
         assert_eq!(l.meta.default_branch, "main");
         assert_eq!(
             l.meta.allowed_methods(),

@@ -193,6 +193,7 @@ fn toolbar_row(
         busy: busy_label,
         loading,
         page,
+        github_remote,
         ..
     } = repo;
     let busy = busy_label.is_some();
@@ -290,6 +291,17 @@ fn toolbar_row(
                         force: false,
                     }));
                 }
+            }
+        }
+        if github_remote.is_some() {
+            ui.add_space(2.0);
+            let pr = IconButton::new(Icon::PullRequest, "Pull request")
+                .enabled(current.is_some())
+                .show(ui)
+                .on_hover_text("Open a pull request from the current branch");
+            if pr.clicked() {
+                actions.push(Action::ShowPage(Page::Review));
+                actions.push(crate::devops::review::Act::NewPr.into());
             }
         }
         ui.add_space(2.0);
