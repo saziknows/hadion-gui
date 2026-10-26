@@ -738,7 +738,14 @@ fn workload_detail(
         }
     });
     if let Some(Err(e)) = detail.and_then(|d| d.data.as_ref()).map(|d| &d.pods) {
-        kit::callout(ui, Tone::Danger, "kubectl get pods failed", e);
+        common::error_block(
+            ui,
+            "kubectl get pods failed",
+            e,
+            None,
+            Some(("Try again", Act::KubeRefresh)),
+            actions,
+        );
     }
     if pods.is_empty() {
         common::note(
@@ -799,7 +806,7 @@ fn workload_detail(
             let by_digest = digest
                 .as_deref()
                 .or(img.digest.as_deref())
-                .and_then(|d| pkg.tags_for_digest(d));
+                .and_then(|d| pkg.tags_for_digest(d, img.ghcr_package().map(|(_, n)| n)));
             let mut m: Option<RefMatch> = refs.idx.as_ref().and_then(|idx| {
                 kube::image_match(idx, &img, rev.map(|(_, v)| v), w.version_label())
             });
@@ -867,7 +874,14 @@ fn workload_detail(
     match data.map(|d| &d.events) {
         None if loading => kit::loading(ui, "Loading events…"),
         None => common::note(ui, "Not loaded."),
-        Some(Err(e)) => kit::callout(ui, Tone::Danger, "kubectl get events failed", e),
+        Some(Err(e)) => common::error_block(
+            ui,
+            "kubectl get events failed",
+            e,
+            None,
+            Some(("Try again", Act::KubeRefresh)),
+            actions,
+        ),
         Some(Ok(ev)) if ev.is_empty() => common::note(
             ui,
             "No events for this workload. Kubernetes keeps events for about an hour; pod events are under each pod.",
@@ -883,7 +897,14 @@ fn workload_detail(
     match data.map(|d| &d.history) {
         None if loading => kit::loading(ui, "Loading history…"),
         None => common::note(ui, "Not loaded."),
-        Some(Err(e)) => kit::callout(ui, Tone::Danger, "kubectl rollout history failed", e),
+        Some(Err(e)) => common::error_block(
+            ui,
+            "kubectl rollout history failed",
+            e,
+            None,
+            Some(("Try again", Act::KubeRefresh)),
+            actions,
+        ),
         Some(Ok(h)) if h.is_empty() => common::note(ui, "No revisions recorded."),
         Some(Ok(h)) => {
             let current = h.first().map(|r| r.number);
@@ -1211,7 +1232,14 @@ fn pod_detail(ui: &mut Ui, cx: &Cx, k: &KubeState, p: &Pod, actions: &mut Vec<Ac
         Some(e) if e.loading => kit::loading(ui, "Loading events…"),
         Some(e) => match &e.result {
             None => common::note(ui, "Not loaded."),
-            Some(Err(err)) => kit::callout(ui, Tone::Danger, "kubectl get events failed", err),
+            Some(Err(err)) => common::error_block(
+                ui,
+                "kubectl get events failed",
+                err,
+                None,
+                Some(("Try again", Act::KubeRefresh)),
+                actions,
+            ),
             Some(Ok(ev)) if ev.is_empty() => {
                 common::note(ui, "No events (they expire after about an hour).")
             }

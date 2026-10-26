@@ -169,16 +169,33 @@ impl PkgState {
         }
     }
 
-    /// Tags of the package version with this digest, across loaded
-    /// packages (for images running in the cluster).
-    pub fn tags_for_digest(&self, digest: &str) -> Option<(&str, &PackageVersion)> {
-        self.versions.iter().find_map(|(name, v)| match &v.result {
-            Some(Ok(list)) => list
+    /// The loaded package version with this digest (for images running in
+    /// the cluster), looking in `prefer` (the image's package) first.
+    pub fn tags_for_digest(
+        &self,
+        digest: &str,
+        prefer: Option<&str>,
+    ) -> Option<(&str, &PackageVersion)> {
+        fn find<'a>(v: &'a Versions, digest: &str) -> Option<&'a PackageVersion> {
+            match &v.result {
+                Some(Ok(list)) => list.iter().find(|x| x.digest() == digest),
+                _ => None,
+            }
+        }
+        if let Some(p) = prefer
+            && let Some((name, v)) = self
+                .versions
                 .iter()
-                .find(|x| x.digest() == digest)
-                .map(|x| (name.as_str(), x)),
-            _ => None,
-        })
+                .find(|(n, _)| n.eq_ignore_ascii_case(p))
+            && let Some(x) = find(v, digest)
+        {
+            return Some((name.as_str(), x));
+        }
+        let mut names: Vec<&String> = self.versions.keys().collect();
+        names.sort();
+        names
+            .into_iter()
+            .find_map(|n| find(&self.versions[n], digest).map(|x| (n.as_str(), x)))
     }
 }
 
@@ -2043,5 +2060,33 @@ mod tests {
             rail_badge(&r, &console).unwrap().1,
             "terraform drift in infra"
         );
+    }
+
+    #[test]
+    fn digests_resolve_in_the_image_package_first() {
+        let v = |id: u64| -> PackageVersion {
+            serde_json::from_value(serde_json::json!({
+                "id": id, "name": "sha256:abc",
+                "metadata": {"container": {"tags": [format!("t{id}")]}}
+            }))
+            .unwrap()
+        };
+        let mut st = PkgState::default();
+        for (name, id) in [("a/one", 1), ("b/two", 2)] {
+            st.versions.insert(
+                name.into(),
+                Versions {
+                    loading: false,
+                    result: Some(Ok(vec![v(id)])),
+                    fetched: None,
+                },
+            );
+        }
+        assert_eq!(
+            st.tags_for_digest("sha256:abc", Some("b/two")).unwrap().0,
+            "b/two"
+        );
+        assert_eq!(st.tags_for_digest("sha256:abc", None).unwrap().0, "a/one");
+        assert!(st.tags_for_digest("sha256:zzz", None).is_none());
     }
 }

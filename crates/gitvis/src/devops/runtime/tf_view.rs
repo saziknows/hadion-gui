@@ -753,7 +753,7 @@ fn results(
     for (_, cmd) in order {
         match cmd {
             Command::Validate => validation_section(ui, cx, r, actions),
-            Command::Fmt => fmt_section(ui, info, r, binary, actions),
+            Command::Fmt => fmt_section(ui, cx, info, r, binary, actions),
             Command::Init => init_section(ui, r, actions),
             Command::Plan => {
                 if let Some(p) = &r.plan {
@@ -795,6 +795,7 @@ fn validation_section(ui: &mut Ui, cx: &Cx, r: &RootRuns, actions: &mut Vec<Acti
 
 fn fmt_section(
     ui: &mut Ui,
+    cx: &Cx,
     info: &terraform::TfDir,
     r: &RootRuns,
     binary: Option<Binary>,
@@ -802,6 +803,7 @@ fn fmt_section(
 ) {
     if let Some(f) = &r.fmt {
         kit::section(ui, "Format check", Some(f.files.len()));
+        common::note(ui, &common::when(Some(f.at), cx.now));
         if let Some(e) = &f.error {
             kit::code_block(ui, e, actions);
         } else if f.files.is_empty() {

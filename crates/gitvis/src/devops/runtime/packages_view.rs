@@ -471,11 +471,11 @@ fn versions(
             Stat::new("matched to a commit", format::count(commits)),
             Stat::new("untagged", format::count(untagged)),
             Stat::new(
-                "newest image is behind",
+                "commits the newest image is behind",
                 newest_dist
                     .as_ref()
                     .and_then(|d| d.behind())
-                    .map(|b| format::plural(b, "commit", "commits"))
+                    .map(format::count)
                     .unwrap_or_else(|| "–".into()),
             ),
         ],
