@@ -71,11 +71,11 @@ impl ConsoleRun {
     }
 
     pub fn succeeded(&self) -> bool {
-        matches!(&self.exit, Some(Ok(e)) if e.success())
+        matches!(&self.exit, Some(Ok(e)) if !e.cancelled && self.spec.is_success(e.code))
     }
 
     pub fn failed(&self) -> bool {
-        matches!(&self.exit, Some(Ok(e)) if !e.success() && !e.cancelled)
+        matches!(&self.exit, Some(Ok(e)) if !e.cancelled && !self.spec.is_success(e.code))
             || matches!(&self.exit, Some(Err(_)))
     }
 
@@ -104,6 +104,9 @@ impl ConsoleRun {
             Some(Err(_)) => "Could not start".to_owned(),
             Some(Ok(e)) if e.cancelled => "Stopped".to_owned(),
             Some(Ok(e)) if e.success() => "Passed".to_owned(),
+            Some(Ok(e)) if self.spec.is_success(e.code) => {
+                format!("Passed (exit {})", e.code.unwrap_or_default())
+            }
             Some(Ok(e)) => match e.code {
                 Some(c) => format!("Failed (exit {c})"),
                 None => "Killed".to_owned(),

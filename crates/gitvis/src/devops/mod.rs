@@ -241,10 +241,12 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         return Some(vec![Action::ShowPage(page)]);
     }
     if cmd == "ship" {
-        let mut out = vec![Action::ShowPage(Page::Ship)];
+        // Tab first, so opening the page fetches for the right tab.
+        let mut out = Vec::new();
         if let Some(t) = ShipTab::from_name(arg) {
             out.push(Action::DevOps(DevOpsAction::SetShipTab(t)));
         }
+        out.push(Action::ShowPage(Page::Ship));
         return Some(out);
     }
     if cmd == "ship-tab" {

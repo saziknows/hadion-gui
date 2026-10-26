@@ -30,6 +30,9 @@ pub struct ProcSpec {
     pub env: Vec<(String, String)>,
     /// Written to standard input, then closed. Never shown or logged.
     pub stdin: Option<Vec<u8>>,
+    /// Exit codes besides 0 that mean success (`terraform plan
+    /// -detailed-exitcode` exits 2 when there are changes).
+    pub ok_codes: Vec<i32>,
 }
 
 impl ProcSpec {
@@ -40,7 +43,19 @@ impl ProcSpec {
             cwd: cwd.into(),
             env: Vec::new(),
             stdin: None,
+            ok_codes: Vec::new(),
         }
+    }
+
+    /// Exit codes besides 0 that mean success.
+    pub fn ok_codes(mut self, codes: &[i32]) -> Self {
+        self.ok_codes = codes.to_vec();
+        self
+    }
+
+    /// Did a process with this exit code succeed?
+    pub fn is_success(&self, code: Option<i32>) -> bool {
+        code.is_some_and(|c| c == 0 || self.ok_codes.contains(&c))
     }
 
     pub fn arg(mut self, a: impl Into<String>) -> Self {

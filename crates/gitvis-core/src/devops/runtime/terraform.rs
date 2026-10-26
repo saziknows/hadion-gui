@@ -1099,7 +1099,12 @@ impl Command {
 
 /// The process for a command in a root directory.
 pub fn spec(binary: Binary, root_dir: &Path, cmd: Command, plan_out: Option<&Path>) -> ProcSpec {
-    ProcSpec::new(binary.program(), root_dir).args(cmd.args(plan_out))
+    let spec = ProcSpec::new(binary.program(), root_dir).args(cmd.args(plan_out));
+    match cmd {
+        // -detailed-exitcode: 0 no changes, 2 changes (or drift), 1 error.
+        Command::Plan | Command::Drift => spec.ok_codes(&[2]),
+        _ => spec,
+    }
 }
 
 /// `show -json PLANFILE`.
