@@ -203,7 +203,6 @@ pub enum Act {
 pub enum Msg {
     Discovered(Result<Discovery, String>, Vec<(String, bool)>),
     Tools(Vec<(Tool, Option<Installed>)>),
-    TaskRunStarted,
     RebaseSuggestions(Vec<BaseChoice>, bool),
     RebaseLoaded(Result<Loaded, String>),
     RebaseDone(Result<Outcome, String>),
@@ -237,7 +236,6 @@ impl Msg {
                 t.len(),
                 t.iter().filter(|(_, i)| i.is_some()).count()
             )),
-            Msg::TaskRunStarted => Ok(String::new()),
             Msg::RebaseSuggestions(s, _) => Ok(format!("{} base suggestions", s.len())),
             Msg::RebaseLoaded(Ok(l)) => Ok(format!(
                 "{} commits between {} and HEAD",
@@ -386,7 +384,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
 
 pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
     match msg {
-        Msg::Discovered(..) | Msg::Tools(_) | Msg::TaskRunStarted => tasks::on_msg(cx, repo, msg),
+        Msg::Discovered(..) | Msg::Tools(_) => tasks::on_msg(cx, repo, msg),
         Msg::RebaseSuggestions(..) | Msg::RebaseLoaded(_) | Msg::RebaseDone(_) => {
             rebase::on_msg(cx, repo, msg)
         }

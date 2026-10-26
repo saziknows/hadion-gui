@@ -7,7 +7,6 @@
 //! Every input takes an `id_salt` so it keeps focus when the layout around
 //! it changes (see CLAUDE.md: widgets that move need a stable id).
 
-#![allow(dead_code)] // Used by the DevOps pages; removed at integration.
 use std::hash::Hash;
 
 use egui::{

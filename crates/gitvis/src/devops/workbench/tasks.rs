@@ -685,7 +685,6 @@ fn detail(
     now: i64,
     actions: &mut Vec<Action>,
 ) {
-    let p = *pal(ui);
     let id = task.id.clone();
     let available = wb.tasks.available.get(&id).copied().unwrap_or(true);
     let fav = wb.favourites.contains(&id);

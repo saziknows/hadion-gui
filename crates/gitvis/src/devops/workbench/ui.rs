@@ -155,12 +155,6 @@ pub fn error_card(ui: &mut Ui, title: &str, error: &str, retry: &str) -> bool {
     clicked
 }
 
-/// A small caption above a block.
-pub fn caption(ui: &mut Ui, text: &str) {
-    let p = *pal(ui);
-    ui.label(kit::caption_text(&p, text));
-}
-
 /// A row of buttons that wraps.
 pub fn buttons(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
     ui.add_space(2.0);

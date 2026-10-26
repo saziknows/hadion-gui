@@ -837,10 +837,6 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 );
             }
         }
-        Act::ResetProtection => {
-            let st = &mut repo.devops.govern;
-            st.prot_edit = st.protection.ok().and_then(|p| p.clone());
-        }
         Act::ReviewProtection => {
             let Some(gh) = gh_of(cx) else { return };
             let st = &repo.devops.govern;
@@ -1619,7 +1615,6 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                 st.dep_selected = None;
             }
         }
-        Msg::DepPackages(p) => st.dep_packages = Some(p),
         Msg::Code(r) => {
             st.code.finish(r);
             st.snippets.clear();

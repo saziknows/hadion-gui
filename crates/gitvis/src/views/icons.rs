@@ -12,8 +12,6 @@ use egui::{
 use crate::theme;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-// Some icons exist for pages still being filled in (removed at integration).
-#[allow(dead_code)]
 pub enum Icon {
     Pull,
     Push,
@@ -95,8 +93,6 @@ pub enum Icon {
     Bell,
     /// Two chain links: a link.
     Link,
-    /// A funnel: filter.
-    Filter,
     /// A ship's wheel: Kubernetes / Helm.
     Wheel,
     /// An arrow down onto a line: download.
@@ -694,20 +690,6 @@ pub fn paint(p: &Painter, icon: Icon, center: Pos2, size: f32, color: Color32) {
                 p.line(pts, st);
             }
             let _ = r;
-        }
-        Icon::Filter => {
-            p.line(
-                vec![
-                    pt(-0.42, -0.36),
-                    pt(0.42, -0.36),
-                    pt(0.1, 0.02),
-                    pt(0.1, 0.36),
-                    pt(-0.1, 0.44),
-                    pt(-0.1, 0.02),
-                    pt(-0.42, -0.36),
-                ],
-                st,
-            );
         }
         Icon::Wheel => {
             p.circle_stroke(c, 0.28 * s, st);

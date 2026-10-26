@@ -156,10 +156,6 @@ impl Console {
         self.runs.iter().rev().filter(move |r| r.repo == Some(repo))
     }
 
-    pub fn running(&self) -> usize {
-        self.runs.iter().filter(|r| r.running()).count()
-    }
-
     /// Register a run (the app starts the process right after).
     pub fn add(&mut self, id: u64, repo: Option<RepoId>, title: String, spec: ProcSpec) {
         let command = spec.display();

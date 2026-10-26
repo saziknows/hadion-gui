@@ -387,6 +387,12 @@ pub struct State {
 #[derive(Clone, Debug)]
 pub enum Act {
     SetTab(Tab),
+    /// A dispatched run should be visible by now: refresh runs and history.
+    DispatchSettled {
+        workflow_id: Option<u64>,
+    },
+    /// Re-fetch runs changed a moment ago (re-run, cancel, …).
+    RefreshRuns(Vec<u64>),
     /// The refresh button of the page header on a tab.
     Refresh(Tab),
     // Runs tab.
@@ -595,10 +601,6 @@ pub enum Msg {
         workflow_id: Option<u64>,
         git_ref: String,
     },
-    /// A few seconds after a dispatch: time to look for the new run.
-    DispatchSettled {
-        workflow_id: Option<u64>,
-    },
     Artifacts(Result<ArtifactList, String>),
     ArtifactsDeleted {
         ok: Vec<u64>,
@@ -722,7 +724,6 @@ impl Msg {
                 Ok(()) => Ok(format!("dispatched on {git_ref}")),
                 Err(e) => Err(e.clone()),
             },
-            Msg::DispatchSettled { .. } => Ok("refreshing the runs".to_owned()),
             Msg::Artifacts(r) => match r {
                 Ok(a) => Ok(format!(
                     "{} of {}, {}",

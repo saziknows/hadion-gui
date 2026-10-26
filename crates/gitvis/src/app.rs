@@ -63,6 +63,8 @@ pub struct GitVis {
     /// Actions queued by DevOps controllers while no egui context was at
     /// hand (event handling); applied at the start of the next `logic`.
     deferred: Vec<Action>,
+    /// Actions due at a time (`Ctx::after`).
+    timers: Vec<(Instant, Action)>,
 }
 
 impl GitVis {
@@ -94,6 +96,7 @@ impl GitVis {
             console: Console::default(),
             home: devops::home::State::default(),
             deferred: Vec::new(),
+            timers: Vec::new(),
         };
         app.home.apply_prefs(&app.settings.home);
         for path in app.settings.open_repos.clone() {
@@ -3014,9 +3017,7 @@ impl GitVis {
             r.map(|r| r.id),
             r.map(|r| r.workdir.clone()),
             gh,
-            r.and_then(|r| r.forge_remote.clone()),
             self.settings.dark,
-            self.settings.verbose,
         )
     }
 
@@ -3026,6 +3027,9 @@ impl GitVis {
         for e in effects {
             match e {
                 Effect::Action(a) => self.deferred.push(a),
+                Effect::After { delay, action } => {
+                    self.timers.push((Instant::now() + delay, action));
+                }
                 Effect::Task(t) => self.start_task(t),
                 Effect::Console {
                     id,
@@ -3040,6 +3044,22 @@ impl GitVis {
                     }
                 }
             }
+        }
+    }
+
+    /// Move due timer actions to the deferred queue; wake up for the next.
+    fn tick_timers(&mut self, ctx: &egui::Context) {
+        if self.timers.is_empty() {
+            return;
+        }
+        let now = Instant::now();
+        let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.timers)
+            .into_iter()
+            .partition(|(at, _)| *at <= now);
+        self.timers = later;
+        self.deferred.extend(due.into_iter().map(|(_, a)| a));
+        if let Some(next) = self.timers.iter().map(|(at, _)| *at).min() {
+            ctx.request_repaint_after(next.saturating_duration_since(now));
         }
     }
 
@@ -4071,6 +4091,7 @@ impl eframe::App for GitVis {
         for ev in events {
             self.handle_event(ev);
         }
+        self.tick_timers(ctx);
         self.drain_deferred(ctx);
         self.tick_dirty(ctx);
         self.tick_checks(ctx);

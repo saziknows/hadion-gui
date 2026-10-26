@@ -44,15 +44,6 @@ pub enum GitOp {
     GhPrCheckout {
         number: u64,
     },
-    /// `gh run rerun ID [--failed]`.
-    GhRunRerun {
-        id: u64,
-        failed_only: bool,
-    },
-    /// `gh run cancel ID`.
-    GhRunCancel {
-        id: u64,
-    },
     Switch {
         branch: String,
     },
@@ -215,14 +206,6 @@ impl GitOp {
         let one = |a: Vec<String>| vec![a];
         match self {
             GhPrCheckout { number } => one(v(["pr", "checkout", &number.to_string()])),
-            GhRunRerun { id, failed_only } => {
-                let mut args = v(["run", "rerun", &id.to_string()]);
-                if *failed_only {
-                    args.push("--failed".into());
-                }
-                one(args)
-            }
-            GhRunCancel { id } => one(v(["run", "cancel", &id.to_string()])),
             Switch { branch } => one(v(["switch", branch])),
             Detach { commit } => one(v(["switch", "--detach", commit])),
             SwitchTracking {
@@ -420,32 +403,28 @@ impl GitOp {
                 | GitOp::DeleteRemoteBranch { .. }
                 | GitOp::PushTag { .. }
                 | GitOp::GhPrCheckout { .. }
-                | GitOp::GhRunRerun { .. }
-                | GitOp::GhRunCancel { .. }
         )
     }
 
     /// The executable the operation runs: `gh` for GitHub CLI operations.
     pub fn program(&self) -> &'static str {
         match self {
-            GitOp::GhPrCheckout { .. } | GitOp::GhRunRerun { .. } | GitOp::GhRunCancel { .. } => {
-                "gh"
-            }
+            GitOp::GhPrCheckout { .. } => "gh",
             _ => "git",
         }
     }
 
     /// Operations that only talk to GitHub and change nothing locally.
+    /// None today: Actions re-runs and cancels go through the CI area's
+    /// `gh api` requests (`devops::ci`), which log their bodies.
     pub fn is_remote_only(&self) -> bool {
-        matches!(self, GitOp::GhRunRerun { .. } | GitOp::GhRunCancel { .. })
+        false
     }
 
     pub fn refresh(&self) -> Refresh {
         use GitOp::*;
         match self {
-            GhRunRerun { .. }
-            | GhRunCancel { .. }
-            | Stage { .. }
+            Stage { .. }
             | StageAll
             | Unstage { .. }
             | UnstageAll { .. }
@@ -465,12 +444,6 @@ impl GitOp {
         use GitOp::*;
         match self {
             GhPrCheckout { number } => format!("Check out PR #{number}"),
-            GhRunRerun {
-                id,
-                failed_only: true,
-            } => format!("Re-run failed jobs of run {id}"),
-            GhRunRerun { id, .. } => format!("Re-run run {id}"),
-            GhRunCancel { id } => format!("Cancel run {id}"),
             Switch { branch } => format!("Switch to {branch}"),
             Detach { commit } => format!("Check out {}", short(commit)),
             SwitchTracking {

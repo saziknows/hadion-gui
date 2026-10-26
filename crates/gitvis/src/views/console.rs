@@ -2,7 +2,6 @@
 //! `terraform plan`, `kubectl logs`, `git bisect run`, image scans) with
 //! its command, status, duration and controls, plus a compact run list.
 
-#![allow(dead_code)] // Used by the DevOps pages; removed at integration.
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
     Align, Align2, Color32, FontId, Frame, Layout, Margin, RichText, Sense, Ui, pos2, vec2,

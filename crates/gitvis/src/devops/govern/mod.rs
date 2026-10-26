@@ -450,7 +450,6 @@ pub enum Act {
     SelectBranch(String),
     /// Start editing protection for an unprotected branch.
     StartProtecting,
-    ResetProtection,
     ReviewProtection,
     SaveProtection {
         branch: String,
@@ -553,7 +552,6 @@ pub type CoRead = (CoFile, Arc<Vec<String>>);
 pub enum Msg {
     Access(Result<Box<Access>, String>),
     Dependabot(Result<Vec<DependabotAlert>, String>),
-    DepPackages(Vec<Package>),
     Code(Result<Vec<CodeAlert>, String>),
     Snippet(u64, Option<Snippet>),
     Sbom(Result<Box<LocalSbom>, String>),
@@ -617,7 +615,6 @@ impl Msg {
                 sev_summary(v.iter().map(|a| a.severity))
             )),
             Msg::Dependabot(Err(e)) => err(e),
-            Msg::DepPackages(p) => Ok(count(p.len(), "locked package", "locked packages")),
             Msg::Code(Ok(v)) => Ok(format!(
                 "{}{}",
                 count(v.len(), "code scanning alert", "code scanning alerts"),

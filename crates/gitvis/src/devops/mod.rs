@@ -17,9 +17,6 @@
 //! | [`workbench`] | Workbench | `devops::workbench` |
 //! | [`forge`] | Review and Actions on GitLab / Azure DevOps | `devops::forge` |
 
-// Framework pieces are used by the areas as they are filled in; this goes
-// away at integration (see the devops branch).
-#![allow(dead_code, unused_variables)]
 pub mod ci;
 pub mod console;
 pub mod ctx;

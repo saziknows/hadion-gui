@@ -16,7 +16,6 @@
 
 use std::path::{Path, PathBuf};
 
-use gitvis_core::devops::forge::ForgeRemote;
 use gitvis_core::devops::gh::Gh;
 use gitvis_core::devops::proc::ProcSpec;
 use gitvis_core::github::ApiCall;
@@ -49,12 +48,6 @@ pub enum TaskKind {
     LocalChange,
 }
 
-impl TaskKind {
-    pub fn is_change(self) -> bool {
-        matches!(self, TaskKind::GhChange | TaskKind::LocalChange)
-    }
-}
-
 /// What a task produced.
 pub struct TaskDone {
     pub log: TaskLog,
@@ -80,6 +73,11 @@ pub enum Effect {
         title: String,
         spec: ProcSpec,
     },
+    /// Apply an action after a delay (e.g. refresh once GitHub has caught up).
+    After {
+        delay: std::time::Duration,
+        action: Action,
+    },
 }
 
 /// The context an area's `apply` / `on_msg` gets.
@@ -88,29 +86,17 @@ pub struct Ctx {
     pub workdir: Option<PathBuf>,
     /// `gh api` bound to the repository's GitHub remote, if it has one.
     pub gh: Option<Gh>,
-    /// The GitLab / Azure DevOps remote, if any.
-    pub forge: Option<ForgeRemote>,
     pub dark: bool,
-    pub verbose: bool,
     effects: Vec<Effect>,
 }
 
 impl Ctx {
-    pub fn new(
-        repo: Option<RepoId>,
-        workdir: Option<PathBuf>,
-        gh: Option<Gh>,
-        forge: Option<ForgeRemote>,
-        dark: bool,
-        verbose: bool,
-    ) -> Self {
+    pub fn new(repo: Option<RepoId>, workdir: Option<PathBuf>, gh: Option<Gh>, dark: bool) -> Self {
         Self {
             repo,
             workdir,
             gh,
-            forge,
             dark,
-            verbose,
             effects: Vec::new(),
         }
     }
@@ -122,6 +108,16 @@ impl Ctx {
     /// Run an app action after this call (show a page, open a URL, …).
     pub fn action(&mut self, a: impl Into<Action>) {
         self.effects.push(Effect::Action(a.into()));
+    }
+
+    /// Run an app action after `delay` (GitHub needs a moment before a
+    /// dispatched or re-run workflow shows up). Nothing is logged for the
+    /// wait itself.
+    pub fn after(&mut self, delay: std::time::Duration, a: impl Into<Action>) {
+        self.effects.push(Effect::After {
+            delay,
+            action: a.into(),
+        });
     }
 
     pub fn toast(&mut self, kind: ToastKind, msg: impl Into<String>) {

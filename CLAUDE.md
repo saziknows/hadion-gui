@@ -15,8 +15,8 @@ Toolchain on this machine: `stable-x86_64-pc-windows-gnu` with WinLibs gcc; libg
 
 - `crates/gitvis-core` — no UI. `graph.rs` (lane layout, pure), `repo.rs` (libgit2 snapshot; working tree via
   `git status --porcelain=v2` because libgit2 status is ~15x slower on big trees), `ops.rs` (`GitOp` → git
-  command lines; mutations always go through the git binary; `gh run rerun/cancel` and `gh pr checkout`
-  are `GitOp`s too, with `program() == "gh"`), `diff.rs` (unified diff parser keeping raw bytes so hunks
+  command lines; mutations always go through the git binary; `gh pr checkout`
+  is a `GitOp` too, with `program() == "gh"`), `diff.rs` (unified diff parser keeping raw bytes so hunks
   round-trip through `git apply`), `github.rs` (every `gh api` call is recorded as an `ApiCall` with bytes,
   latency and the `X-Ratelimit-*` headers read from `gh api -i`), `joblog.rs` (Actions log parser),
   `secrets.rs` (exposure scanner: `SPECS` content rules with placeholder/entropy filters, gated by

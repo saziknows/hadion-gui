@@ -116,6 +116,13 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             tab_shown(cx, repo, t);
         }
         Act::Refresh(t) => refresh(cx, repo, t),
+        Act::DispatchSettled { workflow_id } => {
+            cx.action(Action::RefreshGitHub);
+            if let Some(id) = workflow_id {
+                load_history(cx, repo, id, true);
+            }
+        }
+        Act::RefreshRuns(ids) => fetch_runs_now(cx, ids),
         // ------------------------------------------------------------ Runs
         Act::Pick { run, mode } => pick(repo, run, mode),
         Act::PickRuns(ids) => {
@@ -2017,16 +2024,8 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                 }
             }
             if ok.is_ok() {
-                cx.gh_read("Wait for the dispatched run to appear", move |_, _| {
-                    std::thread::sleep(Duration::from_secs(4));
-                    Msg::DispatchSettled { workflow_id }
-                });
-            }
-        }
-        Msg::DispatchSettled { workflow_id } => {
-            cx.action(Action::RefreshGitHub);
-            if let Some(id) = workflow_id {
-                load_history(cx, repo, id, true);
+                // GitHub takes a few seconds to list a dispatched run.
+                cx.after(Duration::from_secs(4), Act::DispatchSettled { workflow_id });
             }
         }
         Msg::Artifacts(result) => repo.devops.ci.artifacts.finish(result),
@@ -2099,13 +2098,16 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
 /// second to show a re-run as queued).
 fn refresh_runs(cx: &mut Ctx, ids: Vec<u64>) {
     let ids: Vec<u64> = ids.into_iter().take(10).collect();
+    cx.after(Duration::from_millis(1500), Act::RefreshRuns(ids));
+}
+
+fn fetch_runs_now(cx: &mut Ctx, ids: Vec<u64>) {
     cx.gh_read(
         format!(
             "Refresh {} after the change",
             plural(ids.len(), "run", "runs")
         ),
         move |gh, log| {
-            std::thread::sleep(Duration::from_millis(1500));
             Msg::RunsRefreshed(
                 ids.iter()
                     .map(|id| core::fetch_run(gh, *id, &mut log.calls).map_err(|e| e.to_string()))

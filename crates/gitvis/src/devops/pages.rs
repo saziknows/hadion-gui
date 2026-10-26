@@ -43,16 +43,6 @@ const NAV: [(&str, &[ShipTab]); 3] = [
 ];
 
 impl ShipTab {
-    pub const ALL: [ShipTab; 7] = [
-        ShipTab::Releases,
-        ShipTab::Environments,
-        ShipTab::WhereIsMyCommit,
-        ShipTab::Dora,
-        ShipTab::Packages,
-        ShipTab::Kubernetes,
-        ShipTab::Terraform,
-    ];
-
     pub fn label(self) -> &'static str {
         match self {
             ShipTab::Releases => "Releases",

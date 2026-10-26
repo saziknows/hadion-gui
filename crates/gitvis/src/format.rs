@@ -93,8 +93,10 @@ pub fn bytes(n: usize) -> String {
         format!("{n} B")
     } else if n < K * K {
         format!("{:.1} KB", n / K)
-    } else {
+    } else if n < K * K * K {
         format!("{:.1} MB", n / (K * K))
+    } else {
+        format!("{:.2} GB", n / (K * K * K))
     }
 }
 

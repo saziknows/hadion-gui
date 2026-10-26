@@ -437,7 +437,6 @@ fn commit_card(ui: &mut Ui, c: &CommitInfo, now: i64, in_graph: bool, actions: &
 }
 
 pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut Vec<Action>) {
-    let p = *pal(ui);
     let now = format::now_secs();
     let selected_commit = match (&repo.selection, &repo.snapshot) {
         (Selection::Commit(id), Some(s)) => s

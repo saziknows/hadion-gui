@@ -333,18 +333,6 @@ pub fn when(t: Option<i64>) -> String {
     }
 }
 
-/// The role line under a header ("Your role: admin").
-pub fn role_badge(ui: &mut Ui, repo: &RepoState) {
-    if let Some(a) = repo.devops.govern.access.ok() {
-        let tone = if a.admin {
-            Tone::Success
-        } else {
-            Tone::Neutral
-        };
-        kit::badge(ui, &format!("Role: {}", a.role()), tone);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
