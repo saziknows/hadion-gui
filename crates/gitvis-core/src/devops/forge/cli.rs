@@ -133,13 +133,12 @@ fn error_text(
     let e = stderr.trim();
     let o = String::from_utf8_lossy(stdout).trim().to_owned();
     // glab prints the API's JSON error to stdout and a summary to stderr.
-    let msg = match (e.is_empty(), o.is_empty()) {
+    match (e.is_empty(), o.is_empty()) {
         (false, false) if o.starts_with('{') => format!("{e}\n{}", api_message(&o).unwrap_or(o)),
         (false, _) => e.to_owned(),
         (true, false) => api_message(&o).unwrap_or(o),
         _ => format!("exited with {code:?}"),
-    };
-    msg
+    }
 }
 
 /// `message` / `error` of a JSON error body.

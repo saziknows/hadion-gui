@@ -83,7 +83,7 @@ fn vote_badges(cr: &ChangeRequest) -> Vec<(String, Tone)> {
     out
 }
 
-fn visible<'a>(st: &'a State) -> Vec<&'a ChangeRequest> {
+fn visible(st: &State) -> Vec<&ChangeRequest> {
     let me = st.me();
     let t = st.filter.trim().to_lowercase();
     st.reviews
@@ -761,8 +761,8 @@ fn gitlab_sections(
                 ],
                 &rows,
             );
-            if let Some(head) = &cr.pipeline {
-                if kit::link(
+            if let Some(head) = &cr.pipeline
+                && kit::link(
                     ui,
                     &format!(
                         "Open head pipeline #{} ({}) on the web",
@@ -770,9 +770,8 @@ fn gitlab_sections(
                     ),
                 )
                 .clicked()
-                {
-                    actions.push(Action::OpenUrl(head.web_url.clone()));
-                }
+            {
+                actions.push(Action::OpenUrl(head.web_url.clone()));
             }
         }
     }
@@ -807,7 +806,7 @@ fn gitlab_sections(
                 })
                 .filter(|(n, _)| !n.system)
                 .collect();
-            notes.sort_by(|a, b| b.0.created.cmp(&a.0.created));
+            notes.sort_by_key(|n| std::cmp::Reverse(n.0.created));
             for (n, open) in notes.iter().take(6) {
                 form::card(
                     ui,

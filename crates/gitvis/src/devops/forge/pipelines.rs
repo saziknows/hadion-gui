@@ -35,7 +35,7 @@ pub fn tone(o: Outcome) -> Tone {
     }
 }
 
-fn visible<'a>(st: &'a State) -> Vec<&'a Pipeline> {
+fn visible(st: &State) -> Vec<&Pipeline> {
     let t = st.pipeline_filter.trim().to_lowercase();
     st.pipelines
         .data
@@ -480,10 +480,10 @@ fn pipeline_header(
         let mut timing = Vec::new();
         if let Some(d) = pl.duration {
             timing.push(format!("ran {}", format::duration(d)));
-        } else if pl.outcome.is_running() {
-            if let Some(s) = pl.started {
-                timing.push(format!("running for {}", format::duration(now - s)));
-            }
+        } else if pl.outcome.is_running()
+            && let Some(s) = pl.started
+        {
+            timing.push(format!("running for {}", format::duration(now - s)));
         }
         if let Some(q) = pl.queued {
             timing.push(format!("queued {}", format::duration(q)));
@@ -562,6 +562,12 @@ fn jobs_list(
             last_stage = Some(j.stage.as_str());
             let in_stage: Vec<&Job> = jobs.iter().filter(|x| x.stage == j.stage).collect();
             let agg = gitvis_core::github::aggregate(in_stage.iter().map(|x| x.outcome));
+            // The forge's own word for the stage: the status of its worst job.
+            let word = in_stage
+                .iter()
+                .find(|x| x.outcome == agg)
+                .map(|x| x.status.clone())
+                .unwrap_or_else(|| agg.label().to_owned());
             ui.add_space(space::S);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
@@ -571,7 +577,7 @@ fn jobs_list(
                         .size(size::CAPTION)
                         .color(p.text_3),
                 );
-                kit::badge(ui, agg.label(), tone(agg));
+                kit::badge(ui, &word, tone(agg));
             });
         }
         let (rect, resp) =

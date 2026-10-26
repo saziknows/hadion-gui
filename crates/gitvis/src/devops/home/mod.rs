@@ -193,13 +193,16 @@ pub enum Act {
     OpenNth(usize),
 }
 
+/// What one inbox fetch brought back.
+pub struct InboxMsg {
+    pub notifications: Result<Vec<Notification>, String>,
+    pub search: Result<search::Results, String>,
+    pub rate: Option<RateLimit>,
+    pub epoch: i64,
+}
+
 pub enum Msg {
-    Inbox {
-        notifications: Result<Vec<Notification>, String>,
-        search: Result<search::Results, String>,
-        rate: Option<RateLimit>,
-        epoch: i64,
-    },
+    Inbox(Box<InboxMsg>),
     MarkedRead {
         id: String,
         result: Result<(), String>,
@@ -218,15 +221,11 @@ impl Msg {
     /// One line for the activity log (`Err` when the work failed).
     pub fn summary(&self) -> Result<String, String> {
         match self {
-            Msg::Inbox {
-                notifications,
-                search,
-                ..
-            } => match (notifications, search) {
+            Msg::Inbox(m) => match (&m.notifications, &m.search) {
                 (Err(a), Err(b)) => Err(format!("{a}\n{b}")),
                 _ => {
                     let mut parts = Vec::new();
-                    match notifications {
+                    match &m.notifications {
                         Ok(n) => parts.push(format!(
                             "{} ({} unread)",
                             format::plural(n.len(), "notification", "notifications"),
@@ -234,7 +233,7 @@ impl Msg {
                         )),
                         Err(e) => parts.push(format!("notifications failed: {e}")),
                     }
-                    match search {
+                    match &m.search {
                         Ok(s) => parts.push(format!(
                             "{} review requests, {} of my pull requests, {} mentions, {} assigned",
                             s.review.total, s.mine.total, s.mentions.total, s.assigned.total
@@ -384,12 +383,12 @@ fn fetch_inbox(cx: &mut Ctx, state: &mut State) {
             .graphql(search::QUERY, search::variables(50), &mut log.calls)
             .map_err(|e| e.to_string())
             .and_then(|d| search::parse(&d).map_err(|e| e.to_string()));
-        Msg::Inbox {
+        Msg::Inbox(Box::new(InboxMsg {
             notifications,
             search,
             rate,
             epoch: format::now_secs(),
-        }
+        }))
     });
 }
 
@@ -721,12 +720,13 @@ fn start_fetch(
 pub fn on_msg(cx: &mut Ctx, state: &mut State, _repos: &[RepoState], msg: Msg) {
     let _ = cx;
     match msg {
-        Msg::Inbox {
-            notifications,
-            search,
-            rate,
-            epoch,
-        } => {
+        Msg::Inbox(m) => {
+            let InboxMsg {
+                notifications,
+                search,
+                rate,
+                epoch,
+            } = *m;
             state.loading = false;
             state.fetched_at = Some(Instant::now());
             state.fetched_epoch = Some(epoch);

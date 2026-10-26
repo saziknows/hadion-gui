@@ -1049,7 +1049,7 @@ mod tests {
         );
         assert!(v.write);
         for vote in Vote::ALL {
-            assert_eq!(vote_label(vote.value()).is_empty(), false);
+            assert!(!vote_label(vote.value()).is_empty());
         }
         assert_eq!(vote_label(Vote::Reject.value()), "Rejected");
 

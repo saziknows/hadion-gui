@@ -352,7 +352,7 @@ fn convert(r: RawNotification) -> Notification {
 pub fn parse(body: &[u8]) -> Result<Vec<Notification>> {
     let raw: Vec<RawNotification> = decode(body, "notifications")?;
     let mut out: Vec<Notification> = raw.into_iter().map(convert).collect();
-    out.sort_by(|a, b| b.updated.cmp(&a.updated));
+    out.sort_by_key(|n| std::cmp::Reverse(n.updated));
     Ok(out)
 }
 

@@ -176,12 +176,9 @@ fn strip_erase(s: &str) -> &str {
 /// options, rest after the marker's `\r`).
 fn marker(s: &str) -> Option<(bool, i64, String, String, &str)> {
     let s = strip_erase(s);
-    let (start, body) = if let Some(b) = s.strip_prefix("section_start:") {
-        (true, b)
-    } else if let Some(b) = s.strip_prefix("section_end:") {
-        (false, b)
-    } else {
-        return None;
+    let (start, body) = match s.strip_prefix("section_start:") {
+        Some(b) => (true, b),
+        None => (false, s.strip_prefix("section_end:")?),
     };
     let (head, rest) = match body.find('\r') {
         Some(i) => (&body[..i], &body[i + 1..]),

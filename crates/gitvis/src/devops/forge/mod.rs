@@ -301,25 +301,39 @@ pub enum Act {
     SelectNth(usize),
     SelectNthPipeline(usize),
     ShowNthJob(usize),
+    /// Script: submit the open form, or act on the selection (each ends
+    /// at the confirmation dialog).
+    ScriptSubmit,
+    ScriptMerge,
+    ScriptApprove,
+    ScriptVote(Vote),
+    ScriptRetry,
+    ScriptComment(String),
+}
+
+/// Everything loaded for one merge / pull request.
+pub struct DetailMsg {
+    pub number: u64,
+    pub cr: Result<ChangeRequest, String>,
+    pub approvals: Option<Result<Approvals, String>>,
+    pub threads: Option<Result<Vec<Thread>, String>>,
+    pub files: Option<Result<Vec<FileChange>, String>>,
+    pub pipelines: Option<Result<Vec<Pipeline>, String>>,
+}
+
+/// A pipeline and its jobs.
+pub struct RunMsg {
+    pub id: u64,
+    pub pipeline: Result<Pipeline, String>,
+    pub jobs: Result<Vec<Job>, String>,
 }
 
 pub enum Msg {
     Tool(ToolState),
     Reviews(Result<Vec<ChangeRequest>, String>),
-    Detail {
-        number: u64,
-        cr: Result<ChangeRequest, String>,
-        approvals: Option<Result<Approvals, String>>,
-        threads: Option<Result<Vec<Thread>, String>>,
-        files: Option<Result<Vec<FileChange>, String>>,
-        pipelines: Option<Result<Vec<Pipeline>, String>>,
-    },
+    Detail(Box<DetailMsg>),
     Pipelines(Result<Vec<Pipeline>, String>),
-    Run {
-        id: u64,
-        pipeline: Result<Pipeline, String>,
-        jobs: Result<Vec<Job>, String>,
-    },
+    Run(Box<RunMsg>),
     Log {
         pipeline: u64,
         key: u64,
@@ -352,17 +366,25 @@ impl Msg {
                 .as_ref()
                 .map(|v| format::plural(v.len(), "open request", "open requests"))
                 .map_err(Clone::clone),
-            Msg::Detail { number, cr, .. } => cr
-                .as_ref()
-                .map(|c| format!("#{number} {}", c.title))
-                .map_err(Clone::clone),
+            Msg::Detail(d) => {
+                d.cr.as_ref()
+                    .map(|c| format!("#{} {}", d.number, c.title))
+                    .map_err(Clone::clone)
+            }
             Msg::Pipelines(r) => r
                 .as_ref()
                 .map(|v| format::plural(v.len(), "pipeline", "pipelines"))
                 .map_err(Clone::clone),
-            Msg::Run { id, jobs, .. } => jobs
+            Msg::Run(r) => r
+                .jobs
                 .as_ref()
-                .map(|j| format!("pipeline {id}: {}", format::plural(j.len(), "job", "jobs")))
+                .map(|j| {
+                    format!(
+                        "pipeline {}: {}",
+                        r.id,
+                        format::plural(j.len(), "job", "jobs")
+                    )
+                })
                 .map_err(Clone::clone),
             Msg::Log { key, result, .. } => result
                 .as_ref()
@@ -528,28 +550,28 @@ fn load_detail(cx: &mut Ctx, repo: &mut RepoState, number: u64) {
                     .and_then(|b| gitlab::parse_diffs(&b).map_err(|e| e.to_string()));
                 let pipelines = gl_read(&gitlab::mr_pipelines(&remote, number), public, dir, log)
                     .and_then(|b| gitlab::parse_pipelines(&b).map_err(|e| e.to_string()));
-                Msg::Detail {
+                Msg::Detail(Box::new(DetailMsg {
                     number,
                     cr,
                     approvals: Some(approvals),
                     threads: Some(threads),
                     files: Some(files),
                     pipelines: Some(pipelines),
-                }
+                }))
             }
             ForgeKind::Azure => {
                 let cr = target(&remote).and_then(|t| {
                     az_read(&azure::pr_show(&t, number), dir, log)
                         .and_then(|b| azure::parse_pr(&t, &b).map_err(|e| e.to_string()))
                 });
-                Msg::Detail {
+                Msg::Detail(Box::new(DetailMsg {
                     number,
                     cr,
                     approvals: None,
                     threads: None,
                     files: None,
                     pipelines: None,
-                }
+                }))
             }
         },
     );
@@ -607,7 +629,7 @@ fn load_run(cx: &mut Ctx, repo: &mut RepoState, id: u64) {
                     .and_then(|b| gitlab::parse_pipeline(&b).map_err(|e| e.to_string()));
                 let jobs = gl_read(&gitlab::pipeline_jobs(&remote, id), public, dir, log)
                     .and_then(|b| gitlab::parse_jobs(&b).map_err(|e| e.to_string()));
-                Msg::Run { id, pipeline, jobs }
+                Msg::Run(Box::new(RunMsg { id, pipeline, jobs }))
             }
             ForgeKind::Azure => match target(&remote) {
                 Ok(t) => {
@@ -615,13 +637,13 @@ fn load_run(cx: &mut Ctx, repo: &mut RepoState, id: u64) {
                         .and_then(|b| azure::parse_run(&t, &b).map_err(|e| e.to_string()));
                     let jobs = az_read(&azure::timeline(&t, id), dir, log)
                         .and_then(|b| azure::parse_timeline(&t, id, &b).map_err(|e| e.to_string()));
-                    Msg::Run { id, pipeline, jobs }
+                    Msg::Run(Box::new(RunMsg { id, pipeline, jobs }))
                 }
-                Err(e) => Msg::Run {
+                Err(e) => Msg::Run(Box::new(RunMsg {
                     id,
                     pipeline: Err(e.clone()),
                     jobs: Err(e),
-                },
+                })),
             },
         },
     );
@@ -929,7 +951,11 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             };
             confirm(
                 cx,
-                format!("{verb} {} #{n}?", noun(&remote)),
+                format!(
+                    "{verb} {} into {}?",
+                    review::reference(remote.kind, n),
+                    cr.target
+                ),
                 format!(
                     "{what}: {} into {}{}{}.",
                     cr.source,
@@ -1261,6 +1287,40 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 apply(cx, repo, Act::SelectPipeline(id));
             }
         }
+        Act::ScriptSubmit => match page {
+            Page::GitHub => apply(cx, repo, Act::SubmitRun),
+            _ => apply(cx, repo, Act::SubmitCreate),
+        },
+        Act::ScriptMerge => {
+            if let Some(n) = repo.devops.forge.selected {
+                apply(cx, repo, Act::Merge(n));
+            }
+        }
+        Act::ScriptApprove => {
+            if let Some(n) = repo.devops.forge.selected {
+                apply(cx, repo, Act::Approve(n));
+            }
+        }
+        Act::ScriptVote(v) => {
+            if let Some(n) = repo.devops.forge.selected {
+                apply(cx, repo, Act::Vote(n, v));
+            }
+        }
+        Act::ScriptRetry => {
+            if let Some(id) = repo.devops.forge.selected_pipeline {
+                let act = match remote.kind {
+                    ForgeKind::GitLab => Act::RetryPipeline(id),
+                    ForgeKind::Azure => Act::CancelPipeline(id),
+                };
+                apply(cx, repo, act);
+            }
+        }
+        Act::ScriptComment(text) => {
+            if let Some(n) = repo.devops.forge.selected {
+                repo.devops.forge.comment = text;
+                apply(cx, repo, Act::Comment(n));
+            }
+        }
         Act::ShowNthJob(n) => {
             let st = &repo.devops.forge;
             let Some(p) = st.selected_pipeline else {
@@ -1324,14 +1384,15 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                 st.selected = None;
             }
         }
-        Msg::Detail {
-            number,
-            cr,
-            approvals,
-            threads,
-            files,
-            pipelines,
-        } => {
+        Msg::Detail(m) => {
+            let DetailMsg {
+                number,
+                cr,
+                approvals,
+                threads,
+                files,
+                pipelines,
+            } = *m;
             let d = repo.devops.forge.details.entry(number).or_default();
             d.loading = false;
             d.at = Some(format::now_secs());
@@ -1342,7 +1403,8 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
             d.pipelines = pipelines;
         }
         Msg::Pipelines(r) => repo.devops.forge.pipelines.done(r),
-        Msg::Run { id, pipeline, jobs } => {
+        Msg::Run(m) => {
+            let RunMsg { id, pipeline, jobs } = *m;
             let d = repo.devops.forge.runs.entry(id).or_default();
             d.loading = false;
             d.at = Some(format::now_secs());
@@ -1424,6 +1486,15 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         "forge-public" => vec![Act::UsePublic(true).into()],
         "forge-check" => vec![Act::CheckTool.into()],
         "forge-refresh" => vec![Act::RefreshReviews.into(), Act::RefreshPipelines.into()],
+        "forge-submit" => vec![Act::ScriptSubmit.into()],
+        "forge-merge" => vec![Act::ScriptMerge.into()],
+        "forge-approve" => vec![Act::ScriptApprove.into()],
+        "forge-retry" => vec![Act::ScriptRetry.into()],
+        "forge-comment" => vec![Act::ScriptComment(arg.to_owned()).into()],
+        "forge-vote" => {
+            let v = Vote::ALL.into_iter().find(|v| v.arg() == arg.trim())?;
+            vec![Act::ScriptVote(v).into()]
+        }
         _ => return None,
     })
 }
