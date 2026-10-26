@@ -1257,7 +1257,7 @@ pub fn fetch_check_runs(
         )?,
         "check runs",
     )?;
-    Ok(raw
+    let mut out: Vec<CheckRun> = raw
         .check_runs
         .into_iter()
         .map(|c| CheckRun {
@@ -1274,7 +1274,73 @@ pub fn fetch_check_runs(
             summary: c.output.as_ref().and_then(|o| o.summary.clone()),
             annotations: c.output.map(|o| o.annotations_count).unwrap_or(0),
         })
-        .collect())
+        .collect();
+    // Commit statuses: CI that reports through the older status API
+    // (Jenkins, CircleCI, …) instead of check runs. A failure here only
+    // drops them; the check runs are still returned.
+    if let Ok(body) = api(
+        dir,
+        &format!("repos/{owner}/{repo}/commits/{sha}/status?per_page=100"),
+        &[],
+        calls,
+    ) && let Ok(st) = serde_json::from_slice::<RawCombinedStatus>(&body)
+    {
+        out.extend(st.statuses.into_iter().map(status_check));
+    }
+    Ok(out)
+}
+
+#[derive(Deserialize)]
+struct RawCombinedStatus {
+    #[serde(default)]
+    statuses: Vec<RawStatus>,
+}
+
+#[derive(Deserialize)]
+struct RawStatus {
+    #[serde(default)]
+    id: u64,
+    #[serde(default)]
+    context: String,
+    #[serde(default)]
+    state: String,
+    description: Option<String>,
+    target_url: Option<String>,
+    created_at: Option<String>,
+    updated_at: Option<String>,
+    creator: Option<RawUser>,
+}
+
+/// A commit status as a check row (`app` is `status`, or the reporter).
+fn status_check(s: RawStatus) -> CheckRun {
+    let (status, conclusion) = match s.state.as_str() {
+        "pending" => ("in_progress", None),
+        "success" => ("completed", Some("success")),
+        // `error` and `failure` both mean the check did not pass.
+        _ => ("completed", Some("failure")),
+    };
+    let url = s.target_url.unwrap_or_default();
+    CheckRun {
+        id: s.id,
+        name: s.context,
+        app: s
+            .creator
+            .map(|c| format!("status by {}", c.login))
+            .unwrap_or_else(|| "status".to_owned()),
+        status: status.to_owned(),
+        conclusion: conclusion.map(str::to_owned),
+        started: s.created_at.as_deref().and_then(parse_time),
+        completed: if status == "completed" {
+            s.updated_at.as_deref().and_then(parse_time)
+        } else {
+            None
+        },
+        details_url: url.clone(),
+        html_url: url,
+        title: s.description,
+        summary: None,
+        annotations: 0,
+    }
 }
 
 /// Size, merge state and reviews of one pull request.
@@ -2133,6 +2199,21 @@ mod tests {
             Outcome::Failure
         );
         assert_eq!(aggregate(std::iter::empty()), Outcome::Unknown);
+    }
+
+    #[test]
+    fn commit_statuses_become_checks() {
+        let st: RawCombinedStatus = serde_json::from_str(
+            r#"{"state":"failure","statuses":[{"id":5,"context":"continuous-integration/jenkins","state":"error","description":"Build failed","target_url":"https://ci/x","created_at":"2026-10-26T04:50:00Z","updated_at":"2026-10-26T05:00:00Z","creator":{"login":"bot"}},{"id":6,"context":"lint","state":"pending"}]}"#,
+        )
+        .unwrap();
+        let checks: Vec<CheckRun> = st.statuses.into_iter().map(status_check).collect();
+        assert_eq!(checks[0].outcome(), Outcome::Failure);
+        assert_eq!(checks[0].app, "status by bot");
+        assert_eq!(checks[0].details_url, "https://ci/x");
+        assert!(checks[0].completed.is_some());
+        assert!(checks[1].outcome().is_running());
+        assert_eq!(checks[1].actions_ids(), None);
     }
 
     #[test]

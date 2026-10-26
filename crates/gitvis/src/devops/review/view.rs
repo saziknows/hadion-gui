@@ -729,7 +729,7 @@ fn pr_detail(
                         ui,
                         Tone::Warning,
                         "GitHub's summary says checks are failing",
-                        "None of the check runs above failed, so the failure comes from a commit status (CI systems such as Jenkins report statuses, not check runs). Open the pull request on GitHub to see every status.",
+                        "None of the check runs and commit statuses listed above failed. The failing one is beyond the first 100 of either list: open the pull request on GitHub to see every check.",
                     );
                 }
             });
