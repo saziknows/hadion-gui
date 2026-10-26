@@ -556,9 +556,9 @@ pub enum Msg {
     DepPackages(Vec<Package>),
     Code(Result<Vec<CodeAlert>, String>),
     Snippet(u64, Option<Snippet>),
-    Sbom(Box<LocalSbom>),
+    Sbom(Result<Box<LocalSbom>, String>),
     GhSbom(Result<Box<GhSbom>, String>),
-    Images(Box<ImagesReport>),
+    Images(Result<Box<ImagesReport>, String>),
     Scanners(Vec<ScannerStatus>),
     ScanParsed(u64, Result<Box<ScanSummary>, String>),
     Protected(Result<Vec<String>, String>),
@@ -631,7 +631,8 @@ impl Msg {
                     None => "file not in the working tree".into(),
                 }
             )),
-            Msg::Sbom(s) => Ok(format!(
+            Msg::Sbom(Err(e)) => err(e),
+            Msg::Sbom(Ok(s)) => Ok(format!(
                 "{} from {} in {}",
                 count(s.unique().len(), "package", "packages"),
                 count(s.lockfiles.len(), "lockfile", "lockfiles"),
@@ -642,7 +643,8 @@ impl Msg {
                 count(s.packages.len(), "package", "packages")
             )),
             Msg::GhSbom(Err(e)) => err(e),
-            Msg::Images(r) => Ok(format!(
+            Msg::Images(Err(e)) => err(e),
+            Msg::Images(Ok(r)) => Ok(format!(
                 "{}, {} ({} high or worse), {}",
                 count(r.dockerfiles.len(), "Dockerfile", "Dockerfiles"),
                 count(

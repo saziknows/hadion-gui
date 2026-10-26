@@ -117,8 +117,16 @@ pub fn sbom(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
         },
     );
     let Some(local) = sbom.ok() else {
-        kit::scroll_page(ui, "gov_sbom_wait", |ui| {
-            widgets::loading(ui, "Reading the lockfiles…");
+        let error = sbom.error.clone();
+        kit::scroll_page(ui, "gov_sbom_wait", |ui| match &error {
+            Some(e) => widgets::failed(
+                ui,
+                "Could not list the tracked files",
+                e,
+                Act::LoadSbom,
+                actions,
+            ),
+            None => widgets::loading(ui, "Reading the lockfiles…"),
         });
         return;
     };
@@ -623,8 +631,16 @@ pub fn images(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mu
         },
     );
     let Some(report) = images.ok() else {
-        kit::scroll_page(ui, "gov_img_wait", |ui| {
-            widgets::loading(ui, "Looking for Dockerfiles and compose files…");
+        let error = images.error.clone();
+        kit::scroll_page(ui, "gov_img_wait", |ui| match &error {
+            Some(e) => widgets::failed(
+                ui,
+                "Could not list the tracked files",
+                e,
+                Act::LoadImages,
+                actions,
+            ),
+            None => widgets::loading(ui, "Looking for Dockerfiles and compose files…"),
         });
         return;
     };

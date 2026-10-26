@@ -400,7 +400,11 @@ fn env_detail(
                 for p in list {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
-                        kit::badge(ui, &p.kind, Tone::Neutral);
+                        kit::badge(
+                            ui,
+                            if p.kind == "tag" { "Tag" } else { "Branch" },
+                            Tone::Neutral,
+                        );
                         ui.label(kit::mono(&p.name).color(pal(ui).text));
                         if is_admin
                             && IconButton::icon(Icon::Trash)

@@ -267,7 +267,7 @@ pub fn protection(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
                             text(r.name.as_str()),
                             sec(r.target.as_str()),
                             Cell::Badges(vec![(
-                                r.enforcement.clone(),
+                                sentence(&r.enforcement),
                                 match r.enforcement.as_str() {
                                     "active" => Tone::Success,
                                     "evaluate" => Tone::Warning,
@@ -311,6 +311,15 @@ pub fn protection(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
             }
         }
     });
+}
+
+/// `active` → `Active`.
+fn sentence(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().chain(c).collect(),
+        None => String::new(),
+    }
 }
 
 fn on_off(b: bool) -> (String, Tone) {
@@ -709,8 +718,8 @@ fn overview_tiles(ui: &mut Ui, co: &CoState, has_gh: bool) {
     kit::secondary(
         ui,
         &format!(
-            "{} lines ({} comments, {} blank), {}.{}",
-            p.lines,
+            "{} ({} comments, {} blank), {}.{}",
+            format::plural(p.lines, "line", "lines"),
             p.comment_lines,
             p.blank_lines,
             format::bytes(p.bytes),

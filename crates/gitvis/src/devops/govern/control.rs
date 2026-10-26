@@ -210,12 +210,15 @@ fn load_sbom(cx: &mut Ctx, st: &mut State) {
         return;
     }
     let started = cx.read("Read the lockfiles", |dir, log| {
-        let tracked = gcore::tracked_files(dir, &mut log.commands).unwrap_or_default();
+        let tracked = match gcore::tracked_files(dir, &mut log.commands) {
+            Ok(t) => t,
+            Err(e) => return Msg::Sbom(Err(e.to_string())),
+        };
         let s = sbom::local_sbom(dir, &tracked);
         for (f, _) in &s.lockfiles {
             log.command(format!("read {f}"));
         }
-        Msg::Sbom(Box::new(s))
+        Msg::Sbom(Ok(Box::new(s)))
     });
     if !started {
         st.sbom.loading = false;
@@ -240,12 +243,15 @@ fn load_images(cx: &mut Ctx, st: &mut State) {
         return;
     }
     let started = cx.read("Find and lint Dockerfiles", |dir, log| {
-        let tracked = gcore::tracked_files(dir, &mut log.commands).unwrap_or_default();
+        let tracked = match gcore::tracked_files(dir, &mut log.commands) {
+            Ok(t) => t,
+            Err(e) => return Msg::Images(Err(e.to_string())),
+        };
         let r = docker::scan_tree(dir, &tracked);
         for (df, _) in &r.dockerfiles {
             log.command(format!("read {}", df.path));
         }
-        Msg::Images(Box::new(r))
+        Msg::Images(Ok(Box::new(r)))
     });
     if !started {
         st.images.loading = false;
@@ -1625,14 +1631,17 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
         Msg::Snippet(n, s) => {
             st.snippets.insert(n, s);
         }
-        Msg::Sbom(s) => {
-            if st.dep_packages.is_none() {
+        Msg::Sbom(r) => {
+            if st.dep_packages.is_none()
+                && let Ok(s) = &r
+            {
                 st.dep_packages = Some(s.packages.clone());
             }
-            st.sbom.finish(Ok(*s));
+            st.sbom.finish(r.map(|b| *b));
         }
         Msg::GhSbom(r) => st.gh_sbom.finish(r.map(|b| *b)),
-        Msg::Images(r) => {
+        Msg::Images(Err(e)) => st.images.finish(Err(e)),
+        Msg::Images(Ok(r)) => {
             if let Some(p) = &st.image_selected
                 && !r.dockerfiles.iter().any(|(d, _)| &d.path == p)
             {

@@ -191,8 +191,8 @@ pub fn no_github(ui: &mut Ui, repo: &RepoState, tab: Tab) {
         Icon::Lock,
         "No GitHub remote",
         &format!(
-            "{} lives on GitHub: add a remote on github.com (git remote add origin https://github.com/OWNER/REPO.git) and gitvis reads it with your gh login.{other} SBOM, container images and CODEOWNERS work without one.",
-            tab.label()
+            "This section reads {} from GitHub: add a remote on github.com (git remote add origin https://github.com/OWNER/REPO.git) and gitvis reads it with your gh login.{other} SBOM, container images and CODEOWNERS work without one.",
+            tab.label().to_lowercase()
         ),
         None,
     );
