@@ -239,6 +239,7 @@ fn environment_facts_against_the_default_branch() {
                 "gone".into(),
                 "0123456789abcdef0123456789abcdef01234567".into(),
             ),
+            ("github-pages".into(), c[0].clone()),
         ],
         default.as_deref(),
         &mut commands,
@@ -251,7 +252,10 @@ fn environment_facts_against_the_default_branch() {
     assert_eq!(list[0].sha, c[4]);
     assert_eq!(list[1].subject, "feat(api)!: new endpoint");
     assert_eq!(facts["production"].behind, Some(2));
+    // github-pages is GitHub's own environment, not the next stage.
     assert!(facts["production"].ahead_of_next.is_none());
+    assert!(facts["github-pages"].ahead_of_next.is_none());
+    assert_eq!(facts["github-pages"].behind, Some(4));
     assert!(!facts["gone"].present);
     assert_eq!(facts["gone"].behind, None);
 }
@@ -296,6 +300,16 @@ fn dora_reads_the_commits_each_deployment_brought() {
     assert_eq!(shas(3), vec![c[4].clone(), c[3].clone()]);
     // The roll-back to c3 brings nothing new.
     assert!(shas(4).is_empty());
+    let again = dora::prepare(vec![
+        ev("r1", &c[2], 5, dora::Outcome::Success),
+        ev("r2", &c[2], 30, dora::Outcome::Success),
+    ]);
+    let l2 = dora::collect_local(dir, &again, &mut commands);
+    assert_eq!(
+        l2.new_commits.get(&1).map(Vec::len),
+        Some(0),
+        "a redeploy brings nothing"
+    );
     assert!(!local.new_commits.contains_key(&0), "no predecessor");
     // Lead times: c3 and c5 deployed 5 h after they were committed, c2
     // and c4 15 h: the median is 10 h.

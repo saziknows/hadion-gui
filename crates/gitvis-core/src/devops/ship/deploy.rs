@@ -249,7 +249,7 @@ impl EnvData {
             }
         }
         self.deployments
-            .sort_by(|a, b| b.created.cmp(&a.created).then(b.id.cmp(&a.id)));
+            .sort_by_key(|d| std::cmp::Reverse((d.created, d.id)));
     }
 
     pub fn env(&self, name: &str) -> Option<&Environment> {
@@ -800,7 +800,7 @@ pub fn fetch_rest(gh: &Gh, calls: &mut Vec<ApiCall>) -> Result<EnvData> {
             ));
         }
     }
-    deployments.sort_by(|a, b| b.created.cmp(&a.created));
+    deployments.sort_by_key(|d| std::cmp::Reverse(d.created));
     notes.push(format!(
         "REST shows the newest {REST_DEPLOYMENTS} deployments per environment."
     ));
@@ -1027,6 +1027,14 @@ pub fn stage_rank(name: &str) -> u8 {
     }
 }
 
+/// Environments GitHub creates for its own features (`github-pages`,
+/// `copilot`): not stages of the delivery pipeline. They sort last and are
+/// not compared with their neighbours.
+pub fn is_side(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n == "github-pages" || n == "copilot" || n.starts_with("copilot-") || n == "pages"
+}
+
 /// Does the name look like production?
 pub fn is_production(name: &str) -> bool {
     if stage_rank(name) != 6 {
@@ -1044,8 +1052,8 @@ pub fn order(names: &[String], user: &[String]) -> Vec<String> {
     let mut out: Vec<String> = user.iter().filter(|u| names.contains(u)).cloned().collect();
     let mut rest: Vec<&String> = names.iter().filter(|n| !out.contains(n)).collect();
     rest.sort_by(|a, b| {
-        stage_rank(a)
-            .cmp(&stage_rank(b))
+        (is_side(a), stage_rank(a))
+            .cmp(&(is_side(b), stage_rank(b)))
             .then_with(|| a.to_lowercase().cmp(&b.to_lowercase()))
     });
     out.extend(rest.into_iter().cloned());
@@ -1086,12 +1094,14 @@ pub fn local_facts(
             (true, Some(d)) => local::count(dir, &format!("{sha}..{d}"), commands),
             _ => None,
         };
-        // The next environment downstream that has a local commit.
-        let ahead_of_next = if here {
+        // The next pipeline environment downstream that has a local commit
+        // (GitHub's own environments are not stages).
+        let ahead_of_next = if here && !is_side(env) {
             ordered
                 .iter()
                 .enumerate()
                 .skip(i + 1)
+                .filter(|(_, (e, _))| !is_side(e))
                 .find(|(j, _)| present.get(*j).cloned().flatten().is_some())
                 .and_then(|(_, (next_env, next_sha))| {
                     let range = format!("{next_sha}..{sha}");
@@ -1376,12 +1386,15 @@ mod tests {
             vec![
                 "dev",
                 "qa",
-                "copilot",
-                "github-pages",
                 "staging",
-                "production"
+                "production",
+                "copilot",
+                "github-pages"
             ]
         );
+        assert!(is_side("github-pages"));
+        assert!(is_side("Copilot"));
+        assert!(!is_side("pages-preview"));
         assert_eq!(
             order(&names, &["staging".into(), "gone".into()])[0],
             "staging"

@@ -142,7 +142,17 @@ pub fn generate_notes(
     req: &Request,
     calls: &mut Vec<ApiCall>,
 ) -> Result<(String, String)> {
-    let v: Value = gh.send_json(req, "generated notes", calls)?;
+    let v: Value = gh.send_json(req, "generated notes", calls).map_err(|e| {
+        let m = e.to_string();
+        if m.contains("(HTTP 404)") {
+            Error::new(format!(
+                "{m}
+GitHub answers 404 here when your account cannot push to the repository: generating notes needs write access. Generate them locally instead."
+            ))
+        } else {
+            e
+        }
+    })?;
     let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
     Ok((s("name"), s("body")))
 }

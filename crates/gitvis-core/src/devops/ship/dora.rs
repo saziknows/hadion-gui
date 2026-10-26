@@ -295,6 +295,8 @@ pub fn collect_local(dir: &Path, events: &[Event], commands: &mut Vec<String>) -
     // (event index, its commit, the previous distinct deployed commits)
     let mut jobs: Vec<(usize, String, Vec<String>)> = Vec::new();
     let mut previous: Vec<String> = Vec::new();
+    // Redeploys of the commit already live bring nothing new.
+    let mut same: Vec<usize> = Vec::new();
     for (i, e) in events.iter().enumerate() {
         if e.outcome != Outcome::Success {
             continue;
@@ -302,6 +304,9 @@ pub fn collect_local(dir: &Path, events: &[Event], commands: &mut Vec<String>) -
         let Some(sha) = resolved[i].clone() else {
             continue;
         };
+        if previous.last() == Some(&sha) {
+            same.push(i);
+        }
         if !previous.is_empty() && previous.last() != Some(&sha) {
             let excl: Vec<String> = previous
                 .iter()
@@ -370,7 +375,8 @@ pub fn collect_local(dir: &Path, events: &[Event], commands: &mut Vec<String>) -
         tally.record(c, commands);
     }
     tally.finish(commands);
-    let mut new_commits = HashMap::new();
+    let mut new_commits: HashMap<usize, Vec<NewCommit>> =
+        same.into_iter().map(|i| (i, Vec::new())).collect();
     let mut truncated = Vec::new();
     for (i, list) in results {
         if let Some(list) = list {

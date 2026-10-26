@@ -121,10 +121,10 @@ pub fn locate(
     for b in branches.lines().map(str::trim).filter(|b| !b.is_empty()) {
         if let Some(l) = b.strip_prefix("refs/heads/") {
             out.local_branches.push(l.to_owned());
-        } else if let Some(r) = b.strip_prefix("refs/remotes/") {
-            if !r.ends_with("/HEAD") {
-                out.remote_branches.push(r.to_owned());
-            }
+        } else if let Some(r) = b.strip_prefix("refs/remotes/")
+            && !r.ends_with("/HEAD")
+        {
+            out.remote_branches.push(r.to_owned());
         }
     }
     let tags = local::git(

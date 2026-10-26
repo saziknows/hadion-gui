@@ -45,9 +45,18 @@ fn pr_suffix_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"\s*\(#(\d+)\)\s*$").expect("valid regex"))
 }
 
+fn branch_merge_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^Merge (branch|remote-tracking branch|tag) |^Merge \S+ into \S+")
+            .expect("valid regex")
+    })
+}
+
 /// Read a commit: pull-request merges use the pull request's title (the
-/// first body line), squash merges keep their `(#123)`. Merges of branches
-/// (`Merge branch 'main' into x`) give `None`: they are noise in notes.
+/// first body line), squash merges and titled merge commits keep their
+/// `(#123)`. Merges of one branch into another (`Merge branch 'main' into
+/// x`, `Merge stable into main`) give `None`: they are noise in notes.
 pub fn classify(c: &LogLine) -> Option<Change> {
     let mut pr = None;
     let mut message = c.subject.clone();
@@ -60,10 +69,7 @@ pub fn classify(c: &LogLine) -> Option<Change> {
             .find(|l| !l.is_empty())
             .unwrap_or(&c.subject)
             .to_owned();
-    } else if c.parents > 1
-        || c.subject.starts_with("Merge branch ")
-        || c.subject.starts_with("Merge remote-tracking branch ")
-    {
+    } else if branch_merge_re().is_match(&c.subject) {
         return None;
     }
     if let Some(caps) = pr_suffix_re().captures(&message) {
@@ -380,6 +386,9 @@ pub struct Prepared {
     pub truncated: bool,
 }
 
+/// Builds a "compare" link from two tags.
+pub type CompareUrl = dyn Fn(&str, &str) -> String;
+
 /// Read the commits between the latest version tag (or `previous`, when
 /// given) and `target`, suggest a version and write grouped notes.
 pub fn prepare(
@@ -387,7 +396,7 @@ pub fn prepare(
     tags: &[String],
     previous: Option<&str>,
     target: &str,
-    compare_url: Option<&dyn Fn(&str, &str) -> String>,
+    compare_url: Option<&CompareUrl>,
     commands: &mut Vec<String>,
 ) -> Result<Prepared> {
     let target = if target.trim().is_empty() {
@@ -429,6 +438,10 @@ pub fn prepare(
     })
 }
 
+/// Per release tag: the commit it points at locally and the commits since
+/// the previous release.
+pub type ReleaseFacts = HashMap<String, (Option<String>, Option<u32>)>;
+
 /// Local facts about the listed releases: for each `(tag, previous tag)`
 /// pair, the commit the tag points at locally (`None` when the tag is not
 /// here) and `git rev-list --count previous..tag` when both are.
@@ -436,7 +449,7 @@ pub fn release_facts(
     dir: &Path,
     pairs: &[(String, Option<String>)],
     commands: &mut Vec<String>,
-) -> HashMap<String, (Option<String>, Option<u32>)> {
+) -> ReleaseFacts {
     let mut names: Vec<String> = pairs
         .iter()
         .map(|(t, _)| format!("refs/tags/{t}"))
@@ -511,6 +524,11 @@ mod tests {
         assert_eq!(m.kind.as_deref(), Some("fix"));
         assert_eq!(m.text, "crash on start");
         assert!(classify(&line("c", "Merge branch 'main' into x", "", 2)).is_none());
+        assert!(classify(&line("c", "Merge stable into main (#3876)", "", 2)).is_none());
+        // A merge commit titled after its pull request (merge queues).
+        let t = classify(&line("e", "Add `Parameter.spec` (#3877)", "", 2)).unwrap();
+        assert_eq!((t.pr, t.kind.as_deref()), (Some(3877), None));
+        assert_eq!(t.text, "Add `Parameter.spec`");
         let plain = classify(&line("d", "Update README", "BREAKING CHANGE: api", 1)).unwrap();
         assert_eq!(plain.kind, None);
         assert!(plain.breaking);

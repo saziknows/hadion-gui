@@ -588,6 +588,11 @@ pub fn commit(ui: &mut Ui, cx: &MenuCtx, c: &Commit, actions: &mut Vec<Action>) 
     separator(ui);
     action(ui, "Copy SHA", actions, Action::Copy(sha.clone()));
     action(ui, "Copy message", actions, Action::Copy(c.summary.clone()));
+    if entry(ui, "Where is this commit?", false).clicked() {
+        actions.push(crate::devops::ship::Act::WhereIs(c.id).into());
+        actions.push(Action::ShowPage(crate::state::Page::Ship));
+        ui.close();
+    }
     if let Some(gh) = cx.github {
         separator(ui);
         action(
