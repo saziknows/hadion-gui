@@ -469,6 +469,14 @@ pub struct State {
     pub pending_listed: Option<usize>,
     /// A script asked for the N-th file before the files arrived.
     pub pending_file: Option<usize>,
+    /// Whether the GitHub CLI was found (`None` until the page is opened).
+    pub gh_ok: Option<bool>,
+}
+
+/// Whether `gh` can be run: on PATH, or overridden by `GITVIS_GH`.
+pub fn gh_installed() -> bool {
+    std::env::var_os("GITVIS_GH").is_some_and(|v| !v.is_empty())
+        || gitvis_core::devops::tools::available(gitvis_core::devops::tools::Tool::Gh)
 }
 
 /// Files remembered as viewed (oldest dropped first).
@@ -732,6 +740,8 @@ pub enum Act {
     CreateIssue,
     /// The base branch of the New pull request form changed.
     SetBase(String),
+    /// Look for the GitHub CLI again (after installing it).
+    CheckGh,
     /// Script commands that need the state.
     Script(String, String),
 }
@@ -864,6 +874,12 @@ pub fn on_console_done(_cx: &mut Ctx, _repo: &mut RepoState, _run: &ConsoleRun) 
 /// The page was opened (fetch what it needs the first time).
 pub fn on_page_shown(cx: &mut Ctx, repo: &mut RepoState) {
     let st = &mut repo.devops.review;
+    if st.gh_ok.is_none() {
+        st.gh_ok = Some(gh_installed());
+    }
+    if st.gh_ok == Some(false) {
+        return;
+    }
     if st.meta.wanted() {
         fetch_meta(cx, st);
     }

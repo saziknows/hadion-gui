@@ -166,17 +166,19 @@ fn merge_box(
                 };
                 kit::badge(ui, c.label(), t);
             }
-            let m = match d.pr.mergeable {
-                Mergeable::Mergeable => ("No conflicts", Tone::Neutral),
-                Mergeable::Conflicting => ("Conflicts", Tone::Danger),
-                Mergeable::Unknown => ("Conflicts not computed yet", Tone::Neutral),
-            };
-            kit::badge(ui, m.0, m.1);
-            kit::badge(
-                ui,
-                &format!("Merge state: {}", d.pr.merge_state.code()),
-                Tone::Neutral,
-            );
+            if d.pr.is_open() {
+                let m = match d.pr.mergeable {
+                    Mergeable::Mergeable => ("No conflicts", Tone::Neutral),
+                    Mergeable::Conflicting => ("Conflicts", Tone::Danger),
+                    Mergeable::Unknown => ("Conflicts not computed yet", Tone::Neutral),
+                };
+                kit::badge(ui, m.0, m.1);
+                kit::badge(
+                    ui,
+                    &format!("Merge state: {}", d.pr.merge_state.code()),
+                    Tone::Neutral,
+                );
+            }
             let open = d.unresolved_threads();
             if open > 0 {
                 kit::badge(
@@ -186,7 +188,7 @@ fn merge_box(
                 );
             }
         });
-        if let Some(am) = &d.auto_merge {
+        if let Some(am) = d.auto_merge.as_ref().filter(|_| d.pr.is_open()) {
             ui.add_space(2.0);
             kit::callout(
                 ui,

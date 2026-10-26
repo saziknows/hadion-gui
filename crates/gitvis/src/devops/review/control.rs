@@ -763,6 +763,17 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 change,
             );
         }
+        Act::CheckGh => {
+            gitvis_core::devops::tools::refresh();
+            let st = &mut repo.devops.review;
+            st.gh_ok = Some(gh_installed());
+            // Earlier failures were "gh not found": try again.
+            st.meta = Fetch::default();
+            st.open = Fetch::default();
+            st.closed = Fetch::default();
+            st.issues.lists.clear();
+            on_page_shown(cx, repo);
+        }
         Act::Script(cmd, arg) => script_act(cx, repo, &cmd, &arg),
     }
 }

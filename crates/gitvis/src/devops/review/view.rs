@@ -28,10 +28,38 @@ pub fn show(
     };
     let now = format::now_secs();
     header(ui, repo, &owner, &name, now, actions);
+    if repo.devops.review.gh_ok == Some(false) {
+        gh_missing(ui, actions);
+        return;
+    }
     match repo.devops.review.mode {
         Mode::Prs => prs_page(ui, repo, settings, now, actions),
         Mode::Issues => issues::page(ui, repo, settings, now, actions),
     }
+}
+
+/// The GitHub CLI is not installed: what it is, why the page needs it, how
+/// to get it, and a way to look again.
+fn gh_missing(ui: &mut Ui, actions: &mut Vec<Action>) {
+    use gitvis_core::devops::tools::Tool;
+    detail_area(ui, |ui| {
+        Frame::NONE.inner_margin(Margin::same(28)).show(ui, |ui| {
+            ui.set_max_width(kit::PROSE);
+            kit::title(ui, &format!("{} ({}) is not installed", Tool::Gh.name(), Tool::Gh.program()));
+            ui.add_space(4.0);
+            kit::body(
+                ui,
+                "The Review page lists, reads and changes pull requests and issues through `gh api`, signed in with your own `gh auth login`. gitvis keeps no token of its own.",
+            );
+            ui.add_space(space::S);
+            kit::section(ui, "Install it", None);
+            kit::code_block(ui, Tool::Gh.install_hint(), actions);
+            ui.add_space(space::S);
+            if crate::views::form::primary(ui, "Check again", true).clicked() {
+                actions.push(Act::CheckGh.into());
+            }
+        });
+    });
 }
 
 fn header(
@@ -82,12 +110,13 @@ fn header(
     }
     let mode = st.mode;
     let issues_off = st.meta().has_issues == Some(false);
+    let gh_ok = st.gh_ok != Some(false);
     kit::page_header(ui, "Review", &sub.join("  ·  "), |ui| {
         let (label, act) = match mode {
             Mode::Prs => ("New pull request", Act::NewPr),
             Mode::Issues => ("New issue", Act::NewIssue),
         };
-        let enabled = !(mode == Mode::Issues && issues_off);
+        let enabled = !(mode == Mode::Issues && issues_off) && gh_ok;
         if IconButton::new(Icon::Plus, label)
             .primary(true)
             .enabled(enabled)
@@ -581,11 +610,16 @@ fn pr_detail(
                 kit::badge(ui, state_text, state_tone);
                 ui.label(
                     RichText::new(format!(
-                        "{} wants to merge {} into {} from {}",
+                        "{} {} {} into {} from {}",
                         if pr.author.is_empty() {
                             "ghost"
                         } else {
                             &pr.author
+                        },
+                        match pr.state {
+                            PrState::Open => "wants to merge",
+                            PrState::Merged => "merged",
+                            PrState::Closed => "wanted to merge",
                         },
                         format::plural(commits as usize, "commit", "commits"),
                         pr.base,
