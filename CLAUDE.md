@@ -129,6 +129,60 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   `kubectl` always gets an explicit `--context`; never change the user's current context or kubeconfig.
 - Script commands: anything unknown goes to `devops::script` → each area's `script`. Built in: `page
   home|graph|review|actions|ship|exposure|insights|govern|tools`, `ship TAB`, `ship-tab TAB`.
+- Per area (core / app files):
+  - `review`: core `model`, `graphql` (one list query with mergeability; on a timeout it retries without
+    it, since brave-core takes ~7 s per 20 PRs), `rest` (request builders and a `Step` runner that
+    substitutes `{number}` of a PR created a step earlier), `patch` (GitHub's bare hunks, comment
+    anchors, suggestions), `local` (templates, commits between branches, `#N` matching), `fetch`; app
+    `reads`, `changes`, `control`, `view`, `conversation`, `files`, `forms`, `issues`, `widgets`.
+    `cargo test -p gitvis-core --test review_live -- --ignored --nocapture` is a read-only live check
+    (`GITVIS_REVIEW_REPO=owner/name`).
+  - `ci`: core `workflow`/`yaml` (dispatch inputs; serde_yaml reads the YAML 1.1 key `on` as `true`),
+    `lint` (`GITVIS_LINT_DIR=<repo> cargo test -p gitvis-core --lib lint_report -- --ignored
+    --nocapture` prints a report), `history` (stats, flaky), `compare` (log normalisation and diff; it
+    skips the "Set up job" preamble, which ends at `Complete job name:`), `act`, `requests`.
+    Re-fetches after a change use `Ctx::after` (GitHub needs a moment), not a sleeping read.
+  - `ship`: core `deploy` (one GraphQL query for environments and deployments; `protectionRules`
+    errors on some repos, so it is REST-only), `dora`, `notes` (next version, local changelog),
+    `local`; app tabs Releases, Environments, Where is my commit, DORA.
+  - `runtime`: core `packages` (needs `read:packages`; the page shows the `gh auth refresh` fix and
+    never runs it), `kube` (every cluster call has `--context` and `--request-timeout`, except
+    `logs -f`, which Stop ends), `terraform` (plan / drift use `-detailed-exitcode`, so their
+    `ProcSpec::ok_codes(&[2])` makes the console show exit 2 as passed), `matching` (image tag →
+    commit / tag / branch / PR), `fixtures/`.
+  - `govern`: core `alerts`, `sbom` (CycloneDX 1.5 / SPDX 2.3 from `osint::parse_manifest`),
+    `docker` (Dockerfile parser + lint, scanner JSON), `protection` (the PUT always sends the four
+    required keys), `codeowners` (GitHub semantics: last match wins, `docs/*` is not recursive),
+    `envs`, `config` (secrets via `gh secret set` stdin, variables).
+  - `workbench`: core `tasks/` (discovery; a small order-keeping TOML reader in `toml.rs`;
+    `GITVIS_DISCOVER=<dir> cargo test -p gitvis-core --lib print_discovery -- --ignored --nocapture`),
+    `rebase` (needs git ≥ 2.38 for `--no-update-refs`; `GIT_SEQUENCE_EDITOR="cp '<todo>'"` and
+    `exec git commit --amend -F` lines, so no editor opens), `bisect`, `worktrees`, `history`.
+  - `home` / `forge`: core `home::{notify, search, runs, fetch}` (one GraphQL search for review
+    requests, mine, mentions, assigned), `forge::{gitlab, azure, cli, trace, tools}` (`glab api`
+    with the URL-encoded project path, `az` + azure-devops extension; GitLab job traces parsed into
+    nested sections; public gitlab.com projects readable through curl without signing in).
+- Test doubles: `GITVIS_GH` (any area), `GITVIS_KUBECTL`, `GITVIS_TERRAFORM` replace the executables.
+  `cargo build -p gitvis-core --example gh_guard`, then `GITVIS_GH=target/debug/examples/gh_guard.exe`
+  passes reads to the real gh and blocks every write (non-GET, GraphQL mutations, other subcommands),
+  logging to `GH_GUARD_LOG`; `GH_GUARD_FAIL=msg` forces error states. Use it for every UI session
+  that touches GitHub. Read-only public test beds the area agents used: cli/cli (environments, 3.6k
+  deployments, releases), pallets/click (releases with assets), sharkdp/fd (small artifacts),
+  gitlab-org/gitlab-runner (public GitLab API); brave-core has no releases or deployments.
+- Script commands per area (each area's `script` fn has the full list): review `review`, `prs`,
+  `issues`, `pr N`, `pr-tab conversation|files|commits|checks`, `pr-file N`, `issue N`, `new-pr`,
+  `pr-lines A B`, `pr-comment TEXT`, `pr-review approve|changes|comment TEXT`, `pr-submit` /
+  `pr-merge` / `create-pr` (stop at the confirmation); ci `actions-tab runs|workflows|artifacts|
+  caches|validate|local`, `workflow N`, `dispatch N`, `select-runs N`, `compare`, `analyse-jobs`;
+  ship `ship releases|envs|where|dora|packages|k8s|terraform`, `release N`, `new-release`, `where
+  SHA|head`, `env N`, `dora-source …`, `dora-period N`; runtime `k8s-context NAME`, `workload N`,
+  `pod-logs N`, `tf-root N`, `tf-validate`, `pkg N`; govern `gov-tab dependabot|code-scanning|sbom|
+  images|protection|codeowners|environments|secrets|variables`, `gov-item N`, `codeowners-test PATH`,
+  `secret-form`; tools `tools-tab tasks|console|rebase|bisect|history|worktrees`, `select-task N`,
+  `rebase BASE`, `bisect`, `history PATH`, `worktree N`; home `home`, `home-tab …`, `inbox-item N`,
+  `forge-tab review|pipelines`, `mr N`, `pipeline N`. Commands that would write stop at the
+  confirmation dialog, except `rebase-run-now`, `bisect-run-now CMD`, `task N` and `fetch-all-in
+  DIR`, which act for real and are for scratch repositories only.
 
 ## egui 0.37 gotchas (verified against the crate source)
 
@@ -175,12 +229,12 @@ Commands: `wait S`, `shot PATH`, `tab N`, `head`, `wip`, `open PATH`, `open-wip 
 `unified`, `select HUNK FROM TO`, `activity`, `reflog`, `collapse KEY`, `stage PATH`, `undo`,
 (scripted runs never save settings, window geometry or egui memory, so they cannot change the owner's
 session; run a copy of the exe under another name, e.g. `gitvis-test.exe`, so the build is never locked),
-`theme`, `github` / `graph` / `prs` (centre page), `filter TEXT` and `status failed|running|passed|all`
-(run list), `run N` (open the N-th listed run), `job N` (show the N-th job's log), `pr N`, `verbose`,
+`theme`, `github` / `graph` (centre page), `filter TEXT` and `status failed|running|passed|all`
+(run list), `run N` (open the N-th listed run), `job N` (show the N-th job's log), `verbose`,
 `security` / `scan` / `scan-history N` / `finding N` / `reveal` (Exposure page), `sec-tab NAME` /
 `osint` / `item N` / `unreachable` / `osv` / `dorks` / `pr-refs` (OSINT tabs), `insights` /
 `ins-tab NAME` / `analyse N` / `ins-item N` / `weight` / `date-debt` / `pickaxe TEXT` / `grep TEXT` /
-`recover` / `blame PATH` (Insights page), `quit`. See
+`recover` / `blame PATH` (Insights page), the DevOps commands (see "DevOps areas"), `quit`. See
 `crates/gitvis/src/script.rs`. `stage`/`undo` run real git operations; the GitHub commands make
 real `gh api` calls (brave-core is the live test bed: `status failed; run 0` lands on a Dependabot
 failure with annotations and an `##[error]` line). `scripts/make-leaky-repo.sh DIR` builds a
