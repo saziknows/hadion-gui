@@ -30,6 +30,8 @@ pub struct CommitCx<'a> {
     pub checks: Option<&'a crate::state::ChecksState>,
     pub has_github: bool,
     pub contains: Option<&'a Option<Vec<String>>>,
+    /// The pull request the commit belongs to (Review page link).
+    pub pr: Option<u64>,
 }
 
 pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mut Vec<Action>) {
@@ -46,6 +48,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
         contains,
         github_remote,
         sec_page,
+        devops,
         ..
     } = repo;
     let Some(snap) = snapshot.as_ref() else {
@@ -83,6 +86,13 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
                         checks: checks.get(&id),
                         has_github: github_remote.is_some(),
                         contains: contains.get(&id),
+                        pr: github_remote.as_ref().and_then(|_| {
+                            crate::devops::review::pr_for_commit(
+                                &devops.review,
+                                id,
+                                &commit.summary,
+                            )
+                        }),
                     };
                     commit_panel(ui, &cx, commit, d, actions)
                 }
@@ -237,6 +247,13 @@ fn commit_panel(
     kit::section(ui, "Details", None);
     let sha = d.id.to_string();
     kit::kv(ui, 92.0, |kv| {
+        if let Some(n) = cx.pr {
+            kv.row("Pull request", |ui| {
+                if kit::link(ui, &format!("Pull request #{n}")).clicked() {
+                    actions.push(Action::OpenPr(n));
+                }
+            });
+        }
         kv.row("Commit", |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
