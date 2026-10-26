@@ -11,7 +11,7 @@ use egui::{
 use crate::devops::console::{Console, ConsoleAction, ConsoleLine, ConsoleRun};
 use crate::format;
 use crate::state::{Action, RepoId};
-use crate::theme::{Tone, pal, size, space};
+use crate::theme::{Tone, pal, size};
 use crate::views::icons::{Icon, IconButton};
 use crate::views::kit;
 
@@ -306,13 +306,11 @@ pub fn run_list(
         );
         painter.galley(pos2(rect.left() + 28.0, mid - g.size().y / 2.0), g, p.text);
         if resp
-            .on_hover_text(&run.command)
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .clicked()
         {
             clicked = Some(run.id);
         }
-        ui.add_space(space::XS - 4.0);
     }
     clicked
 }

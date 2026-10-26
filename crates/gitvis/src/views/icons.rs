@@ -101,6 +101,8 @@ pub enum Icon {
     Wheel,
     /// An arrow down onto a line: download.
     Download,
+    /// A five-pointed star: favourites.
+    Star,
 }
 
 /// Draw `icon` centred on `center` inside a `size`×`size` box.
@@ -720,6 +722,16 @@ pub fn paint(p: &Painter, icon: Icon, center: Pos2, size: f32, color: Color32) {
                     st,
                 );
             }
+        }
+        Icon::Star => {
+            let pts: Vec<Pos2> = (0..=10)
+                .map(|i| {
+                    let a = -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / 5.0;
+                    let r = if i % 2 == 0 { 0.46 } else { 0.2 };
+                    pt(r * a.cos(), 0.04 + r * a.sin())
+                })
+                .collect();
+            p.line(pts, st);
         }
         Icon::Download => {
             p.line_segment([pt(0.0, -0.44), pt(0.0, 0.16)], st);

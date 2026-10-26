@@ -792,7 +792,7 @@ fn detail(
             actions.push(Act::RunTask(id.clone()).into());
         }
         if IconButton::new(
-            Icon::Check,
+            Icon::Star,
             if fav {
                 "Favourite"
             } else {
