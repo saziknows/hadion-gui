@@ -394,6 +394,12 @@ pub enum Act {
         tag: String,
         asset: String,
     },
+    /// Download the N-th asset of the selected release into `dir` without
+    /// asking for a folder (script).
+    DownloadTo {
+        index: usize,
+        dir: String,
+    },
     JumpToTag(String),
     JumpTo(String),
 
@@ -766,7 +772,29 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             }
         }
         Act::DeleteConfirmed { id, tag, with_tag } => delete_release(cx, repo, id, tag, with_tag),
-        Act::Download { tag, asset } => download(cx, repo, tag, asset),
+        Act::Download { tag, asset } => {
+            if let Some(dir) = rfd::FileDialog::new()
+                .set_title(format!("Download {asset} to"))
+                .pick_folder()
+            {
+                download(cx, repo, tag, asset, dir.to_string_lossy().into_owned());
+            }
+        }
+        Act::DownloadTo { index, dir } => {
+            let target = repo
+                .devops
+                .ship
+                .selected
+                .and_then(|id| repo.devops.ship.release(id))
+                .and_then(|r| {
+                    r.assets
+                        .get(index)
+                        .map(|a| (r.tag_name.clone(), a.name.clone()))
+                });
+            if let Some((tag, asset)) = target {
+                download(cx, repo, tag, asset, dir);
+            }
+        }
         Act::JumpToTag(tag) => {
             let oid = repo
                 .snapshot
@@ -1660,15 +1688,8 @@ fn delete_release(cx: &mut Ctx, repo: &mut RepoState, id: u64, tag: String, with
     });
 }
 
-fn download(cx: &mut Ctx, repo: &mut RepoState, tag: String, asset: String) {
+fn download(cx: &mut Ctx, repo: &mut RepoState, tag: String, asset: String, dir: String) {
     let Some(full) = gh_name(repo) else { return };
-    let Some(dir) = rfd::FileDialog::new()
-        .set_title(format!("Download {asset} to"))
-        .pick_folder()
-    else {
-        return;
-    };
-    let dir = dir.to_string_lossy().into_owned();
     let spec = ProcSpec::new("gh", repo.workdir.clone())
         .args(release::download_args(&full, &tag, &asset, &dir));
     let id = cx.console(format!("Download {asset}"), spec);
@@ -1899,13 +1920,16 @@ fn default_source(repo: &RepoState) -> Option<DoraSource> {
         return None;
     }
     if let Some(d) = st.envs.ok() {
-        let prod = d
-            .environments
-            .iter()
-            .map(|e| e.name.clone())
-            .find(|n| deploy::is_production(n));
+        let names: Vec<String> = d.environments.iter().map(|e| e.name.clone()).collect();
+        // Production by name; else a production-like stage (`publish`,
+        // `release`) that has deployments.
+        let prod = names.iter().find(|n| deploy::is_production(n)).or_else(|| {
+            names.iter().find(|n| {
+                !deploy::is_side(n) && deploy::stage_rank(n) == 6 && d.of(n).next().is_some()
+            })
+        });
         if let Some(p) = prod {
-            return Some(DoraSource::Environment(p));
+            return Some(DoraSource::Environment(p.clone()));
         }
     }
     if st.releases.ok().is_some_and(|r| !r.is_empty()) {
@@ -2017,7 +2041,8 @@ fn recompute_dora(st: &mut State) {
 
 /// `GITVIS_SCRIPT` commands this area understands: `release N`,
 /// `new-release`, `release-tag TAG`, `notes local|github`, `publish`,
-/// `edit-release`, `delete-release`, `where SHA|head|selected`, `env N`,
+/// `edit-release`, `delete-release`, `download N DIR` (N-th asset of the
+/// selected release), `where SHA|head|selected`, `env N`,
 /// `rollback [rerun]`, `promote ENV`, `approve N`, `reject N`,
 /// `dora-source env NAME|releases|tags
 /// PATTERN|workflow NAME`, `dora-period 30|90|180`, `ship-scroll Y` (Where
@@ -2040,6 +2065,16 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         "publish" => (ShipTab::Releases, Act::Publish),
         "edit-release" => (ShipTab::Releases, Act::EditSelected),
         "delete-release" => (ShipTab::Releases, Act::DeleteSelected),
+        "download" => {
+            let (n, dir) = arg.split_once(' ')?;
+            (
+                ShipTab::Releases,
+                Act::DownloadTo {
+                    index: n.trim().parse().ok()?,
+                    dir: dir.trim().to_owned(),
+                },
+            )
+        }
         "where" => (
             ShipTab::WhereIsMyCommit,
             match arg {
@@ -2122,4 +2157,96 @@ pub fn rail_badge(repo: &RepoState, _console: &Console) -> Option<(crate::theme:
             ),
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::devops::DevOpsAction;
+
+    fn ship_act(actions: &[Action]) -> Option<&Act> {
+        actions.iter().find_map(|a| match a {
+            Action::DevOps(DevOpsAction::Ship(x)) => Some(x),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn script_commands() {
+        let a = script("release", "2").unwrap();
+        assert!(matches!(ship_act(&a), Some(Act::SelectReleaseIndex(2))));
+        assert!(
+            a.iter()
+                .any(|x| matches!(x, Action::ShowPage(crate::state::Page::Ship)))
+        );
+        assert!(script("release", "x").is_none());
+        assert!(script("dora-period", "45").is_none());
+        let a = script("dora-period", "180").unwrap();
+        assert!(matches!(ship_act(&a), Some(Act::DoraPeriod(180))));
+        let a = script("dora-source", "tags v*").unwrap();
+        assert!(matches!(ship_act(&a), Some(Act::DoraSource(DoraSource::Tags(p))) if p == "v*"));
+        let a = script("dora-source", "env production").unwrap();
+        assert!(
+            matches!(ship_act(&a), Some(Act::DoraSource(DoraSource::Environment(e))) if e == "production")
+        );
+        let a = script("dora-source", "workflow Deploy app").unwrap();
+        assert!(matches!(ship_act(&a), Some(Act::DoraWorkflowNamed(n)) if n == "Deploy app"));
+        assert!(script("dora-source", "nonsense").is_none());
+        let a = script("where", "head").unwrap();
+        assert!(matches!(ship_act(&a), Some(Act::WhereHead)));
+        let a = script("where", "abc123").unwrap();
+        assert!(matches!(ship_act(&a), Some(Act::WhereRev(r)) if r == "abc123"));
+        let a = script("download", "1 C:/tmp/out dir").unwrap();
+        assert!(
+            matches!(ship_act(&a), Some(Act::DownloadTo { index: 1, dir }) if dir == "C:/tmp/out dir")
+        );
+        let a = script("approve", "0").unwrap();
+        assert!(matches!(ship_act(&a), Some(Act::ReviewIndex(0, true))));
+        let a = script("rollback", "rerun").unwrap();
+        assert!(matches!(
+            ship_act(&a),
+            Some(Act::RollbackSelected { rerun: true })
+        ));
+        assert!(script("unknown-command", "").is_none());
+    }
+
+    #[test]
+    fn prefs_round_trip() {
+        let mut st = State::default();
+        st.order = vec!["staging".into(), "production".into()];
+        st.dora.source = Some(DoraSource::Workflow(7, "Deploy".into()));
+        st.dora.chosen = true;
+        st.dora.period = 30;
+        let json = serde_json::to_string(&st.prefs()).unwrap();
+        let p: Prefs = serde_json::from_str(&json).unwrap();
+        let mut back = State::default();
+        back.apply_prefs(&p);
+        assert_eq!(back.order, st.order);
+        assert_eq!(back.dora.source, st.dora.source);
+        assert_eq!(back.dora.period, 30);
+        // A default (not chosen) source is not persisted; odd periods reset.
+        st.dora.chosen = false;
+        assert!(st.prefs().dora_source.is_none());
+        let p: Prefs = serde_json::from_str(r#"{"dora_period": 7}"#).unwrap();
+        back.apply_prefs(&p);
+        assert_eq!(back.dora.period, 90);
+    }
+
+    #[test]
+    fn load_states_and_source_keys() {
+        let mut l: Load<u32> = Load::default();
+        assert!(l.idle());
+        l.loading = true;
+        assert!(!l.idle());
+        l.finish(Err("boom".into()));
+        assert_eq!(l.err(), Some("boom"));
+        assert!(l.ok().is_none());
+        l.finish(Ok(3));
+        assert_eq!(l.ok(), Some(&3));
+        assert_ne!(
+            DoraSource::Tags("v*".into()).key(),
+            DoraSource::Tags("*".into()).key()
+        );
+        assert_eq!(DoraSource::Releases.describe(), "published releases");
+    }
 }

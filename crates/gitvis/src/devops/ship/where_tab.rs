@@ -257,16 +257,29 @@ fn timeline(ui: &mut Ui, repo: &RepoState, l: &Located, now: i64, actions: &mut 
                     String::new()
                 }
             )];
-            lines.push(format!("{} contain it", count(l.tags_total, "tag", "tags")));
+            lines.push(format!(
+                "{} {}",
+                count(l.tags_total, "tag", "tags"),
+                if l.tags_total == 1 {
+                    "contains it"
+                } else {
+                    "contain it"
+                }
+            ));
             match (st.releases.ok(), releases.first()) {
                 (Some(_), Some((tag, title))) => lines.push(format!(
-                    "First release: {title}{} · {} contain it",
+                    "First release: {title}{} · {} {}",
                     if title != tag {
                         format!(" ({tag})")
                     } else {
                         String::new()
                     },
-                    count(releases.len(), "release", "releases")
+                    count(releases.len(), "release", "releases"),
+                    if releases.len() == 1 {
+                        "contains it"
+                    } else {
+                        "contain it"
+                    }
                 )),
                 (Some(_), None) => lines.push("No published release contains it yet.".to_owned()),
                 (None, _) if repo.github_remote.is_some() => {

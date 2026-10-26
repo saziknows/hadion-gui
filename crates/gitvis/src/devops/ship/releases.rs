@@ -108,7 +108,8 @@ pub fn show(
                 github_remote,
                 ..
             } = repo;
-            kit::scroll_page(ui, "ship_release_form_page", |ui| {
+            let mut offset = devops.ship.scroll_to.take();
+            sui::scroll_page(ui, "ship_release_form_page", &mut offset, |ui| {
                 publish_form(
                     ui,
                     &mut devops.ship,
@@ -817,26 +818,22 @@ fn publish_form(
             },
         );
         // Previous tag.
-        let base = f
-            .prepared
-            .ok()
-            .and_then(|p| p.suggestion.base_tag.clone())
-            .unwrap_or_else(|| "the first commit".to_owned());
-        form::field(
-            ui,
-            "Previous tag",
-            Some(&format!(
-                "Where the notes and the suggestion start. Empty: the latest version tag ({base})."
-            )),
-            |ui| {
-                form::input(
-                    ui,
-                    "ship_form_previous",
-                    &mut f.previous,
-                    form::InputOpts::new(&base).mono(),
-                );
-            },
-        );
+        let base = f.prepared.ok().and_then(|p| p.suggestion.base_tag.clone());
+        let help = match &base {
+            Some(b) => format!(
+                "Where the notes and the suggestion start. Empty: the latest version tag ({b})."
+            ),
+            None => "Where the notes and the suggestion start. Empty: the latest version tag; there is none yet, so the whole history.".to_owned(),
+        };
+        let hint = base.unwrap_or_else(|| "none: the whole history".to_owned());
+        form::field(ui, "Previous tag", Some(&help), |ui| {
+            form::input(
+                ui,
+                "ship_form_previous",
+                &mut f.previous,
+                form::InputOpts::new(&hint).mono(),
+            );
+        });
         if f.prepared_for != (f.target.clone(), f.previous.clone()) && !f.prepared.loading {
             ui.horizontal(|ui| {
                 kit::muted(ui, "Target or previous tag changed:");

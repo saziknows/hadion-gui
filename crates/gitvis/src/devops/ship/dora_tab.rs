@@ -96,18 +96,36 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         };
         if rep.coverage.events == 0 {
             let all = d.events.ok().map(Vec::len).unwrap_or(0);
-            kit::empty_state(
-                ui,
-                Icon::Gauge,
-                "Nothing deployed in this period",
-                &format!(
-                    "{} {} read in total, none in the last {} days. Pick a longer period or another source (a production environment, published releases, version tags or a deploy workflow).",
-                    format::count(all),
-                    if all == 1 { "event was" } else { "events were" },
-                    rep.days
-                ),
-                None,
-            );
+            let other = "Pick another source: a production environment, published releases, version tags or a deploy workflow.";
+            let (title, body) = if all == 0 {
+                let what = match &d.source {
+                    Some(DoraSource::Tags(p)) => format!("No tag matches {p} in this repository."),
+                    Some(DoraSource::Releases) => {
+                        "This repository has no published release.".to_owned()
+                    }
+                    Some(DoraSource::Environment(e)) => {
+                        format!("Nothing was deployed to {e} in the last 240 days.")
+                    }
+                    Some(DoraSource::Workflow(_, n)) => {
+                        format!(
+                            "{n} has no completed run on the default branch in the last 240 days."
+                        )
+                    }
+                    None => String::new(),
+                };
+                ("Nothing to count".to_owned(), format!("{what} {other}"))
+            } else {
+                (
+                    "Nothing deployed in this period".to_owned(),
+                    format!(
+                        "{} {} read, none in the last {} days. Pick a longer period, or another source.",
+                        format::count(all),
+                        if all == 1 { "event was" } else { "events were" },
+                        rep.days
+                    ),
+                )
+            };
+            kit::empty_state(ui, Icon::Gauge, &title, &body, None);
             how(ui, st);
             return;
         }
@@ -349,8 +367,10 @@ fn metrics(ui: &mut Ui, rep: &Report) {
     let w = (avail - 12.0 * (cols as f32 - 1.0)) / cols as f32;
     let freq_value = if rep.per_day >= 1.0 {
         format!("{:.1}/day", rep.per_day)
-    } else {
+    } else if rep.per_week >= 1.0 {
         format!("{:.1}/week", rep.per_week)
+    } else {
+        format!("{:.1}/month", rep.per_day * 30.0)
     };
     let lead_value = rep
         .lead
@@ -599,7 +619,7 @@ fn charts(ui: &mut Ui, rep: &Report) {
         .map(|w| (w.start, w.lead_median.unwrap_or(0) as f64 / 3_600.0, 0.0))
         .collect();
     if lead.iter().any(|v| v.1 > 0.0) {
-        kit::section(ui, "Lead time per week (median, hours)", None);
+        kit::section(ui, "Lead time per week (median)", None);
         week_chart(
             ui,
             "ship_dora_lead",
@@ -617,7 +637,13 @@ fn charts(ui: &mut Ui, rep: &Report) {
                     }
                 )
             },
-            |m| format!("{m:.0} h"),
+            |m| {
+                if m > 96.0 {
+                    format!("{:.0} d", m / 24.0)
+                } else {
+                    format!("{m:.0} h")
+                }
+            },
         );
     }
 }
