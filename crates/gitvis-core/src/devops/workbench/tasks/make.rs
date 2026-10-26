@@ -14,10 +14,19 @@ const BODY_LINES: usize = 8;
 /// Targets of a Makefile: `^target:` lines (several per line allowed),
 /// without special targets (`.PHONY`), pattern rules (`%.o`), variable
 /// references or assignments. The description comes from a `## text`
-/// after the prerequisites or on the line above.
+/// after the prerequisites or on the line above. File targets
+/// (`out/Makefile`, `config.gypi`) are left out unless they are phony or
+/// documented.
 pub fn makefile(dir: &str, file: &str, text: &str) -> Vec<Task> {
     let lines: Vec<&str> = text.lines().collect();
-    let mut phony: HashSet<String> = HashSet::new();
+    // `.PHONY` lines anywhere in the file, before the targets are read.
+    let phony: HashSet<String> = lines
+        .iter()
+        .filter_map(|l| l.strip_prefix(".PHONY"))
+        .filter_map(|l| l.trim_start().strip_prefix(':'))
+        .flat_map(|l| l.split('#').next().unwrap_or("").split_whitespace())
+        .map(str::to_owned)
+        .collect();
     let mut seen: HashSet<String> = HashSet::new();
     let mut out = Vec::new();
     let mut in_define = 0usize;
@@ -57,7 +66,6 @@ pub fn makefile(dir: &str, file: &str, text: &str) -> Vec<Task> {
         };
         let prereqs = prereqs.split(';').next().unwrap_or("").trim();
         if targets.trim() == ".PHONY" {
-            phony.extend(prereqs.split_whitespace().map(str::to_owned));
             continue;
         }
         let desc = inline_desc.filter(|d| !d.is_empty()).or_else(|| {
@@ -78,6 +86,11 @@ pub fn makefile(dir: &str, file: &str, text: &str) -> Vec<Task> {
                 || target.contains('%')
                 || target.contains('$')
                 || target.contains('(')
+                // `a b &: deps` (grouped targets).
+                || target == "&"
+                || ((target.contains('/') || target.contains('.'))
+                    && !phony.contains(target)
+                    && desc.is_none())
                 || !seen.insert(target.to_owned())
             {
                 continue;
@@ -100,12 +113,6 @@ pub fn makefile(dir: &str, file: &str, text: &str) -> Vec<Task> {
                 .tool(Tool::Make)
                 .body(body.join("\n")),
             );
-        }
-    }
-    // Phony targets are the commands people run; mention it.
-    for t in &mut out {
-        if phony.contains(&t.name) && t.description.is_empty() {
-            t.description = "Phony target".to_owned();
         }
     }
     out
@@ -456,6 +463,12 @@ clean distclean:
 $(OUT)/x: y
 \ttouch $@
 
+out/Makefile: config.gypi
+\tpython configure
+
+docs/api.html: ## Build the API page
+\tmake-docs
+
 define HELP_TEXT
 not: a target
 endef
@@ -470,7 +483,15 @@ install:: build
         let names: Vec<&str> = t.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(
             names,
-            vec!["all", "build", "test", "clean", "distclean", "install"]
+            vec![
+                "all",
+                "build",
+                "test",
+                "clean",
+                "distclean",
+                "docs/api.html",
+                "install"
+            ]
         );
         assert_eq!(t[0].description, "Build everything");
         assert_eq!(t[0].line, Some(9));
@@ -482,7 +503,7 @@ install:: build
         assert_eq!(t[2].description, "Depends on build");
         assert_eq!(t[3].command_line(&[]), "make clean");
         assert_eq!(t[3].line, t[4].line);
-        assert_eq!(t[5].line, Some(31));
+        assert_eq!(t[6].line, Some(37));
     }
 
     #[test]

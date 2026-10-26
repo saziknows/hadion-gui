@@ -259,9 +259,12 @@ pub fn add_args(path: &str, mode: &AddMode) -> Vec<String> {
     v
 }
 
-pub fn remove_args(path: &str, force: bool) -> Vec<String> {
+/// `git worktree remove`: `--force` once for a worktree with changes,
+/// twice for a locked one (git's rule).
+pub fn remove_args(path: &str, dirty: bool, locked: bool) -> Vec<String> {
     let mut v = vec!["worktree".to_owned(), "remove".to_owned()];
-    if force {
+    let n = if locked { 2 } else { dirty as usize };
+    for _ in 0..n {
         v.push("--force".to_owned());
     }
     v.push(path.to_owned());
@@ -469,8 +472,16 @@ u UU N... 100644 100644 100644 100644 aaaa bbbb cccc conflict.rs
             vec!["worktree", "add", "--detach", "p", "HEAD"]
         );
         assert_eq!(
-            remove_args("p", true),
+            remove_args("p", true, false),
             vec!["worktree", "remove", "--force", "p"]
+        );
+        assert_eq!(
+            remove_args("p", false, true),
+            vec!["worktree", "remove", "--force", "--force", "p"]
+        );
+        assert_eq!(
+            remove_args("p", false, false),
+            vec!["worktree", "remove", "p"]
         );
         assert_eq!(
             lock_args("p", " on a USB disk "),

@@ -20,7 +20,7 @@ use std::time::Instant;
 use crate::devops::proc::{ProcSpec, render_args};
 use crate::devops::tools::Tool;
 
-pub use cargo::{cargo_aliases, cargo_tasks};
+pub use cargo::{CargoScan, cargo_aliases, cargo_tasks};
 pub use make::{justfile, makefile, taskfile};
 pub use node::{
     PackageManager, composer, deno, json_member_lines, package_manager, package_scripts,
@@ -760,5 +760,38 @@ mod tests {
         assert!(d.project("").unwrap().workspace);
         assert!(d.problems.is_empty(), "{:?}", d.problems);
         assert!(d.dirs_scanned >= 3);
+    }
+}
+
+/// `GITVIS_DISCOVER=<dir> cargo test -p gitvis-core --lib print_discovery
+/// -- --ignored --nocapture` prints what the Tasks page would list.
+#[cfg(test)]
+#[test]
+#[ignore]
+fn print_discovery() {
+    let Some(dir) = std::env::var_os("GITVIS_DISCOVER") else {
+        return;
+    };
+    let d = discover(Path::new(&dir));
+    println!(
+        "{} tasks, {} projects, {} dirs, {} files, {} ms",
+        d.tasks.len(),
+        d.projects.len(),
+        d.dirs_scanned,
+        d.files_read,
+        d.elapsed_ms
+    );
+    for p in &d.problems {
+        println!("problem {}: {}", p.file, p.message);
+    }
+    for t in &d.tasks {
+        println!(
+            "{:<40} {:<45} {}:{} {}",
+            t.id,
+            t.command_line(&[]),
+            t.file,
+            t.line.map(|l| l.to_string()).unwrap_or_default(),
+            t.description
+        );
     }
 }

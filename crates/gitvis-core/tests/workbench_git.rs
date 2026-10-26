@@ -402,7 +402,7 @@ fn worktrees_list_lock_and_remove() {
     assert!(cmds.iter().any(|c| c.starts_with("git -C ")));
 
     f.git(&["worktree", "unlock", &path]);
-    let rm = worktrees::remove_args(&path, true);
+    let rm = worktrees::remove_args(&path, true, false);
     let rm: Vec<&str> = rm.iter().map(String::as_str).collect();
     f.git(&rm);
     assert!(!wt.exists());

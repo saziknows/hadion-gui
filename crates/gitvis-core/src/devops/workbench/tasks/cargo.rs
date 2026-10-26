@@ -175,13 +175,18 @@ fn package_tasks(dir: &str, pkg: &Package, in_workspace: bool) -> Vec<Task> {
     out
 }
 
+/// What a Cargo.toml yields.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CargoScan {
+    pub tasks: Vec<Task>,
+    /// Workspace members: `(directory, package name)`.
+    pub members: Vec<(String, String)>,
+    pub workspace: bool,
+}
+
 /// Tasks of a Cargo.toml in `dir` (relative to `root`) plus its workspace
 /// members, and the directories they cover.
-pub fn cargo_tasks(
-    root: &Path,
-    dir: &str,
-    text: &str,
-) -> Result<(Vec<Task>, Vec<(String, String)>, bool), String> {
+pub fn cargo_tasks(root: &Path, dir: &str, text: &str) -> Result<CargoScan, String> {
     let t = toml::parse(text).map_err(|e| format!("Not valid TOML: {e}"))?;
     let file = join_rel(dir, "Cargo.toml");
     let abs = if dir.is_empty() {
@@ -247,7 +252,11 @@ pub fn cargo_tasks(
     } else if let Some(pkg) = package(&t, &abs, dir) {
         tasks.extend(package_tasks(dir, &pkg, false));
     }
-    Ok((tasks, members, workspace.is_some()))
+    Ok(CargoScan {
+        tasks,
+        members,
+        workspace: workspace.is_some(),
+    })
 }
 
 /// `[alias]` of a `.cargo/config.toml`: `cargo NAME` running the
@@ -287,7 +296,11 @@ pub(crate) fn scan(root: &Path, info: &DirInfo, found: &mut Found) -> Vec<String
         let file = info.rel_file("Cargo.toml");
         if let Some(text) = found.read(root, &file) {
             match cargo_tasks(root, &info.rel, &text) {
-                Ok((tasks, members, workspace)) => {
+                Ok(CargoScan {
+                    tasks,
+                    members,
+                    workspace,
+                }) => {
                     covered.push(info.rel.clone());
                     if workspace {
                         found.project(&info.rel).workspace = true;
@@ -352,7 +365,11 @@ mod tests {
         .file("crates/skip/Cargo.toml", "[package]\nname = \"skip\"\n")
         .file(".cargo/config.toml", "[alias]\nxt = \"run -p xtask --\"\nb = [\"build\", \"--release\"]\n");
         let text = std::fs::read_to_string(t.path().join("Cargo.toml")).unwrap();
-        let (tasks, members, ws) = cargo_tasks(t.path(), "", &text).unwrap();
+        let CargoScan {
+            tasks,
+            members,
+            workspace: ws,
+        } = cargo_tasks(t.path(), "", &text).unwrap();
         assert!(ws);
         assert_eq!(
             members,
@@ -410,7 +427,11 @@ mod tests {
         )
         .file("src/main.rs", "fn main() {}");
         let text = std::fs::read_to_string(t.path().join("Cargo.toml")).unwrap();
-        let (tasks, members, ws) = cargo_tasks(t.path(), "", &text).unwrap();
+        let CargoScan {
+            tasks,
+            members,
+            workspace: ws,
+        } = cargo_tasks(t.path(), "", &text).unwrap();
         assert!(!ws);
         assert!(members.is_empty());
         let cmds: Vec<String> = tasks.iter().map(|t| t.command_line(&[])).collect();
