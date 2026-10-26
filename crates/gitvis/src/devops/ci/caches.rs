@@ -120,13 +120,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
             });
             ui.add_space(space::S);
             if load.ok().is_none() {
-                widgets::loaded(
-                    ui,
-                    load,
-                    "Loading the caches…",
-                    Act::Refresh(super::Tab::Caches).into(),
-                    actions,
-                );
+                widgets::list_state(ui, load, "the caches", "Loading the caches…");
                 return;
             }
             if items.is_empty() {
@@ -220,6 +214,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                 widgets::loaded(
                     ui,
                     load,
+                    "the caches",
                     "Loading the caches…",
                     Act::Refresh(super::Tab::Caches).into(),
                     actions,

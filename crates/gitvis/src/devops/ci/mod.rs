@@ -201,7 +201,7 @@ pub struct CompareState {
     pub good: Option<WorkflowRun>,
     /// Why there is no green run to compare with.
     pub missing: Option<String>,
-    pub report: Load<CompareReport>,
+    pub report: Load<Box<CompareReport>>,
     pub job: usize,
     /// API calls spent finding the green run.
     pub lookup_calls: usize,
@@ -357,8 +357,8 @@ pub struct State {
     pub artifact_scope: ArtifactScope,
     pub artifact_selected: Option<u64>,
     pub artifact_busy: HashSet<u64>,
-    /// Console runs of downloads, by artifact id.
-    pub downloads: HashMap<u64, u64>,
+    /// Console runs of downloads and their folders, by artifact id.
+    pub downloads: HashMap<u64, (u64, PathBuf)>,
     // Caches tab.
     pub caches: Load<CacheList>,
     pub cache_sort: CacheSort,
@@ -379,6 +379,9 @@ pub struct State {
     pub act: ActState,
     /// A script command waiting for data (the workflow files).
     pub pending: Option<ScriptCmd>,
+    /// A section to scroll to on the next frame (`jobs`, `flaky`,
+    /// `branches`, `runs`), for the script driver.
+    pub scroll_to: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -473,7 +476,7 @@ pub enum Act {
     ListActJobs,
     PickSecretFile,
     ClearSecretFile,
-    RunAct,
+    RunLocally,
     ShowActRun(Option<u64>),
     // Script driver.
     Script(ScriptCmd),
@@ -531,6 +534,17 @@ pub enum ScriptCmd {
     AskRerunFailedPicked,
     AskDeleteRun,
     AskRerunDebug,
+    /// Re-run the N-th job of the selected run (stops at the confirmation).
+    AskRerunJob(usize),
+    /// Point the Run locally form at the N-th job.
+    ActJob(usize),
+    /// Scroll the workflow detail to a section.
+    ScrollTo(String),
+    /// The dispatch form's "Run workflow…" (stops at the confirmation).
+    AskDispatch,
+    /// Delete the selected artifact or cache / ref, or disable the selected
+    /// workflow (stops at the confirmation).
+    AskDelete,
     DownloadArtifact(usize, PathBuf),
 }
 
@@ -554,11 +568,11 @@ pub enum Msg {
     },
     GreenFound {
         bad: u64,
-        result: Result<Option<WorkflowRun>, String>,
+        result: Result<Option<Box<WorkflowRun>>, String>,
     },
     Compared {
         bad: u64,
-        result: Result<CompareReport, String>,
+        result: Result<Box<CompareReport>, String>,
     },
     Local(Result<LocalInfo, String>),
     History {
@@ -594,8 +608,8 @@ pub enum Msg {
         failed: usize,
     },
     PrStates(Result<HashMap<u64, String>, String>),
-    Linted(LintRun),
-    Tools(Tools),
+    Linted(Box<LintRun>),
+    Tools(Box<Tools>),
     ActList(Result<Vec<ActJob>, String>),
 }
 
@@ -848,10 +862,11 @@ pub fn on_page_shown(cx: &mut Ctx, repo: &mut RepoState) {
 
 /// `GITVIS_SCRIPT` commands this area understands: `actions-tab NAME`,
 /// `workflow N`, `dispatch N`, `select-runs N`, `compare`, `analyse-jobs`,
-/// `validate`, `act`, plus `artifact N`, `cache N`, `cache-refs`,
+/// `validate`, `act`, plus `act-job N`, `ci-scroll SECTION`, `artifact N`,
+/// `cache N`, `cache-refs`,
 /// `lint-file N`, `cancel-picked`, `rerun-picked`, `delete-run`,
-/// `rerun-debug` (these stop at their confirmation) and
-/// `download-artifact N DIR`.
+/// `rerun-debug`, `rerun-job N`, `ask-dispatch`, `ask-delete`, `ask-delete-closed` (these
+/// stop at their confirmation), `check-prs` and `download-artifact N DIR`.
 pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
     use crate::state::Page;
     let page = Action::ShowPage(Page::GitHub);
@@ -867,6 +882,8 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         "analyse-jobs" | "analyze-jobs" => vec![page, s(ScriptCmd::AnalyseJobs)],
         "validate" => vec![page, tab(Tab::Validate), Act::Validate.into()],
         "act" => vec![page, tab(Tab::Local), s(ScriptCmd::Act)],
+        "act-job" => vec![page, tab(Tab::Local), s(ScriptCmd::ActJob(n()?))],
+        "ci-scroll" => vec![s(ScriptCmd::ScrollTo(arg.trim().to_owned()))],
         "artifact" => vec![page, tab(Tab::Artifacts), s(ScriptCmd::Artifact(n()?))],
         "cache" => vec![page, tab(Tab::Caches), s(ScriptCmd::Cache(n()?))],
         "cache-refs" => vec![page, tab(Tab::Caches), s(ScriptCmd::CacheRefs)],
@@ -875,6 +892,11 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         "rerun-picked" => vec![page, s(ScriptCmd::AskRerunFailedPicked)],
         "delete-run" => vec![page, s(ScriptCmd::AskDeleteRun)],
         "rerun-debug" => vec![page, s(ScriptCmd::AskRerunDebug)],
+        "rerun-job" => vec![page, s(ScriptCmd::AskRerunJob(n()?))],
+        "ask-dispatch" => vec![page, s(ScriptCmd::AskDispatch)],
+        "ask-delete" => vec![page, s(ScriptCmd::AskDelete)],
+        "check-prs" => vec![page, tab(Tab::Caches), Act::CheckPrStates.into()],
+        "ask-delete-closed" => vec![page, tab(Tab::Caches), Act::AskDeleteClosedPrCaches.into()],
         "download-artifact" => {
             let (i, dir) = arg.trim().split_once(' ')?;
             vec![

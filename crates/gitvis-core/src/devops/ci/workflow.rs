@@ -165,12 +165,13 @@ pub fn parse(path: &str, text: &str) -> WorkflowFile {
     if let Some(on) = get_on(m) {
         wf.triggers = triggers(on);
         wf.dispatch = dispatch_inputs(on);
-        if let Some(sched) = mapping(on).and_then(|o| get(o, "schedule")) {
-            if let Some(items) = super::yaml::sequence(sched) {
-                for it in items {
-                    if let Some(c) = mapping(it).and_then(|i| get(i, "cron")).and_then(scalar) {
-                        wf.schedules.push(c);
-                    }
+        if let Some(items) = mapping(on)
+            .and_then(|o| get(o, "schedule"))
+            .and_then(super::yaml::sequence)
+        {
+            for it in items {
+                if let Some(c) = mapping(it).and_then(|i| get(i, "cron")).and_then(scalar) {
+                    wf.schedules.push(c);
                 }
             }
         }
@@ -290,10 +291,8 @@ pub fn validate_values(
                     errs.push((i.name.clone(), format!("{} must be a number", i.name)));
                 }
             }
-            InputKind::Boolean => {
-                if v != "true" && v != "false" {
-                    errs.push((i.name.clone(), format!("{} must be true or false", i.name)));
-                }
+            InputKind::Boolean if v != "true" && v != "false" => {
+                errs.push((i.name.clone(), format!("{} must be true or false", i.name)));
             }
             _ => {}
         }

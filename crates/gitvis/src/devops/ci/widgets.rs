@@ -22,8 +22,14 @@ pub fn pct(x: f64) -> String {
     format!("{:.0}%", x * 100.0)
 }
 
+/// `640 B`, `12.3 KB`, `1.5 MB`, `4.50 GB`.
 pub fn bytes(n: u64) -> String {
-    format::bytes(n as usize)
+    const GB: u64 = 1024 * 1024 * 1024;
+    if n >= GB {
+        format!("{:.2} GB", n as f64 / GB as f64)
+    } else {
+        format::bytes(n as usize)
+    }
 }
 
 /// `2026-10-26 16:46 · 1h ago`.
@@ -81,6 +87,7 @@ pub fn outcome_color(p: &Palette, o: Outcome) -> Color32 {
 pub fn loaded<'a, T>(
     ui: &mut Ui,
     load: &'a Load<T>,
+    what: &str,
     loading_text: &str,
     retry: Action,
     actions: &mut Vec<Action>,
@@ -93,7 +100,16 @@ pub fn loaded<'a, T>(
                 return None;
             }
             let mut again = false;
-            kit::callout_with(ui, Tone::Danger, "Could not load this", e, |ui| {
+            let mut body = e.clone();
+            if e.contains("(HTTP 5") {
+                body.push_str(
+                    "
+
+GitHub answered with a server error; it does that when a listing is very large or the service is busy. Retry in a moment.",
+                );
+            }
+            let title = format!("Could not load {what}");
+            kit::callout_with(ui, Tone::Danger, &title, &body, |ui| {
                 ui.add_space(2.0);
                 again = IconButton::new(Icon::Fetch, "Retry")
                     .compact()
@@ -123,6 +139,21 @@ pub fn loaded<'a, T>(
             }
             None
         }
+    }
+}
+
+/// The state of a list pane while its data is not there: a spinner, or a
+/// pointer to the error shown in the detail pane.
+pub fn list_state<T>(ui: &mut Ui, load: &Load<T>, what: &str, loading_text: &str) {
+    if load.loading {
+        kit::loading(ui, loading_text);
+    } else if load.err().is_some() {
+        kit::muted(
+            ui,
+            &format!("Could not load {what}; the error and a retry are on the right."),
+        );
+    } else {
+        kit::muted(ui, "Not loaded yet.");
     }
 }
 
@@ -297,7 +328,17 @@ pub fn duration_chart(ui: &mut Ui, runs: &[&WorkflowRun], now: i64, actions: &mu
         .iter()
         .map(|r| r.duration_secs(now).unwrap_or(0))
         .collect();
-    let max = durations.iter().copied().max().unwrap_or(1).max(1) as f32;
+    let longest = durations.iter().copied().max().unwrap_or(1).max(1);
+    // A few very long runs (a stuck job) would flatten every other bar:
+    // scale to the bulk of the runs and clip the outliers.
+    let p90 = gitvis_core::devops::ci::history::percentile(&durations, 90.0).unwrap_or(longest);
+    let scale = if p90 > 0 && longest > p90 * 4 {
+        (p90 * 2).max(1)
+    } else {
+        longest
+    };
+    let clipped = durations.iter().filter(|d| **d > scale).count();
+    let max = scale as f32;
     // Grid: zero, half, max.
     let mut grid = vec![
         (0.0f32, "0s".to_owned()),
@@ -325,7 +366,8 @@ pub fn duration_chart(ui: &mut Ui, runs: &[&WorkflowRun], now: i64, actions: &mu
     let mut hovered: Option<usize> = None;
     for (i, (r, d)) in runs.iter().zip(&durations).enumerate() {
         let x0 = plot.left() + i as f32 * slot + (slot - bar_w) / 2.0;
-        let h = (*d as f32 / max * plot.height()).max(2.0);
+        let over = *d > scale;
+        let h = (*d as f32 / max * plot.height()).clamp(2.0, plot.height());
         let bar = Rect::from_min_max(pos2(x0, plot.bottom() - h), pos2(x0 + bar_w, plot.bottom()));
         let col_rect = Rect::from_min_max(
             pos2(plot.left() + i as f32 * slot, plot.top()),
@@ -342,6 +384,14 @@ pub fn duration_chart(ui: &mut Ui, runs: &[&WorkflowRun], now: i64, actions: &mu
             CornerRadius::same(if bar_w > 4.0 { 2 } else { 0 }),
             if is_hover { c } else { c.gamma_multiply(0.85) },
         );
+        if over {
+            // A break mark: the bar goes on beyond the scale.
+            let y = plot.top() + 7.0;
+            painter.line_segment(
+                [pos2(x0 - 1.0, y + 2.0), pos2(x0 + bar_w + 1.0, y - 2.0)],
+                Stroke::new(2.5, p.canvas),
+            );
+        }
     }
     // Median of finished runs.
     let finished: Vec<i64> = runs
@@ -360,10 +410,28 @@ pub fn duration_chart(ui: &mut Ui, runs: &[&WorkflowRun], now: i64, actions: &mu
             );
             x += 9.0;
         }
-        painter.text(
-            pos2(plot.right() - 2.0, y - 3.0),
-            Align2::RIGHT_BOTTOM,
+        let g = painter.layout_no_wrap(
             format!("median {}", format::duration(m)),
+            FontId::proportional(size::CAPTION),
+            p.text_2,
+        );
+        let at = pos2(plot.right() - g.size().x - 6.0, y - g.size().y - 4.0);
+        painter.rect_filled(
+            Rect::from_min_size(at - vec2(4.0, 1.0), g.size() + vec2(8.0, 2.0)),
+            CornerRadius::same(3),
+            p.canvas.gamma_multiply(0.9),
+        );
+        painter.galley(at, g, p.text_2);
+    }
+    if clipped > 0 {
+        painter.text(
+            pos2(plot.center().x, plot.bottom() + 4.0 + label_h / 2.0),
+            Align2::CENTER_CENTER,
+            format!(
+                "{} beyond the scale, the longest {}",
+                format::plural(clipped, "run", "runs"),
+                format::duration(longest)
+            ),
             FontId::proportional(size::CAPTION),
             p.text_2,
         );

@@ -140,6 +140,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         analysis,
         dispatch,
         wf_busy,
+        scroll_to,
         ..
     } = &mut devops.ci;
     let list = entries_from(github.as_ref(), local.ok());
@@ -187,6 +188,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                     applied: wf_branch_applied,
                     busy: e.id.is_some_and(|id| wf_busy.contains(&id)),
                     refs: &refs,
+                    scroll: scroll_to,
                     current: current.as_deref(),
                     now,
                     t,
@@ -363,6 +365,7 @@ struct DetailCx<'a> {
     applied: &'a str,
     busy: bool,
     refs: &'a (Vec<String>, Vec<String>),
+    scroll: &'a mut Option<String>,
     current: Option<&'a str>,
     now: i64,
     t: f64,
@@ -507,7 +510,14 @@ fn detail(ui: &mut Ui, e: &Entry, cx: DetailCx, actions: &mut Vec<Action>) {
         force: true,
     }
     .into();
-    let Some(h) = widgets::loaded(ui, load, "Loading the last 100 runs…", retry, actions) else {
+    let Some(h) = widgets::loaded(
+        ui,
+        load,
+        "the run history",
+        "Loading the last 100 runs…",
+        retry,
+        actions,
+    ) else {
         return;
     };
     if h.runs.is_empty() {
@@ -521,7 +531,16 @@ fn detail(ui: &mut Ui, e: &Entry, cx: DetailCx, actions: &mut Vec<Action>) {
         );
         return;
     }
-    history_sections(ui, id, h, cx.analysis.get(&key), cx.now, cx.t, actions);
+    history_sections(
+        ui,
+        id,
+        h,
+        cx.analysis.get(&key),
+        cx.scroll,
+        cx.now,
+        cx.t,
+        actions,
+    );
 }
 
 fn branch_filter(ui: &mut Ui, branch: &mut String, applied: &str, actions: &mut Vec<Action>) {
@@ -564,11 +583,21 @@ fn branch_filter(ui: &mut Ui, branch: &mut String, applied: &str, actions: &mut 
     });
 }
 
+/// Scroll here when the script driver asked for this section.
+fn anchor(ui: &mut Ui, scroll: &mut Option<String>, name: &str) {
+    if scroll.as_deref() == Some(name) {
+        ui.scroll_to_cursor(Some(egui::Align::TOP));
+        *scroll = None;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn history_sections(
     ui: &mut Ui,
     workflow: u64,
     h: &History,
     analysis: Option<&Load<Analysis>>,
+    scroll: &mut Option<String>,
     now: i64,
     t: f64,
     actions: &mut Vec<Action>,
@@ -621,6 +650,7 @@ fn history_sections(
     widgets::duration_chart(ui, &chrono, now, actions);
     widgets::outcome_legend(ui);
 
+    anchor(ui, scroll, "flaky");
     flaky_section(ui, h, now, t, actions);
 
     let rows = |groups: Vec<history::Group>| -> Vec<Vec<String>> {
@@ -651,6 +681,7 @@ fn history_sections(
             Col::num("Median"),
         ]
     };
+    anchor(ui, scroll, "branches");
     let branches = history::by_branch(&h.runs);
     kit::section(ui, "By branch", Some(branches.len()));
     kit::table(ui, &cols("Branch"), &rows(branches));
@@ -658,8 +689,10 @@ fn history_sections(
     kit::section(ui, "By event", Some(events.len()));
     kit::table(ui, &cols("Event"), &rows(events));
 
+    anchor(ui, scroll, "jobs");
     jobs_section(ui, workflow, h, analysis, actions);
 
+    anchor(ui, scroll, "runs");
     kit::section(ui, "Latest runs", Some(h.runs.len().min(15)));
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
@@ -764,14 +797,11 @@ fn jobs_section(
         } else if !picked.is_empty()
             && IconButton::new(
                 Icon::Chart,
-                &format!(
-                    "{} jobs ({calls} API calls)",
-                    if analysis.and_then(|a| a.ok()).is_some() {
-                        "Analyse again"
-                    } else {
-                        "Analyse"
-                    }
-                ),
+                &if analysis.and_then(|a| a.ok()).is_some() {
+                    format!("Analyse jobs again ({calls} API calls)")
+                } else {
+                    format!("Analyse jobs ({calls} API calls)")
+                },
             )
             .compact()
             .show(ui)
@@ -852,7 +882,14 @@ fn jobs_section(
                     .unwrap_or_else(|| "—".to_owned()),
                 j.slowest_step
                     .as_ref()
-                    .map(|(n, m, _)| format!("{n} ({})", format::duration(*m)))
+                    .map(|(n, m, _)| {
+                        let n: String = if n.chars().count() > 44 {
+                            format!("{}…", n.chars().take(43).collect::<String>())
+                        } else {
+                            n.clone()
+                        };
+                        format!("{n} ({})", format::duration(*m))
+                    })
                     .unwrap_or_else(|| "—".to_owned()),
             ]
         })

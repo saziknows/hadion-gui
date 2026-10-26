@@ -94,12 +94,11 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
         actions,
         |ui, actions| {
             let Some(run) = load.ok() else {
-                widgets::loaded(
+                widgets::list_state(
                     ui,
                     load,
+                    "the workflow files",
                     "Checking the workflow files…",
-                    Act::Validate.into(),
-                    actions,
                 );
                 return;
             };
@@ -212,6 +211,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                 widgets::loaded(
                     ui,
                     load,
+                    "the workflow files",
                     "Checking the workflow files…",
                     Act::Validate.into(),
                     actions,
@@ -264,7 +264,16 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                     run.linted, run.reused, run.elapsed_ms
                 ),
             );
-            actionlint_note(ui, run, actions);
+            if let (Some(Ok(n)), v) = (&run.actionlint, &run.actionlint_version) {
+                widgets::note(
+                    ui,
+                    &format!(
+                        "actionlint {} added {}",
+                        v.as_deref().unwrap_or(""),
+                        format::plural(*n, "finding", "findings")
+                    ),
+                );
+            }
             // Filters.
             ui.add_space(space::S);
             ui.horizontal(|ui| {
@@ -305,7 +314,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                 if list.is_empty() && selected.is_none() {
                     continue;
                 }
-                kit::section(ui, &f.path, Some(list.len()));
+                file_header(ui, &f.path, list.len());
                 if list.is_empty() {
                     kit::muted(
                         ui,
@@ -316,8 +325,12 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                         },
                     );
                 }
+                let lines: Vec<&str> = f.text.lines().collect();
                 for x in list {
-                    finding(ui, x, &workdir, actions);
+                    let src = (x.line > 0)
+                        .then(|| lines.get(x.line as usize - 1).copied())
+                        .flatten();
+                    finding(ui, x, src, &workdir, actions);
                     shown += 1;
                 }
             }
@@ -334,28 +347,32 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                     },
                 );
             }
+            actionlint_note(ui, run, actions);
         },
     );
 }
 
+/// A file's name above its findings (not upper-cased like a section).
+fn file_header(ui: &mut Ui, path: &str, n: usize) {
+    let p = *pal(ui);
+    ui.add_space(space::XL);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        ui.label(kit::mono(path).color(p.text_strong));
+        widgets::note(ui, &format::plural(n, "finding", "findings"));
+    });
+    ui.add_space(space::XS);
+}
+
 fn actionlint_note(ui: &mut Ui, run: &LintRun, actions: &mut Vec<Action>) {
     match (&run.actionlint, &run.actionlint_version) {
-        (Some(Ok(n)), v) => {
-            widgets::note(
-                ui,
-                &format!(
-                    "actionlint {} added {}",
-                    v.as_deref().unwrap_or(""),
-                    format::plural(*n, "finding", "findings")
-                ),
-            );
-        }
+        (Some(Ok(_)), _) => {}
         (Some(Err(e)), _) => {
             kit::callout(ui, Tone::Warning, "actionlint failed", e);
         }
         (None, _) => {
             if !tools::available(Tool::Actionlint) {
-                ui.add_space(4.0);
+                ui.add_space(space::XL);
                 if widgets::tool_missing(
                     ui,
                     Tool::Actionlint,
@@ -369,7 +386,13 @@ fn actionlint_note(ui: &mut Ui, run: &LintRun, actions: &mut Vec<Action>) {
     }
 }
 
-fn finding(ui: &mut Ui, f: &Finding, workdir: &std::path::Path, actions: &mut Vec<Action>) {
+fn finding(
+    ui: &mut Ui,
+    f: &Finding,
+    src: Option<&str>,
+    workdir: &std::path::Path,
+    actions: &mut Vec<Action>,
+) {
     let p = *pal(ui);
     let c = tone(f.severity).color(&p);
     let edge = match f.severity {
@@ -405,6 +428,15 @@ fn finding(ui: &mut Ui, f: &Finding, workdir: &std::path::Path, actions: &mut Ve
             ui.add(
                 egui::Label::new(RichText::new(&f.message).size(size::BODY).color(p.text)).wrap(),
             );
+            if let Some(line) = src.filter(|l| !l.trim().is_empty()) {
+                let shown: String = line.chars().take(160).collect();
+                ui.add(
+                    egui::Label::new(
+                        kit::mono(format!("{:>4} │ {}", f.line, shown.trim_end())).color(p.text_2),
+                    )
+                    .truncate(),
+                );
+            }
             if !f.hint.is_empty() {
                 ui.add(
                     egui::Label::new(RichText::new(&f.hint).size(size::SMALL).color(p.text_2))

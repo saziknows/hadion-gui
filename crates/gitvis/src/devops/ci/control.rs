@@ -224,7 +224,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             }
         }
         Act::ClearSecretFile => repo.devops.ci.act.secret_file = None,
-        Act::RunAct => run_act(cx, repo),
+        Act::RunLocally => run_act(cx, repo),
         Act::ShowActRun(id) => repo.devops.ci.act.shown = id,
         Act::Script(cmd) => run_script(cx, repo, cmd),
     }
@@ -323,6 +323,7 @@ fn pick(repo: &mut RepoState, run: u64, mode: PickMode) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn confirm_runs(
     cx: &mut Ctx,
     title: String,
@@ -829,6 +830,7 @@ fn compare_open(cx: &mut Ctx, repo: &mut RepoState, bad: u64, auto_start: bool) 
             move |gh, log| Msg::GreenFound {
                 bad,
                 result: core::fetch_last_green(gh, &bad_run, &mut log.calls)
+                    .map(|g| g.map(Box::new))
                     .map_err(|e| e.to_string()),
             },
         );
@@ -900,7 +902,7 @@ fn compare_start(cx: &mut Ctx, repo: &mut RepoState) {
     );
     let ok = cx.gh_read(label, move |gh, log| {
         let started = Instant::now();
-        let result = compare_task(gh, log, &good, &bad, bad_jobs, started);
+        let result = compare_task(gh, log, &good, &bad, bad_jobs, started).map(Box::new);
         Msg::Compared {
             bad: bad_id,
             result,
@@ -1465,11 +1467,11 @@ fn download_artifact(cx: &mut Ctx, repo: &mut RepoState, id: u64, dir: Option<Pa
         format!(
             "Download {} ({})",
             a.name,
-            format::bytes(a.size_in_bytes as usize)
+            super::widgets::bytes(a.size_in_bytes)
         ),
         spec,
     );
-    repo.devops.ci.downloads.insert(id, console);
+    repo.devops.ci.downloads.insert(id, (console, dir));
 }
 
 fn ask_delete_artifact(cx: &mut Ctx, repo: &RepoState, id: u64) {
@@ -1487,7 +1489,7 @@ fn ask_delete_artifact(cx: &mut Ctx, repo: &RepoState, id: u64) {
         format!("Delete the artifact {}?", a.name),
         format!(
             "{} from {run}{} is deleted for good; the run keeps its logs.",
-            format::bytes(a.size_in_bytes as usize),
+            super::widgets::bytes(a.size_in_bytes),
             if a.branch().is_empty() {
                 String::new()
             } else {
@@ -1553,7 +1555,7 @@ fn ask_delete_cache(cx: &mut Ctx, repo: &RepoState, id: u64) {
             "{} on {} ({}). The next run with this key starts without it and saves a new one.",
             c.key,
             c.git_ref,
-            format::bytes(c.size_in_bytes as usize)
+            super::widgets::bytes(c.size_in_bytes)
         ),
         "Delete cache",
         true,
@@ -1580,7 +1582,7 @@ fn ask_delete_cache_key(cx: &mut Ctx, repo: &RepoState, key: &str, git_ref: &str
         format!(
             "{key} on {git_ref}: {} listed ({}), every version.",
             plural(hit.len(), "cache", "caches"),
-            format::bytes(bytes as usize)
+            super::widgets::bytes(bytes)
         ),
         "Delete caches",
         true,
@@ -1623,7 +1625,7 @@ fn ask_delete_refs(cx: &mut Ctx, repo: &RepoState, refs: &[String], why: Option<
     let mut body = format!(
         "{} ({}) on {}: ",
         plural(count, "cache", "caches"),
-        format::bytes(bytes as usize),
+        super::widgets::bytes(bytes),
         plural(refs_set.len(), "ref", "refs")
     );
     let shown: Vec<String> = refs_set.iter().take(8).map(|r| (*r).clone()).collect();
@@ -1726,7 +1728,12 @@ fn validate(cx: &mut Ctx, repo: &mut RepoState) {
         .unwrap_or_default();
     let ok = cx.read("Validate the workflow files", move |dir, log| {
         log.command("lint .github/workflows/*.yml, *.yaml (built-in rules)");
-        Msg::Linted(core::lint_workdir(dir, &previous, true, &mut log.commands))
+        Msg::Linted(Box::new(core::lint_workdir(
+            dir,
+            &previous,
+            true,
+            &mut log.commands,
+        )))
     });
     if !ok {
         repo.devops.ci.lint.loading = false;
@@ -1755,11 +1762,11 @@ fn check_tools(cx: &mut Ctx, repo: &mut RepoState) {
                 .map(|c| c.success() && !c.stdout_text().trim().is_empty())
                 .unwrap_or(false)
         });
-        Msg::Tools(Tools {
+        Msg::Tools(Box::new(Tools {
             act,
             docker,
             docker_running,
-        })
+        }))
     });
     if !ok {
         repo.devops.ci.act.tools.loading = false;
@@ -1934,7 +1941,7 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
             c.finding = false;
             match result {
                 Ok(Some(g)) => {
-                    c.good = Some(g);
+                    c.good = Some(*g);
                     if c.auto_start {
                         compare_start(cx, repo);
                     }
@@ -2067,13 +2074,13 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
         Msg::PrStates(result) => repo.devops.ci.pr_states.finish(result),
         Msg::Linted(run) => {
             let ci = &mut repo.devops.ci;
-            ci.lint.finish(Ok(run));
+            ci.lint.finish(Ok(*run));
             ci.lint_changed.clear();
             ci.lint_polled = Some(Instant::now());
         }
         Msg::Tools(t) => {
             let has_act = t.act.is_some();
-            repo.devops.ci.act.tools.finish(Ok(t));
+            repo.devops.ci.act.tools.finish(Ok(*t));
             if has_act {
                 repo.devops.ci.act.list = Default::default();
                 list_act_jobs(cx, repo);
@@ -2195,6 +2202,53 @@ fn run_script(cx: &mut Ctx, repo: &mut RepoState, cmd: ScriptCmd) {
                 ask_rerun(cx, repo, run, failed, true);
             }
         }
+        ScriptCmd::ActJob(n) => {
+            if repo.devops.ci.local.ok().is_none() {
+                repo.devops.ci.pending = Some(cmd);
+                if repo.devops.ci.local.unloaded() {
+                    load_local(cx, repo);
+                }
+                return;
+            }
+            let jobs = super::local::jobs(repo);
+            if let Some(j) = jobs.get(n) {
+                super::local::pick(&mut repo.devops.ci.act, j);
+            }
+        }
+        ScriptCmd::ScrollTo(s) => repo.devops.ci.scroll_to = Some(s),
+        ScriptCmd::AskRerunJob(n) => {
+            let Some(run) = repo.gh_page.selected_run else {
+                return;
+            };
+            let job = repo
+                .gh_page
+                .runs
+                .get(&run)
+                .and_then(|d| d.jobs().get(n))
+                .map(|j| (j.id, j.name.clone()));
+            if let Some((job, name)) = job {
+                ask_rerun_job(cx, repo, run, job, &name, false);
+            }
+        }
+        ScriptCmd::AskDispatch => ask_dispatch(cx, repo),
+        ScriptCmd::AskDelete => match repo.devops.ci.tab {
+            Tab::Artifacts => {
+                if let Some(id) = repo.devops.ci.artifact_selected {
+                    ask_delete_artifact(cx, repo, id);
+                }
+            }
+            Tab::Caches => match repo.devops.ci.cache_selected.clone() {
+                Some(CacheSel::Entry(id)) => ask_delete_cache(cx, repo, id),
+                Some(CacheSel::Ref(r)) => ask_delete_refs(cx, repo, &[r], None),
+                None => {}
+            },
+            Tab::Workflows => {
+                if let Some(id) = selected_workflow_id(repo) {
+                    ask_toggle_workflow(cx, repo, id, false);
+                }
+            }
+            _ => {}
+        },
         ScriptCmd::DownloadArtifact(n, dir) => {
             if let Some(id) = super::artifacts::visible(repo).get(n).map(|a| a.id) {
                 download_artifact(cx, repo, id, Some(dir));

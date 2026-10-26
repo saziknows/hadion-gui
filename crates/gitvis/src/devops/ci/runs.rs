@@ -375,7 +375,7 @@ pub fn artifacts_section(
     ui: &mut Ui,
     run: &WorkflowRun,
     load: Option<&Load<Vec<Artifact>>>,
-    downloads: &std::collections::HashMap<u64, u64>,
+    downloads: &std::collections::HashMap<u64, (u64, std::path::PathBuf)>,
     now: i64,
     actions: &mut Vec<Action>,
 ) {
@@ -408,7 +408,14 @@ pub fn artifacts_section(
         force: true,
     }
     .into();
-    let Some(list) = widgets::loaded(ui, load, "Loading artifacts…", retry, actions) else {
+    let Some(list) = widgets::loaded(
+        ui,
+        load,
+        "the artifacts",
+        "Loading artifacts…",
+        retry,
+        actions,
+    ) else {
         return;
     };
     if list.is_empty() {

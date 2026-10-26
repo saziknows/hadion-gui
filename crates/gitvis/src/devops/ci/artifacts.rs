@@ -145,13 +145,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
             });
             ui.add_space(space::S);
             if list.is_none() {
-                widgets::loaded(
-                    ui,
-                    load,
-                    "Loading the artifacts…",
-                    Act::Refresh(super::Tab::Artifacts).into(),
-                    actions,
-                );
+                widgets::list_state(ui, load, "the artifacts", "Loading the artifacts…");
                 return;
             }
             let needle = artifact_filter.trim().to_lowercase();
@@ -229,6 +223,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
                 widgets::loaded(
                     ui,
                     load,
+                    "the artifacts",
                     "Loading the artifacts…",
                     Act::Refresh(super::Tab::Artifacts).into(),
                     actions,
@@ -243,7 +238,9 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
                     &runs,
                     jump,
                     artifact_busy.contains(&a.id),
-                    downloads.get(&a.id).and_then(|id| console.get(*id)),
+                    downloads
+                        .get(&a.id)
+                        .and_then(|(id, dir)| console.get(*id).map(|r| (r, dir.clone()))),
                     now,
                     actions,
                 ),
@@ -305,13 +302,28 @@ fn overview(
     if items.is_empty() {
         return;
     }
-    let mut largest: Vec<&Artifact> = items.iter().filter(|a| !a.expired).collect();
-    largest.sort_by(|a, b| b.size_in_bytes.cmp(&a.size_in_bytes));
-    kit::section(ui, "Largest", Some(largest.len().min(8)));
-    let bars: Vec<(String, f64)> = largest
+    // The same artifact uploaded by many runs adds up.
+    let mut by_name: HashMap<&str, (u64, usize)> = HashMap::new();
+    for a in items.iter().filter(|a| !a.expired) {
+        let e = by_name.entry(a.name.as_str()).or_default();
+        e.0 += a.size_in_bytes;
+        e.1 += 1;
+    }
+    let mut names: Vec<(&str, (u64, usize))> = by_name.into_iter().collect();
+    names.sort_by_key(|(n, (b, _))| (std::cmp::Reverse(*b), *n));
+    kit::section(ui, "By name", Some(names.len()));
+    let bars: Vec<(String, f64)> = names
         .iter()
-        .take(8)
-        .map(|a| (a.name.clone(), a.size_in_bytes as f64))
+        .map(|(n, (b, c))| {
+            (
+                if *c > 1 {
+                    format!("{n} (×{c})")
+                } else {
+                    (*n).to_owned()
+                },
+                *b as f64,
+            )
+        })
         .collect();
     kit::bars(ui, &bars, pal(ui).accent, 8, |v| bytes(v as u64));
     let mut by_wf: HashMap<String, (u64, usize)> = HashMap::new();
@@ -326,7 +338,7 @@ fn overview(
         e.1 += 1;
     }
     let mut wf: Vec<(String, (u64, usize))> = by_wf.into_iter().collect();
-    wf.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+    wf.sort_by_key(|(n, (b, _))| (std::cmp::Reverse(*b), n.clone()));
     kit::section(ui, "By workflow", Some(wf.len()));
     let bars: Vec<(String, f64)> = wf
         .iter()
@@ -342,7 +354,7 @@ fn detail(
     runs: &HashMap<u64, WorkflowRun>,
     jump: Option<gitvis_core::Oid>,
     busy: bool,
-    download: Option<&crate::devops::console::ConsoleRun>,
+    download: Option<(&crate::devops::console::ConsoleRun, std::path::PathBuf)>,
     now: i64,
     actions: &mut Vec<Action>,
 ) {
@@ -364,7 +376,7 @@ fn detail(
             && IconButton::new(Icon::Download, "Download…")
                 .compact()
                 .primary(true)
-                .enabled(download.is_none_or(|d| !d.running()))
+                .enabled(download.as_ref().is_none_or(|(d, _)| !d.running()))
                 .show(ui)
                 .on_hover_text("Pick a folder, then gh run download RUN -n NAME -D FOLDER")
                 .clicked()
@@ -454,28 +466,42 @@ fn detail(
         }
         kv.text("Artifact id", kit::mono(a.id.to_string()));
     });
-    if let Some(d) = download {
+    if let Some((d, dir)) = download {
         kit::section(ui, "Download", None);
         let tone = crate::views::console::status_tone(d);
         let title = if d.running() {
             "Downloading…".to_owned()
+        } else if d.succeeded() {
+            format!("Downloaded into {}", dir.display())
         } else {
             d.status_text()
         };
+        let mut open = false;
         kit::callout_with(ui, tone, &title, &d.command, |ui| {
             let tail = d.tail(4);
-            if !tail.trim().is_empty() {
+            if !d.succeeded() && !tail.trim().is_empty() {
                 ui.label(kit::mono(tail).color(pal(ui).text_2));
             }
             ui.add_space(2.0);
-            widgets::note(
-                ui,
-                &format!(
-                    "{}  ·  the full output is in the activity log",
-                    format::millis(d.elapsed_ms())
-                ),
-            );
+            ui.horizontal(|ui| {
+                widgets::note(
+                    ui,
+                    &format!(
+                        "{}  ·  the full output is in the activity log",
+                        format::millis(d.elapsed_ms())
+                    ),
+                );
+                if d.succeeded() {
+                    open = IconButton::new(Icon::Folder, "Open folder")
+                        .compact()
+                        .show(ui)
+                        .clicked();
+                }
+            });
         });
+        if open {
+            actions.push(Action::OpenPath(dir));
+        }
     }
     if a.expired {
         kit::callout(

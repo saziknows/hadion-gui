@@ -174,47 +174,45 @@ pub fn flaky(runs: &[WorkflowRun]) -> Flaky {
         .filter(|r| r.attempt > 1 && r.is_success())
         .map(|r| r.id)
         .collect();
-    let mut by_sha: BTreeMap<&str, (String, Vec<u64>, Vec<u64>, i64)> = BTreeMap::new();
+    // Per commit: its runs and the newest creation time.
+    let mut by_sha: BTreeMap<&str, (MixedSha, i64)> = BTreeMap::new();
     for r in runs {
         if r.sha.is_empty() {
             continue;
         }
-        let e = by_sha
-            .entry(&r.sha)
-            .or_insert_with(|| (r.branch.clone(), Vec::new(), Vec::new(), 0));
-        if r.is_failure() {
-            e.1.push(r.id);
-        } else if r.is_success() {
-            e.2.push(r.id);
-        }
-        e.3 = e.3.max(r.created.unwrap_or(0));
-    }
-    let mut mixed: Vec<(i64, MixedSha)> = by_sha
-        .into_iter()
-        .filter(|(_, (_, f, p, _))| !f.is_empty() && !p.is_empty())
-        .map(|(sha, (branch, failed, passed, t))| {
+        let (m, t) = by_sha.entry(&r.sha).or_insert_with(|| {
             (
-                t,
                 MixedSha {
-                    sha: sha.to_owned(),
-                    branch,
-                    failed,
-                    passed,
+                    sha: r.sha.clone(),
+                    branch: r.branch.clone(),
+                    failed: Vec::new(),
+                    passed: Vec::new(),
                 },
+                0,
             )
-        })
+        });
+        if r.is_failure() {
+            m.failed.push(r.id);
+        } else if r.is_success() {
+            m.passed.push(r.id);
+        }
+        *t = (*t).max(r.created.unwrap_or(0));
+    }
+    let mut mixed: Vec<(MixedSha, i64)> = by_sha
+        .into_values()
+        .filter(|(m, _)| !m.failed.is_empty() && !m.passed.is_empty())
         .collect();
-    mixed.sort_by(|a, b| b.0.cmp(&a.0));
+    mixed.sort_by_key(|(_, t)| std::cmp::Reverse(*t));
     Flaky {
         passed_on_retry,
-        mixed_shas: mixed.into_iter().map(|(_, m)| m).collect(),
+        mixed_shas: mixed.into_iter().map(|(m, _)| m).collect(),
     }
 }
 
 /// The runs worth analysing job by job: the newest `max` finished ones.
 pub fn analysis_runs(runs: &[WorkflowRun], max: usize) -> Vec<&WorkflowRun> {
     let mut v: Vec<&WorkflowRun> = runs.iter().filter(|r| !r.is_running()).collect();
-    v.sort_by(|a, b| b.created.cmp(&a.created));
+    v.sort_by_key(|r| std::cmp::Reverse(r.created));
     v.truncate(max);
     v
 }

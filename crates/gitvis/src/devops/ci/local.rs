@@ -22,12 +22,38 @@ use crate::views::icons::{Icon, IconButton};
 use crate::views::kit;
 
 /// A job the tab can run.
-struct JobItem {
-    workflow: String,
-    job: String,
-    name: String,
-    events: Vec<String>,
-    stage: Option<u32>,
+pub struct JobItem {
+    pub workflow: String,
+    pub job: String,
+    pub name: String,
+    pub events: Vec<String>,
+    pub stage: Option<u32>,
+}
+
+/// The jobs the list shows, in order.
+pub fn jobs(repo: &RepoState) -> Vec<JobItem> {
+    let files = repo
+        .devops
+        .ci
+        .local
+        .ok()
+        .map(|l| l.files.as_slice())
+        .unwrap_or(&[]);
+    items(&repo.devops.ci.act, files).0
+}
+
+/// Point the form at a job: its workflow, the job, and an event it has.
+pub fn pick(act: &mut ActState, j: &JobItem) {
+    act.workflow = j.workflow.clone();
+    act.job = j.job.clone();
+    if !j.events.contains(&act.event) {
+        act.event = j
+            .events
+            .iter()
+            .find(|e| *e != "schedule")
+            .cloned()
+            .unwrap_or_else(|| "push".to_owned());
+    }
 }
 
 fn items(act: &ActState, files: &[WorkflowFile]) -> (Vec<JobItem>, bool) {
@@ -73,6 +99,12 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
     let act = &mut ci.act;
     let tools = act.tools.ok().cloned();
     let (jobs, from_act) = items(act, &files);
+    // Start on the first job so the form and the command are never empty.
+    if act.workflow.is_empty()
+        && let Some(j) = jobs.first()
+    {
+        pick(act, j);
+    }
     // Left: tools and jobs.
     egui::Panel::left("ci_act_jobs")
         .resizable(true)
@@ -139,17 +171,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
                 },
             );
             if let Some(i) = pick {
-                let j = &jobs[i];
-                act.workflow = j.workflow.clone();
-                act.job = j.job.clone();
-                if !j.events.contains(&act.event) {
-                    act.event = j
-                        .events
-                        .iter()
-                        .find(|e| *e != "schedule")
-                        .cloned()
-                        .unwrap_or_else(|| "push".to_owned());
-                }
+                self::pick(act, &jobs[i]);
             }
         });
     // Bottom: the output of the shown run.
@@ -468,7 +490,7 @@ fn form_view(
             .on_hover_text("Streams the output below; Stop kills act and its containers' processes")
             .clicked()
         {
-            actions.push(Act::RunAct.into());
+            actions.push(Act::RunLocally.into());
         }
         if let Some(r) = reason {
             widgets::note(ui, r);

@@ -854,20 +854,20 @@ fn check_steps(cx: &mut Ctx, job: &str, jl: Option<u32>, steps: &[Value], prt: b
             ),
             _ => {}
         }
-        if let Some(id) = get(step, "id").and_then(scalar) {
-            if let Some(prev) = ids.insert(id.clone(), i) {
-                cx.push(
-                    Severity::Error,
-                    "duplicate-step-id",
-                    sl,
-                    format!(
-                        "Step id `{id}` is used twice in job `{job}` (steps {} and {})",
-                        prev + 1,
-                        i + 1
-                    ),
-                    "Step ids must be unique within a job; rename one.",
-                );
-            }
+        if let Some(id) = get(step, "id").and_then(scalar)
+            && let Some(prev) = ids.insert(id.clone(), i)
+        {
+            cx.push(
+                Severity::Error,
+                "duplicate-step-id",
+                sl,
+                format!(
+                    "Step id `{id}` is used twice in job `{job}` (steps {} and {})",
+                    prev + 1,
+                    i + 1
+                ),
+                "Step ids must be unique within a job; rename one.",
+            );
         }
         if let Some(u) = &uses {
             for (prefix, why) in DEPRECATED_ACTIONS {
@@ -1001,6 +1001,18 @@ fn strings<'a>(v: &'a Value, path: &mut Vec<String>, out: &mut Vec<(Vec<String>,
     }
 }
 
+/// `jobs.build.steps[2].run` of a key path.
+fn path_str(path: &[String]) -> String {
+    let mut s = String::new();
+    for p in path {
+        if !s.is_empty() && !p.starts_with('[') {
+            s.push('.');
+        }
+        s.push_str(p);
+    }
+    s
+}
+
 /// The bodies of `${{ … }}` in `s`, and whether one is not closed.
 pub fn expressions(s: &str) -> (Vec<&str>, bool) {
     let mut out = Vec::new();
@@ -1124,7 +1136,7 @@ fn check_expressions(cx: &mut Ctx, root: &Value, jobs: &JobLines) {
                 Severity::Error,
                 "expression-unbalanced",
                 line,
-                format!("`${{{{` without a closing `}}}}` in `{}`", path.join(".")),
+                format!("`${{{{` without a closing `}}}}` in `{}`", path_str(&path)),
                 "Close the expression with `}}`.",
             );
         }
@@ -1136,7 +1148,8 @@ fn check_expressions(cx: &mut Ctx, root: &Value, jobs: &JobLines) {
             let (contexts, functions) = identifiers(e);
             let needle: String = e.chars().take(40).collect();
             for c in &contexts {
-                if !CONTEXTS.contains(&c.as_str()) && reported.insert((path.join("."), c.clone())) {
+                if !CONTEXTS.contains(&c.as_str()) && reported.insert((path_str(&path), c.clone()))
+                {
                     let hint = match closest(c, CONTEXTS) {
                         Some(s) => {
                             format!("Did you mean `{s}`? Contexts: {}.", CONTEXTS.join(", "))
@@ -1157,7 +1170,7 @@ fn check_expressions(cx: &mut Ctx, root: &Value, jobs: &JobLines) {
                 }
             }
             for f in &functions {
-                if !FUNCTIONS.contains(&f.as_str()) && reported.insert((path.join("."), f.clone()))
+                if !FUNCTIONS.contains(&f.as_str()) && reported.insert((path_str(&path), f.clone()))
                 {
                     cx.push_at(
                         Severity::Error,

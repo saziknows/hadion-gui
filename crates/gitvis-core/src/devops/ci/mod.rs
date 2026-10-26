@@ -261,6 +261,8 @@ pub struct LintedFile {
     pub path: String,
     pub stamp: Option<Stamp>,
     pub lines: usize,
+    /// The text as checked, for showing the lines of findings.
+    pub text: String,
     pub findings: Vec<lint::Finding>,
 }
 
@@ -307,6 +309,7 @@ pub fn lint_workdir(
             lines: text.lines().count(),
             stamp: st,
             path,
+            text,
         });
     }
     if use_actionlint
