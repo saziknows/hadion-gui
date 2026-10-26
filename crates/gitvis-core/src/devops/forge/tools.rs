@@ -83,19 +83,24 @@ pub fn fix_commands(remote: &ForgeRemote, state: &ToolState) -> Vec<String> {
         ],
         (ForgeKind::Azure, _) => vec![
             "az login".into(),
-            format!(
-                "az devops login --organization {org}   (alternative: a personal access token)"
-            ),
+            "# or sign in with a personal access token:".into(),
+            format!("az devops login --organization {org}"),
         ],
     }
 }
 
-fn first_line(s: &str) -> String {
-    s.lines()
+/// The useful part of a status command's output: up to three non-empty
+/// lines, without the bare host name `glab auth status` starts with.
+pub fn status_detail(text: &str, host: &str) -> String {
+    text.lines()
         .map(str::trim)
-        .find(|l| !l.is_empty())
-        .unwrap_or_default()
-        .to_owned()
+        .filter(|l| !l.is_empty() && !l.eq_ignore_ascii_case(host))
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        )
 }
 
 /// What a status command printed.
@@ -175,7 +180,7 @@ pub fn check(remote: &ForgeRemote, dir: &Path, calls: &mut Vec<ApiCall>) -> Tool
             if !status.ok {
                 return ToolState::SignedOut {
                     version,
-                    detail: first_line(&status.all),
+                    detail: status_detail(&status.all, &remote.host),
                 };
             }
             let user = match cli::run(
@@ -225,7 +230,7 @@ pub fn check(remote: &ForgeRemote, dir: &Path, calls: &mut Vec<ApiCall>) -> Tool
             }
             ToolState::SignedOut {
                 version,
-                detail: first_line(&account.all),
+                detail: status_detail(&account.all, &remote.host),
             }
         }
     }
@@ -273,7 +278,19 @@ mod tests {
             },
         );
         assert_eq!(signed_out[0], "az login");
-        assert!(signed_out[1].contains("https://dev.azure.com/acme"));
+        assert!(signed_out[2].contains("https://dev.azure.com/acme"));
+        assert_eq!(
+            status_detail(
+                "gitlab.com
+  X api call failed: 401
+
+  ! No token provided
+",
+                "gitlab.com"
+            ),
+            "X api call failed: 401
+! No token provided"
+        );
         assert_eq!(tool(ForgeKind::Azure), Tool::Az);
         assert_eq!(
             clean_version(Tool::Az, &["2.91.0", "2.91.0", "1.1.0"].join("\t")),

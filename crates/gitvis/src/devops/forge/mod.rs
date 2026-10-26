@@ -482,7 +482,9 @@ fn target(remote: &ForgeRemote) -> Result<Target, String> {
     Target::of(remote).ok_or_else(|| format!("{} is not an Azure DevOps remote", remote.web_url))
 }
 
-fn check_tool(cx: &mut Ctx, repo: &mut RepoState) {
+/// Check the CLI; `fresh` forgets the cached tool detection first (after
+/// the user installed something and clicked Check again).
+fn check_tool(cx: &mut Ctx, repo: &mut RepoState, fresh: bool) {
     let Some(remote) = repo.forge_remote.clone() else {
         return;
     };
@@ -493,7 +495,9 @@ fn check_tool(cx: &mut Ctx, repo: &mut RepoState) {
     st.checking = true;
     let name = ftools::tool(remote.kind).name();
     cx.read(format!("Check {name}"), move |dir, log| {
-        devtools::refresh();
+        if fresh {
+            devtools::refresh();
+        }
         Msg::Tool(ftools::check(&remote, dir, &mut log.calls))
     });
 }
@@ -745,7 +749,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
     match act {
         Act::CheckTool => {
             repo.devops.forge.tool = None;
-            check_tool(cx, repo);
+            check_tool(cx, repo, true);
         }
         Act::UsePublic(on) => {
             let st = &mut repo.devops.forge;
@@ -1457,7 +1461,7 @@ pub fn on_page_shown(cx: &mut Ctx, repo: &mut RepoState, page: Page) {
     let st = &repo.devops.forge;
     if st.tool.is_none() {
         if !st.checking {
-            check_tool(cx, repo);
+            check_tool(cx, repo, false);
         }
         return;
     }
