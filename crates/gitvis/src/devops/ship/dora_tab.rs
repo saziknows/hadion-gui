@@ -575,6 +575,12 @@ fn week_chart(
     }
 }
 
+/// `2026-10-26` (local).
+fn day(t: i64) -> String {
+    let a = format::absolute(t);
+    a.get(..10).unwrap_or(&a).to_owned()
+}
+
 fn short_date(t: i64) -> String {
     // `2026-10-26 12:00` → `10-26`
     let a = format::absolute(t);
@@ -602,7 +608,7 @@ fn charts(ui: &mut Ui, rep: &Report) {
         |v| {
             format!(
                 "Week of {}: {} successful, {} failed",
-                &format::absolute(v.0)[..10],
+                day(v.0),
                 v.1 as u64,
                 v.2 as u64
             )
@@ -629,7 +635,7 @@ fn charts(ui: &mut Ui, rep: &Report) {
             |v| {
                 format!(
                     "Week of {}: median lead time {}",
-                    &format::absolute(v.0)[..10],
+                    day(v.0),
                     if v.1 > 0.0 {
                         sui::span((v.1 * 3_600.0) as i64)
                     } else {
