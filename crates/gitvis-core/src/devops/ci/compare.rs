@@ -197,6 +197,18 @@ pub struct LogDiff {
 pub const MAX_HUNKS: usize = 60;
 pub const MAX_ONLY: usize = 400;
 
+/// The first line after the runner's "Set up job" preamble (runner and
+/// image versions, token permissions, action downloads), which ends with
+/// `Complete job name: …`; `None` when the log has no such line near the
+/// top.
+pub fn setup_end(log: &JobLog) -> Option<usize> {
+    log.lines
+        .iter()
+        .take(400)
+        .position(|l| l.text.starts_with("Complete job name:"))
+        .map(|i| i + 1)
+}
+
 /// Diff two parsed logs line by line after [`normalize`]. `ids` are
 /// replaced in both (run ids, job ids, SHAs of the two runs).
 pub fn diff_logs(good: &JobLog, bad: &JobLog, ids: &[String], context: usize) -> LogDiff {
@@ -610,6 +622,21 @@ mod tests {
             normalize("<job_1656022918> starting", &[]),
             "<job_<n>> starting"
         );
+    }
+
+    #[test]
+    fn finds_the_end_of_the_setup_step() {
+        let l = log(&[
+            "Current runner version: '2.338.0'",
+            "Version: 20261021.618",
+            "Prepare workflow directory",
+            "Complete job name: Dependabot",
+            "##[group]Run mkdir -p x",
+            "done",
+        ]);
+        assert_eq!(setup_end(&l), Some(4));
+        assert_eq!(l.lines[4].text, "Run mkdir -p x");
+        assert_eq!(setup_end(&log(&["no preamble here"])), None);
     }
 
     #[test]

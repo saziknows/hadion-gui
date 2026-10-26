@@ -1018,8 +1018,13 @@ fn compare_task(
 }
 
 /// The first line after a job's "Set up job" step (runner version, image
-/// and permissions, which differ in every run), or 0.
+/// and permissions, which differ in every run), or 0. The log's own
+/// `Complete job name:` line marks it; step start times (whole seconds)
+/// are the fallback.
 fn setup_end(job: &gitvis_core::github::Job, log: &gitvis_core::joblog::JobLog) -> usize {
+    if let Some(end) = core_compare::setup_end(log) {
+        return end;
+    }
     let Some(first) = job.steps.iter().min_by_key(|s| s.number) else {
         return 0;
     };
@@ -2141,9 +2146,9 @@ fn run_script(cx: &mut Ctx, repo: &mut RepoState, cmd: ScriptCmd) {
                 None => eprintln!("[script] no workflow {n}"),
             }
         }
-        ScriptCmd::Compare => {
+        ScriptCmd::Compare | ScriptCmd::ComparePlan => {
             if let Some(run) = repo.gh_page.selected_run {
-                compare_open(cx, repo, run, true);
+                compare_open(cx, repo, run, matches!(cmd, ScriptCmd::Compare));
             }
         }
         ScriptCmd::AnalyseJobs => {
@@ -2254,5 +2259,71 @@ fn run_script(cx: &mut Ctx, repo: &mut RepoState, cmd: ScriptCmd) {
                 download_artifact(cx, repo, id, Some(dir));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gitvis_core::devops::ci::workflow::parse;
+
+    #[test]
+    fn act_form_builds_the_command() {
+        let wf = parse(
+            ".github/workflows/release.yml",
+            "on:\n  push:\n  workflow_dispatch:\n    inputs:\n      version:\n        required: true\n      dry_run:\n        type: boolean\njobs:\n  release:\n    runs-on: ubuntu-latest\n    steps: [{run: x}]\n",
+        );
+        let mut act = ActState {
+            workflow: wf.path.clone(),
+            job: "release".into(),
+            event: "workflow_dispatch".into(),
+            secret_file: Some(PathBuf::from("C:/s/.secrets")),
+            ..Default::default()
+        };
+        act.inputs.insert("version".into(), "1.2.3".into());
+        act.inputs.insert("dry_run".into(), " ".into());
+        act.inputs.insert("stray".into(), "x".into());
+        let run = act_run(&act, std::slice::from_ref(&wf));
+        assert_eq!(
+            run.args(),
+            [
+                "workflow_dispatch",
+                "-j",
+                "release",
+                "-W",
+                ".github/workflows/release.yml",
+                "--input",
+                "version=1.2.3",
+                "-P",
+                "ubuntu-latest=catthehacker/ubuntu:act-latest",
+                "--secret-file",
+                "C:/s/.secrets",
+            ]
+        );
+        // Inputs only go with workflow_dispatch; a custom image replaces the default.
+        act.event = "push".into();
+        act.image = "node:20".into();
+        let run = act_run(&act, &[wf]);
+        assert!(!run.args().iter().any(|a| a == "--input"));
+        assert!(run.args().contains(&"ubuntu-latest=node:20".to_owned()));
+    }
+
+    #[test]
+    fn confirmation_details_show_requests_and_bodies() {
+        let gh = Gh::new(".", "o", "r");
+        let a = requests::rerun(&gh, 1, true);
+        let b = requests::cancel(&gh, 2);
+        let d = request_details(&[&a, &b]);
+        assert_eq!(d.len(), 2);
+        assert!(d[0].starts_with(
+            "gh api --method POST repos/o/r/actions/runs/1/rerun --input - (JSON body)\n{"
+        ));
+        assert!(d[0].contains("\"enable_debug_logging\": true"));
+        assert_eq!(d[1], "gh api --method POST repos/o/r/actions/runs/2/cancel");
+        let many: Vec<Request> = (0..45).map(|i| requests::delete_cache(&gh, i)).collect();
+        let refs: Vec<&Request> = many.iter().collect();
+        let d = request_details(&refs);
+        assert_eq!(d.len(), 41);
+        assert!(d[40].contains("5 more requests"));
     }
 }

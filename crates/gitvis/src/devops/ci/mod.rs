@@ -524,6 +524,8 @@ pub enum ScriptCmd {
     Workflow(usize),
     Dispatch(usize),
     Compare,
+    /// Open the comparison without starting it (shows the plan).
+    ComparePlan,
     AnalyseJobs,
     Act,
     Artifact(usize),
@@ -862,7 +864,7 @@ pub fn on_page_shown(cx: &mut Ctx, repo: &mut RepoState) {
 
 /// `GITVIS_SCRIPT` commands this area understands: `actions-tab NAME`,
 /// `workflow N`, `dispatch N`, `select-runs N`, `compare`, `analyse-jobs`,
-/// `validate`, `act`, plus `act-job N`, `ci-scroll SECTION`, `artifact N`,
+/// `validate`, `act`, plus `compare-plan`, `act-job N`, `ci-scroll SECTION`, `artifact N`,
 /// `cache N`, `cache-refs`,
 /// `lint-file N`, `cancel-picked`, `rerun-picked`, `delete-run`,
 /// `rerun-debug`, `rerun-job N`, `ask-dispatch`, `ask-delete`, `ask-delete-closed` (these
@@ -879,6 +881,7 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         "dispatch" => vec![page, tab(Tab::Workflows), s(ScriptCmd::Dispatch(n()?))],
         "select-runs" => vec![page, tab(Tab::Runs), s(ScriptCmd::SelectRuns(n()?))],
         "compare" => vec![page, s(ScriptCmd::Compare)],
+        "compare-plan" => vec![page, s(ScriptCmd::ComparePlan)],
         "analyse-jobs" | "analyze-jobs" => vec![page, s(ScriptCmd::AnalyseJobs)],
         "validate" => vec![page, tab(Tab::Validate), Act::Validate.into()],
         "act" => vec![page, tab(Tab::Local), s(ScriptCmd::Act)],

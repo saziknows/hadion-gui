@@ -112,7 +112,15 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) -> boo
                                 );
                             }
                             match &c.report.data {
-                                None => plan(ui, repo, bad, good, c.report.loading, actions),
+                                None => plan(
+                                    ui,
+                                    repo,
+                                    bad,
+                                    good,
+                                    c.report.loading,
+                                    c.lookup_calls,
+                                    actions,
+                                ),
                                 Some(Err(e)) => {
                                     let mut retry = false;
                                     kit::callout_with(
@@ -237,6 +245,7 @@ fn plan(
     bad: &WorkflowRun,
     good: &WorkflowRun,
     loading: bool,
+    spent: usize,
     actions: &mut Vec<Action>,
 ) {
     let (calls, exact) = compare_calls(repo, bad, good);
@@ -266,6 +275,12 @@ fn plan(
             "• the jobs of the failing run (1 call), then the logs of each failing job in both runs (2 calls each)"
                 .to_owned(),
         ),
+    }
+    if spent > 0 {
+        lines.push(format!(
+            "Finding the green run already took {}.",
+            format::plural(spent, "call", "calls")
+        ));
     }
     let title = if exact {
         format!(
