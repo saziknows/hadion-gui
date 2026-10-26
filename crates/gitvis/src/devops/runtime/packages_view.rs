@@ -20,6 +20,12 @@ const MAX_ROWS: usize = 50;
 
 pub fn show(ui: &mut Ui, cx: &Cx, rt: &mut State, actions: &mut Vec<Action>) {
     let State { pkg, refs, .. } = rt;
+    // The tab can open before the repository's GitHub remote is known (a
+    // big repository still loading): ask once when it is.
+    if cx.github && pkg.listing.is_none() && !pkg.loading && !pkg.auto_requested {
+        pkg.auto_requested = true;
+        actions.push(Act::PkgRefresh.into());
+    }
     header(ui, cx, pkg, actions);
     if !cx.github {
         common::page(ui, "pkg_none", |ui| {

@@ -297,6 +297,20 @@ fn toolbar(ui: &mut Ui, k: &KubeState, cfg: &KubeConfig, actions: &mut Vec<Actio
     kit::hairline(ui);
 }
 
+/// A table-sized name for a kubectl failure.
+fn short_error(k: ErrorKind) -> &'static str {
+    match k {
+        ErrorKind::Unreachable => "unreachable",
+        ErrorKind::Timeout => "timed out",
+        ErrorKind::Unauthorized => "credentials rejected",
+        ErrorKind::Forbidden => "forbidden",
+        ErrorKind::NotFound => "not found",
+        ErrorKind::NoContext => "no such context",
+        ErrorKind::NotInstalled => "kubectl missing",
+        ErrorKind::Other => "failed",
+    }
+}
+
 fn probe_table(ui: &mut Ui, k: &KubeState, cfg: &KubeConfig, actions: &mut Vec<Action>) {
     let current = k.target().map(|t| t.context);
     let rows: Vec<Vec<Cell>> = cfg
@@ -320,7 +334,7 @@ fn probe_table(ui: &mut Ui, k: &KubeState, cfg: &KubeConfig, actions: &mut Vec<A
                     Cell::Muted(format::millis(*ms)),
                 ),
                 Some(Probe::Done { result: Err(e), ms }) => (
-                    Cell::Tone(kube::classify(e).title().to_owned(), Tone::Danger),
+                    Cell::Tone(short_error(kube::classify(e)).to_owned(), Tone::Danger),
                     Cell::Muted(format::millis(*ms)),
                 ),
             };
@@ -576,7 +590,7 @@ fn overview(ui: &mut Ui, cx: &Cx, k: &KubeState, actions: &mut Vec<Action>) {
                     Cell::Muted(
                         p.last_termination()
                             .map(|(c, t)| format!("{c}: {}", t.text()))
-                            .unwrap_or_default(),
+                            .unwrap_or_else(|| "–".into()),
                     ),
                     Cell::Muted(common::age(p.created, cx.now)),
                 ]

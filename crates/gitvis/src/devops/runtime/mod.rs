@@ -119,6 +119,9 @@ pub struct PkgState {
     pub versions: HashMap<String, Versions>,
     /// Selected version id of the selected package.
     pub version: Option<u64>,
+    /// The view asked for the first load (when the tab opened before the
+    /// GitHub remote was known).
+    pub auto_requested: bool,
 }
 
 /// Versions of one package.
