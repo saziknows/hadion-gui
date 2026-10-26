@@ -302,6 +302,10 @@ pub struct PrView {
     /// The conversation's comment box.
     pub comment: String,
     pub merge: MergeForm,
+    /// A thread to scroll to in the diff (taken when drawn).
+    pub jump: Option<String>,
+    /// The last thread "Next thread" went to.
+    pub last_jump: Option<String>,
 }
 
 /// The New pull request form.
@@ -372,7 +376,6 @@ pub struct IssuesState {
     pub selected: Option<u64>,
     pub details: HashMap<u64, Fetch<(Issue, Vec<IssueComment>)>>,
     pub comment: HashMap<u64, String>,
-    pub reason: CloseReason,
     pub edit: Option<IssueEdit>,
     pub branch: Option<BranchForm>,
     pub form: Option<NewIssueForm>,
@@ -575,10 +578,6 @@ impl State {
             .is_some_and(|l| l.requested.iter().any(|p| p.number == n))
     }
 
-    pub fn is_viewed(&self, n: u64, f: &PrFile) -> bool {
-        self.viewed.contains(&viewed_key(n, f))
-    }
-
     fn toggle_viewed(&mut self, key: String) {
         if self.viewed.remove(&key) {
             self.viewed_order.retain(|k| *k != key);
@@ -657,7 +656,6 @@ pub enum Act {
     /// The N-th pull request of the visible list (script).
     OpenListed(usize),
     RefreshPr(u64),
-    SelectFile(String),
     /// The N-th file of the selected pull request (script).
     SelectFileIndex(usize),
     ToggleViewed(String),
@@ -725,6 +723,8 @@ pub enum Act {
     NewIssue,
     UseIssueTemplate(usize),
     CreateIssue,
+    /// The base branch of the New pull request form changed.
+    SetBase(String),
     /// Script commands that need the state.
     Script(String, String),
 }
@@ -737,24 +737,26 @@ pub struct LocalInfo {
     pub base_ref: String,
 }
 
+/// Replies of the area's background work. Large payloads are boxed so the
+/// app's message enum stays small.
 pub enum Msg {
-    Meta(Result<RepoMeta, String>),
+    Meta(Box<Result<RepoMeta, String>>),
     List {
         kind: ListKind,
         append: bool,
-        result: Result<PrList, String>,
+        result: Box<Result<PrList, String>>,
     },
-    Detail(u64, Result<PrDetail, String>),
+    Detail(u64, Box<Result<PrDetail, String>>),
     Files(u64, Result<Vec<PrFile>, String>),
     Commits(u64, Result<Vec<PrCommit>, String>),
-    Suggestions(Result<Suggestions, String>),
+    Suggestions(Box<Result<Suggestions, String>>),
     Local(Box<LocalInfo>),
     Issues {
         key: IssueKey,
         login: Option<String>,
         result: Result<Vec<Issue>, String>,
     },
-    Issue(u64, Result<(Issue, Vec<IssueComment>), String>),
+    Issue(u64, Box<Result<(Issue, Vec<IssueComment>), String>>),
     Changed {
         after: After,
         ok: bool,
@@ -766,32 +768,34 @@ impl Msg {
     /// One line for the activity log (`Err` when the work failed).
     pub fn summary(&self) -> Result<String, String> {
         match self {
-            Msg::Meta(r) => r.clone().map(|m| {
+            Msg::Meta(r) => (**r).clone().map(|m| {
                 format!(
                     "default branch {}, your permission {}",
                     m.default_branch,
                     m.permission.to_lowercase()
                 )
             }),
-            Msg::List { kind, result, .. } => result.clone().map(|l| {
-                let what = match kind {
-                    ListKind::Open => "open",
-                    ListKind::Closed => "closed or merged",
-                };
-                format!(
-                    "{} of {} {what} pull requests{}, {} waiting for your review, {} yours",
-                    l.items.len(),
-                    format::count(l.total as usize),
-                    if l.light {
-                        " (without mergeability: the full query timed out)"
-                    } else {
-                        ""
-                    },
-                    l.requested_total,
-                    l.mine_total
-                )
-            }),
-            Msg::Detail(n, r) => r.clone().map(|d| {
+            Msg::List { kind, result, .. } => {
+                result.as_ref().as_ref().map_err(Clone::clone).map(|l| {
+                    let what = match kind {
+                        ListKind::Open => "open",
+                        ListKind::Closed => "closed or merged",
+                    };
+                    format!(
+                        "{} of {} {what} pull requests{}, {} waiting for your review, {} yours",
+                        l.items.len(),
+                        format::count(l.total as usize),
+                        if l.light {
+                            " (without mergeability: the full query timed out)"
+                        } else {
+                            ""
+                        },
+                        l.requested_total,
+                        l.mine_total
+                    )
+                })
+            }
+            Msg::Detail(n, r) => r.as_ref().as_ref().map_err(Clone::clone).map(|d| {
                 format!(
                     "#{n}: {} timeline entries, {} review threads ({} unresolved)",
                     d.timeline.len(),
@@ -805,7 +809,7 @@ impl Msg {
             Msg::Commits(n, r) => r
                 .clone()
                 .map(|c| format!("#{n}: {}", format::plural(c.len(), "commit", "commits"))),
-            Msg::Suggestions(r) => r.clone().map(|s| {
+            Msg::Suggestions(r) => r.as_ref().as_ref().map_err(Clone::clone).map(|s| {
                 format!(
                     "{} people (from {}), {} labels, {} teams",
                     s.users.len(),
@@ -832,6 +836,7 @@ impl Msg {
                 .map(|l| format::plural(l.len(), "issue", "issues"))
                 .map_err(Clone::clone),
             Msg::Issue(n, r) => r
+                .as_ref()
                 .as_ref()
                 .map(|(_, c)| format!("#{n}: {}", format::plural(c.len(), "comment", "comments")))
                 .map_err(Clone::clone),
@@ -877,7 +882,11 @@ fn fetch_meta(cx: &mut Ctx, st: &mut State) {
         cx,
         &mut st.meta,
         "Repository settings".to_owned(),
-        |gh, log| Msg::Meta(fetch::fetch_repo_meta(gh, &mut log.calls).map_err(err)),
+        |gh, log| {
+            Msg::Meta(Box::new(
+                fetch::fetch_repo_meta(gh, &mut log.calls).map_err(err),
+            ))
+        },
     );
 }
 
@@ -911,7 +920,9 @@ fn fetch_list(cx: &mut Ctx, st: &mut State, kind: ListKind, append: bool) {
     let started = cx.gh_read(label, move |gh, log| Msg::List {
         kind,
         append,
-        result: fetch::fetch_pr_list(gh, kind, after.as_deref(), &mut log.calls).map_err(err),
+        result: Box::new(
+            fetch::fetch_pr_list(gh, kind, after.as_deref(), &mut log.calls).map_err(err),
+        ),
     });
     if !started {
         st.more_loading = false;
@@ -930,7 +941,7 @@ fn fetch_detail(cx: &mut Ctx, st: &mut State, n: u64) {
         move |gh, log| {
             Msg::Detail(
                 n,
-                fetch::fetch_pr_detail(gh, n, &mut log.calls).map_err(err),
+                Box::new(fetch::fetch_pr_detail(gh, n, &mut log.calls).map_err(err)),
             )
         },
     );
@@ -961,14 +972,20 @@ fn fetch_commits(cx: &mut Ctx, st: &mut State, n: u64) {
     );
 }
 
+/// Suggestions are fetched once the owner's kind is known (teams exist
+/// only in organisations); `fill_base` calls this again when it arrives.
 fn fetch_suggestions(cx: &mut Ctx, st: &mut State) {
-    let org = st.meta().owner_is_org.unwrap_or(false);
+    let Some(org) = st.meta().owner_is_org else {
+        return;
+    };
     gh_fetch(
         cx,
         &mut st.suggestions,
         "People, labels and teams".to_owned(),
         move |gh, log| {
-            Msg::Suggestions(fetch::fetch_suggestions(gh, org, &mut log.calls).map_err(err))
+            Msg::Suggestions(Box::new(
+                fetch::fetch_suggestions(gh, org, &mut log.calls).map_err(err),
+            ))
         },
     );
 }
@@ -1015,7 +1032,10 @@ fn fetch_issues(cx: &mut Ctx, st: &mut State) {
 fn fetch_issue(cx: &mut Ctx, st: &mut State, n: u64) {
     let slot = st.issues.details.entry(n).or_default();
     gh_fetch(cx, slot, format!("Issue #{n}"), move |gh, log| {
-        Msg::Issue(n, fetch::fetch_issue(gh, n, &mut log.calls).map_err(err))
+        Msg::Issue(
+            n,
+            Box::new(fetch::fetch_issue(gh, n, &mut log.calls).map_err(err)),
+        )
     });
 }
 
@@ -1461,17 +1481,6 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 cx.action(Action::RefreshChecks(oid));
             }
         }
-        Act::SelectFile(path) => {
-            let st = &mut repo.devops.review;
-            if let Some(n) = st.selected {
-                let v = st.prs.entry(n).or_default();
-                if v.file.as_deref() != Some(path.as_str()) {
-                    v.file = Some(path);
-                    v.sel = None;
-                    v.composer_error.clear();
-                }
-            }
-        }
         Act::SelectFileIndex(i) => {
             let st = &mut repo.devops.review;
             st.tab = PrTab::Files;
@@ -1860,12 +1869,17 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 fetch_suggestions(cx, st);
             }
             if st.new_pr.is_none() {
-                let form = new_pr_form(repo, &meta);
-                let candidates = base_candidates(repo, &form.base);
-                let head = (!form.head.is_empty()).then(|| form.head.clone());
-                read_local(cx, candidates, head);
-                repo.devops.review.new_pr = Some(form);
+                repo.devops.review.new_pr = Some(new_pr_form(repo, &meta));
+                // Templates now; the commits once the base is known.
+                read_local(cx, Vec::new(), None);
+                refresh_commits(cx, repo);
             }
+        }
+        Act::SetBase(base) => {
+            if let Some(f) = repo.devops.review.new_pr.as_mut() {
+                f.base = base;
+            }
+            refresh_commits(cx, repo);
         }
         Act::CloseForm => {
             let st = &mut repo.devops.review;
@@ -2175,6 +2189,41 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
     }
 }
 
+/// Read the commits between the New pull request form's base and head
+/// (when both are known), for the title, the body and the summary.
+fn refresh_commits(cx: &mut Ctx, repo: &mut RepoState) {
+    let Some(f) = repo.devops.review.new_pr.as_ref() else {
+        return;
+    };
+    if f.base.is_empty() || f.head.is_empty() {
+        return;
+    }
+    let (base, head) = (f.base.clone(), f.head.clone());
+    let candidates = base_candidates(repo, &base);
+    if let Some(f) = repo.devops.review.new_pr.as_mut() {
+        f.commits = None;
+    }
+    read_local(cx, candidates, Some(head));
+}
+
+/// Fill the New pull request form's base once the default branch is known,
+/// and fetch the suggestions a form waits for.
+fn fill_base(cx: &mut Ctx, repo: &mut RepoState) {
+    let st = &mut repo.devops.review;
+    let wants = st.new_pr.is_some() || st.issues.form.is_some() || st.issues.edit.is_some();
+    if wants && st.suggestions.wanted() {
+        fetch_suggestions(cx, st);
+    }
+    let default = repo.devops.review.meta().default_branch;
+    let Some(f) = repo.devops.review.new_pr.as_mut() else {
+        return;
+    };
+    if f.base.is_empty() && !default.is_empty() {
+        f.base = default;
+        refresh_commits(cx, repo);
+    }
+}
+
 /// Add a ```suggestion block of the selected lines to the composer.
 fn suggest(st: &mut State, n: u64) {
     let Some(v) = st.prs.get_mut(&n) else {
@@ -2351,6 +2400,11 @@ fn script_act(cx: &mut Ctx, repo: &mut RepoState, cmd: &str, arg: &str) {
             }
             apply(cx, repo, Act::Merge(n));
         }
+        "pr-next-thread" => {
+            if let Some(n) = selected {
+                files::jump_next(st.prs.entry(n).or_default());
+            }
+        }
         "pr-threads" => {
             // Open every thread of the selected pull request.
             let Some(n) = selected else { return };
@@ -2391,7 +2445,10 @@ fn script_act(cx: &mut Ctx, repo: &mut RepoState, cmd: &str, arg: &str) {
 pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
     let st = &mut repo.devops.review;
     match msg {
-        Msg::Meta(r) => st.meta.finish(r),
+        Msg::Meta(r) => {
+            st.meta.finish(*r);
+            fill_base(cx, repo);
+        }
         Msg::List {
             kind,
             append,
@@ -2399,7 +2456,7 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
         } => {
             if append {
                 st.more_loading = false;
-                match result {
+                match *result {
                     Ok(page) => {
                         if let Some(l) = st.list_mut(kind).data.as_mut() {
                             for item in page.items {
@@ -2416,8 +2473,10 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                     Err(e) => cx.toast(ToastKind::Error, format!("Could not load more: {e}")),
                 }
             } else {
-                st.list_mut(kind).finish(result);
+                st.list_mut(kind).finish(*result);
+                fill_base(cx, repo);
             }
+            let st = &mut repo.devops.review;
             if let Some(i) = st.pending_listed
                 && kind == st.filter.kind()
                 && let Some(n) = st.visible().get(i).map(|p| p.number)
@@ -2427,6 +2486,7 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
             }
         }
         Msg::Detail(n, r) => {
+            let r = *r;
             let fresh = r.as_ref().ok().map(|d| d.pr.clone());
             st.prs.entry(n).or_default().detail.finish(r);
             // Keep the list rows in step with the fresher detail.
@@ -2470,11 +2530,13 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
             }
         }
         Msg::Commits(n, r) => st.prs.entry(n).or_default().commits.finish(r),
-        Msg::Suggestions(r) => st.suggestions.finish(r),
+        Msg::Suggestions(r) => st.suggestions.finish(*r),
         Msg::Local(info) => {
             let info = *info;
             if let Some(f) = st.new_pr.as_mut() {
-                f.base_ref = info.base_ref.clone();
+                if info.commits.is_some() {
+                    f.base_ref = info.base_ref.clone();
+                }
                 if f.body.is_empty()
                     && let Some(t) = info.templates.first()
                 {
@@ -2482,13 +2544,16 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                     f.template = Some(0);
                 }
                 if !f.title_edited {
-                    f.title = match &info.commits {
-                        Some(Ok(c)) => local::default_title(c, &f.head),
-                        _ => local::humanize_branch(&f.head),
-                    };
+                    match &info.commits {
+                        Some(Ok(c)) => f.title = local::default_title(c, &f.head),
+                        _ if f.title.is_empty() => f.title = local::humanize_branch(&f.head),
+                        _ => {}
+                    }
                 }
                 f.templates = Some(Ok(info.templates.clone()));
-                f.commits = info.commits.clone();
+                if info.commits.is_some() {
+                    f.commits = info.commits.clone();
+                }
             }
             if let Some(f) = st.issues.form.as_mut() {
                 f.templates = Some(info.issue_templates);
@@ -2511,7 +2576,7 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                 select_issue(cx, st, n);
             }
         }
-        Msg::Issue(n, r) => st.issues.details.entry(n).or_default().finish(r),
+        Msg::Issue(n, r) => st.issues.details.entry(n).or_default().finish(*r),
         Msg::Changed { after, ok, number } => {
             st.changing = None;
             match after {
@@ -2656,7 +2721,7 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         "review-refresh" => vec![a(Act::Refresh)],
         "review-filter" | "review-search" | "review-scroll" | "pr-lines" | "pr-comment"
         | "pr-compose" | "pr-suggest" | "pr-review" | "pr-submit" | "pr-merge" | "pr-threads"
-        | "create-pr" | "pr-title" | "generate-body" | "start-branch" => {
+        | "pr-next-thread" | "create-pr" | "pr-title" | "generate-body" | "start-branch" => {
             vec![a(Act::Script(cmd.to_owned(), arg.to_owned()))]
         }
         _ => return None,

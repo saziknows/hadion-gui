@@ -84,21 +84,21 @@ pub fn parse_patch(patch: &str) -> Vec<PatchHunk> {
     let (mut old_no, mut new_no) = (0u32, 0u32);
     for raw in patch.split('\n') {
         let line = raw.strip_suffix('\r').unwrap_or(raw);
-        if line.starts_with("@@") {
-            if let Some((os, ol, ns, nl, context)) = header_of(line) {
-                hunks.push(PatchHunk {
-                    header: line.to_owned(),
-                    old_start: os,
-                    old_len: ol,
-                    new_start: ns,
-                    new_len: nl,
-                    context,
-                    lines: Vec::new(),
-                });
-                old_no = os;
-                new_no = ns;
-                continue;
-            }
+        if line.starts_with("@@")
+            && let Some((os, ol, ns, nl, context)) = header_of(line)
+        {
+            hunks.push(PatchHunk {
+                header: line.to_owned(),
+                old_start: os,
+                old_len: ol,
+                new_start: ns,
+                new_len: nl,
+                context,
+                lines: Vec::new(),
+            });
+            old_no = os;
+            new_no = ns;
+            continue;
         }
         let Some(h) = hunks.last_mut() else {
             continue;
@@ -167,6 +167,9 @@ pub struct LinePos {
     pub line: usize,
 }
 
+/// Where a comment sits: the side and the line number on that side.
+pub type Anchor = (Side, u32);
+
 /// Where a comment on the lines from `a` to `b` (either order) goes:
 /// `(start, end)` anchors, `start` `None` for a single line. `Err` when the
 /// range crosses hunks or touches a line that cannot be commented.
@@ -174,7 +177,7 @@ pub fn range_anchor(
     hunks: &[PatchHunk],
     a: LinePos,
     b: LinePos,
-) -> Result<(Option<(Side, u32)>, (Side, u32)), &'static str> {
+) -> Result<(Option<Anchor>, Anchor), &'static str> {
     let (first, last) = if a <= b { (a, b) } else { (b, a) };
     if first.hunk != last.hunk {
         return Err("A comment can cover lines of one hunk only.");

@@ -131,7 +131,9 @@ pub fn new_pr(ui: &mut Ui, repo: &mut RepoState, _now: i64, actions: &mut Vec<Ac
                 if bases.is_empty() {
                     form::text(ui, "rv_new_pr_base", &mut f.base, "Base branch");
                 } else {
-                    form::select(ui, "rv_new_pr_base_sel", &mut f.base, &bases, 280.0);
+                    if form::select(ui, "rv_new_pr_base_sel", &mut f.base, &bases, 280.0) {
+                        actions.push(Act::SetBase(f.base.clone()).into());
+                    }
                 }
             });
             ui.add_space(4.0);
@@ -276,7 +278,12 @@ pub fn new_pr(ui: &mut Ui, repo: &mut RepoState, _now: i64, actions: &mut Vec<Ac
             _ => String::new(),
         };
         form::field(ui, "Description", Some(&help), |ui| {
-            form::area(ui, "rv_new_pr_body", &mut f.body, "Why and how", 10);
+            egui::ScrollArea::vertical()
+                .id_salt("rv_new_pr_body_scroll")
+                .max_height(380.0)
+                .show(ui, |ui| {
+                    form::area(ui, "rv_new_pr_body", &mut f.body, "Why and how", 10);
+                });
         });
         let has_commits = matches!(&f.commits, Some(Ok(c)) if !c.is_empty());
         if form::button(ui, "Generate from commits", has_commits)

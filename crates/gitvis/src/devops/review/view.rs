@@ -81,13 +81,16 @@ fn header(
         sub.push(format!("{c}…"));
     }
     let mode = st.mode;
+    let issues_off = st.meta().has_issues == Some(false);
     kit::page_header(ui, "Review", &sub.join("  ·  "), |ui| {
         let (label, act) = match mode {
             Mode::Prs => ("New pull request", Act::NewPr),
             Mode::Issues => ("New issue", Act::NewIssue),
         };
+        let enabled = !(mode == Mode::Issues && issues_off);
         if IconButton::new(Icon::Plus, label)
             .primary(true)
+            .enabled(enabled)
             .show(ui)
             .clicked()
         {
@@ -314,10 +317,10 @@ fn pr_list(ui: &mut Ui, st: &mut State, now: i64, actions: &mut Vec<Action>) {
                 "Loading pull requests…",
                 "One GraphQL query per page of 20: reviews, checks and mergeability. GitHub computes mergeability for each pull request, which takes a few seconds on big repositories.",
             );
-        } else if let Some(e) = &list.error {
-            if widgets::error_block(ui, "Could not load the pull requests", e) {
-                actions.push(Act::Refresh.into());
-            }
+        } else if let Some(e) = &list.error
+            && widgets::error_block(ui, "Could not load the pull requests", e)
+        {
+            actions.push(Act::Refresh.into());
         }
         return;
     }

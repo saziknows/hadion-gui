@@ -252,9 +252,8 @@ fn merge_box(
             "GitHub did not say which methods the repository allows; all three are offered."
                 .to_owned()
         } else if allowed.len() == 1 {
-            format!(
-                "The repository allows only this method (the others are switched off in its settings)."
-            )
+            "The repository allows only this method (the others are switched off in its settings)."
+                .to_owned()
         } else {
             format!(
                 "The repository allows {}.",

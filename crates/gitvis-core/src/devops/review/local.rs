@@ -374,8 +374,37 @@ pub fn merge_subject_pr_number(subject: &str) -> Option<u64> {
     digits.parse().ok()
 }
 
-/// A GitHub body as readable plain text: HTML comments removed, runs of
-/// blank lines collapsed, CRLF normalised, trailing space trimmed.
+/// Markdown and HTML markup that reads as noise in plain text.
+fn markup() -> &'static [(regex::Regex, &'static str)] {
+    use std::sync::OnceLock;
+    static RES: OnceLock<Vec<(regex::Regex, &'static str)>> = OnceLock::new();
+    RES.get_or_init(|| {
+        [
+            // Images: `![alt](url)` becomes `[image: alt]`.
+            (r"!\[([^\]]*)\]\([^)\s]*\)", "[image: $1]"),
+            // Links: `[text](url)` becomes `text`.
+            (r"\[([^\]]+)\]\([^)\s]*\)", "$1"),
+            // Bold.
+            (r"\*\*([^*\n]+)\*\*", "$1"),
+            (r"__([^_\n]+)__", "$1"),
+            // Simple HTML tags.
+            (
+                r"(?i)</?(details|summary|br|p|b|i|em|strong|sub|sup|code|kbd|img|div|span)\b[^>]*>",
+                "",
+            ),
+            // Heading marks at the start of a line.
+            (r"(?m)^#{1,6}[ \t]+", ""),
+        ]
+        .into_iter()
+        .filter_map(|(re, to)| regex::Regex::new(re).ok().map(|r| (r, to)))
+        .collect()
+    })
+}
+
+/// A GitHub body as readable plain text: HTML comments and common
+/// Markdown markup (links, images, bold, headings, simple HTML tags)
+/// removed, runs of blank lines collapsed, CRLF normalised, trailing space
+/// trimmed. Code spans and fenced blocks keep their text.
 pub fn plain_text(body: &str) -> String {
     let mut s = body.replace("\r\n", "\n");
     while let Some(start) = s.find("<!--") {
@@ -385,6 +414,11 @@ pub fn plain_text(body: &str) -> String {
                 s.truncate(start);
                 break;
             }
+        }
+    }
+    for (re, to) in markup() {
+        if re.is_match(&s) {
+            s = re.replace_all(&s, *to).into_owned();
         }
     }
     let mut out = String::with_capacity(s.len());
@@ -634,7 +668,16 @@ mod tests {
     #[test]
     fn plain_text_cleanup() {
         let body = "<!-- security-action:summary -->\r\n## Summary\r\n\r\n\r\n\r\nText   \r\n<!-- unclosed";
-        assert_eq!(plain_text(body), "## Summary\n\nText");
+        assert_eq!(plain_text(body), "Summary\n\nText");
+        assert_eq!(
+            plain_text("**19** files: [`a.rs`](https://x/y#diff) and ![shot](https://i/p.png)"),
+            "19 files: `a.rs` and [image: shot]"
+        );
+        assert_eq!(
+            plain_text("<details><summary>More</summary>\nBody<br/></details>"),
+            "More\nBody"
+        );
+        assert_eq!(plain_text("x # not a heading"), "x # not a heading");
     }
 
     #[test]

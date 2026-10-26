@@ -54,6 +54,12 @@ pub fn paint_label_chip(painter: &egui::Painter, p: &Palette, x: f32, cy: f32, l
     let rect = Rect::from_min_size(pos2(x, cy - 9.0), vec2(w, 18.0));
     painter.rect_filled(rect, CornerRadius::same(9), p.hover);
     painter.circle_filled(pos2(x + 9.0, cy), 3.5, label_color(l, p));
+    // A hairline ring keeps pale label colours visible on light surfaces.
+    painter.circle_stroke(
+        pos2(x + 9.0, cy),
+        3.5,
+        egui::Stroke::new(0.8, p.text_3.gamma_multiply(0.6)),
+    );
     painter.galley(pos2(x + 17.0, cy - g.size().y / 2.0), g, p.text_2);
     rect.right()
 }
@@ -403,14 +409,27 @@ pub fn prose(ui: &mut Ui, body: &str, url: &str, actions: &mut Vec<crate::state:
     }
 }
 
-/// A plain-text body with a size: comments in threads and timelines.
+/// Longest comment shown in a timeline or thread (bots post pages).
+const MAX_COMMENT: usize = 3_000;
+
+/// A comment as wrapped plain text: in threads and timelines.
 pub fn comment_text(ui: &mut Ui, body: &str) {
     let p = *pal(ui);
     let text = local::plain_text(body);
-    let shown: String = text.chars().take(MAX_BODY).collect();
+    let total = text.chars().count();
+    let shown: String = text.chars().take(MAX_COMMENT).collect();
     ui.scope(|ui| {
         ui.set_max_width(ui.available_width().min(kit::PROSE));
         ui.add(ELabel::new(RichText::new(shown).size(size::BODY).color(p.text)).wrap());
+        if total > MAX_COMMENT {
+            kit::muted(
+                ui,
+                &format!(
+                    "Cut here: {} more characters on GitHub.",
+                    format::count(total - MAX_COMMENT)
+                ),
+            );
+        }
     });
 }
 

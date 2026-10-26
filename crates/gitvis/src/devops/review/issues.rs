@@ -148,10 +148,10 @@ fn issue_list(ui: &mut Ui, st: &mut State, now: i64, actions: &mut Vec<Action>) 
                 "Loading issues…",
                 "GET issues, newest update first (pull requests left out).",
             );
-        } else if let Some(e) = &list.error {
-            if widgets::error_block(ui, "Could not load the issues", e) {
-                actions.push(Act::Refresh.into());
-            }
+        } else if let Some(e) = &list.error
+            && widgets::error_block(ui, "Could not load the issues", e)
+        {
+            actions.push(Act::Refresh.into());
         }
         return;
     }
@@ -433,10 +433,6 @@ fn issue_detail(ui: &mut Ui, repo: &mut RepoState, n: u64, now: i64, actions: &m
             issues.edit = None;
         }
 
-        // Description.
-        kit::section(ui, "Description", None);
-        widgets::prose(ui, &issue.body, &issue.url, actions);
-
         // Working on it.
         kit::section(ui, "Work on it", None);
         let b = issues.branch.get_or_insert_with(|| BranchForm {
@@ -534,6 +530,10 @@ fn issue_detail(ui: &mut Ui, repo: &mut RepoState, n: u64, now: i64, actions: &m
                 kit::muted(ui, &format!("Showing the newest {MAX_MENTIONS}."));
             }
         }
+
+        // Description.
+        kit::section(ui, "Description", None);
+        widgets::prose(ui, &issue.body, &issue.url, actions);
 
         // Comments.
         kit::section(ui, "Comments", Some(comments.len()));

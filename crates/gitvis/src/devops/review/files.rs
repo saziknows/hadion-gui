@@ -88,7 +88,19 @@ pub fn show(
                 });
                 return;
             };
-            file_header(ui, &file, viewed, n, v.detail.data.as_ref(), actions);
+            let mut next = false;
+            file_header(
+                ui,
+                &file,
+                viewed,
+                n,
+                v.detail.data.as_ref(),
+                &mut next,
+                actions,
+            );
+            if next {
+                jump_next(v);
+            }
             diff(ui, v, &file, n, dark, changing, now, actions);
         });
 }
@@ -434,6 +446,7 @@ fn file_header(
     viewed: &HashSet<String>,
     n: u64,
     detail: Option<&PrDetail>,
+    next: &mut bool,
     actions: &mut Vec<Action>,
 ) {
     let p = *pal(ui);
@@ -447,24 +460,6 @@ fn file_header(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                let (dir, name) = format::split_path(&f.path);
-                ui.label(
-                    RichText::new(name)
-                        .size(size::TITLE)
-                        .family(semibold())
-                        .color(p.text_strong),
-                );
-                if !dir.is_empty() {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(dir.trim_end_matches('/'))
-                                .size(size::SMALL)
-                                .color(p.text_3),
-                        )
-                        .truncate(),
-                    );
-                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     if let Some(d) = detail
@@ -481,6 +476,35 @@ fn file_header(
                     if form::checkbox(ui, &mut seen, "Viewed").changed() {
                         actions.push(Act::ToggleViewed(key).into());
                     }
+                    if detail.is_some_and(|d| d.threads_for(&f.path).next().is_some())
+                        && form::button(ui, "Next thread", true)
+                            .on_hover_text(
+                                "Scroll to the next review thread of this file, unresolved ones first",
+                            )
+                            .clicked()
+                    {
+                        *next = true;
+                    }
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        let (dir, name) = format::split_path(&f.path);
+                        ui.label(
+                            RichText::new(name)
+                                .size(size::TITLE)
+                                .family(semibold())
+                                .color(p.text_strong),
+                        );
+                        if !dir.is_empty() {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(dir.trim_end_matches('/'))
+                                        .size(size::SMALL)
+                                        .color(p.text_3),
+                                )
+                                .truncate(),
+                            );
+                        }
+                    });
                 });
             });
             ui.horizontal_wrapped(|ui| {
@@ -681,6 +705,7 @@ fn diff(
         replies,
         opened,
         closed,
+        jump,
         ..
     } = v;
     if *dragging && !ui.input(|i| i.pointer.primary_down()) {
@@ -735,7 +760,9 @@ fn diff(
                         "These threads point at lines that are no longer in this diff (outdated), or at the file itself.",
                     );
                     for t in &unplaced {
-                        thread_block(ui, t, n, 0.0, opened, closed, replies, changing, now, actions);
+                        thread_block(
+                            ui, t, n, 0.0, jump, opened, closed, replies, changing, now, actions,
+                        );
                     }
                 });
                 kit::hairline(ui);
@@ -833,7 +860,8 @@ fn diff(
                         ui.add_space(4.0);
                         for t in ts {
                             thread_block(
-                                ui, t, n, CODE_X, opened, closed, replies, changing, now, actions,
+                                ui, t, n, CODE_X, jump, opened, closed, replies, changing, now,
+                                actions,
                             );
                         }
                         ui.add_space(4.0);
@@ -999,6 +1027,7 @@ fn thread_block(
     t: &ReviewThread,
     n: u64,
     indent: f32,
+    jump: &mut Option<String>,
     opened: &mut HashSet<String>,
     closed: &mut HashSet<String>,
     replies: &mut HashMap<String, String>,
@@ -1020,7 +1049,7 @@ fn thread_block(
         } else {
             p.warning.gamma_multiply(0.55)
         };
-        Frame::NONE
+        let frame = Frame::NONE
             .fill(p.raised)
             .stroke(Stroke::new(1.0, border))
             .corner_radius(CornerRadius::same(radius::L))
@@ -1186,6 +1215,10 @@ fn thread_block(
                     });
                 }
             });
+        if jump.as_deref() == Some(t.id.as_str()) {
+            ui.scroll_to_rect(frame.response.rect, Some(egui::Align::TOP));
+            *jump = None;
+        }
     });
 }
 
@@ -1275,4 +1308,37 @@ fn range_words(
         (Some((Left, a)), (Right, b)) => format!("old line {a} to line {b}"),
         (Some((Right, a)), (Left, b)) => format!("line {a} to old line {b}"),
     }
+}
+
+/// Threads of the selected file in reading order: the ones without a line
+/// in the diff first, then by line.
+fn ordered_threads<'a>(d: &'a PrDetail, path: &'a str) -> Vec<&'a ReviewThread> {
+    let mut t: Vec<&ReviewThread> = d.threads_for(path).collect();
+    t.sort_by_key(|t| (t.anchor().is_some(), t.line.unwrap_or(0)));
+    t
+}
+
+/// Scroll to the next thread of the selected file (unresolved ones first,
+/// then the rest), opening it.
+pub fn jump_next(v: &mut PrView) {
+    let (Some(d), Some(path)) = (v.detail.data.as_ref(), v.file.as_ref()) else {
+        return;
+    };
+    let all = ordered_threads(d, path);
+    let mut order: Vec<&ReviewThread> = all.iter().copied().filter(|t| !t.resolved).collect();
+    order.extend(all.iter().copied().filter(|t| t.resolved));
+    if order.is_empty() {
+        return;
+    }
+    let at = v
+        .last_jump
+        .as_ref()
+        .and_then(|id| order.iter().position(|t| &t.id == id))
+        .map(|i| (i + 1) % order.len())
+        .unwrap_or(0);
+    let id = order[at].id.clone();
+    v.closed.remove(&id);
+    v.opened.insert(id.clone());
+    v.last_jump = Some(id.clone());
+    v.jump = Some(id);
 }
