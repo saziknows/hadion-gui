@@ -31,7 +31,7 @@ impl Program {
 }
 
 /// A described call.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Call {
     pub program: Program,
     pub args: Vec<String>,
@@ -42,6 +42,18 @@ pub struct Call {
     pub shown: Option<Value>,
     /// Changes something on the forge.
     pub write: bool,
+}
+
+/// Debug output shows the masked body only, so a secret never reaches a
+/// debug print.
+impl std::fmt::Debug for Call {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Call")
+            .field("command", &self.display())
+            .field("body", &self.shown)
+            .field("write", &self.write)
+            .finish()
+    }
 }
 
 impl Call {
@@ -274,6 +286,7 @@ mod tests {
         let m = w.clone().shown(json!({"a": MASK}));
         assert!(m.display().contains("secret values masked"));
         assert!(!m.body_preview().unwrap().contains('1'));
+        assert!(!format!("{m:?}").contains(": 1"), "{m:?}");
         let a = Call::new(
             Program::Az,
             vec![

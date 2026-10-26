@@ -32,10 +32,13 @@ fn when(run: &WorkflowRun) -> Option<i64> {
 
 /// Failed runs on the user's branches that ended within `window_secs` of
 /// `now`, newest first (the order of `runs`, which GitHub sends newest
-/// first). `login` is compared case-insensitively.
+/// first). `repo` is the repository's `owner/repo` (pull requests from
+/// forks run on a branch of the fork, not of this repository); `login` is
+/// compared case-insensitively.
 pub fn failed_on_my_branches<'a>(
     runs: &'a [WorkflowRun],
     prs: &[PullRequest],
+    repo: &str,
     login: &str,
     now: i64,
     window_secs: i64,
@@ -55,10 +58,13 @@ pub fn failed_on_my_branches<'a>(
         }
         let why = if me(&run.actor) || me(&run.triggering_actor) {
             Why::Actor
-        } else if let Some(pr) = prs
-            .iter()
-            .find(|p| me(&p.author) && p.head == run.branch && p.head_repo.is_none())
-        {
+        } else if let Some(pr) = prs.iter().find(|p| {
+            me(&p.author)
+                && p.head == run.branch
+                && p.head_repo
+                    .as_deref()
+                    .is_none_or(|h| h.eq_ignore_ascii_case(repo))
+        }) {
             Why::PrBranch(pr.number)
         } else {
             continue;
@@ -173,8 +179,12 @@ mod tests {
             run(3, 1, "old", "octo", Some("failure"), now - 2 * day), // too old
             run(2, 4, "feature", "octo", Some("timed_out"), now - 700), // mine, still failing
         ];
-        let prs = vec![pr(12, "OCTO", "review-me"), pr(13, "dana", "main")];
-        let got = failed_on_my_branches(&runs, &prs, "octo", now, day);
+        let mut fork = pr(14, "octo", "feature");
+        fork.head_repo = Some("someone/fork".into());
+        let mut same = pr(12, "OCTO", "review-me");
+        same.head_repo = Some("acme/web".into());
+        let prs = vec![same, pr(13, "dana", "main"), fork];
+        let got = failed_on_my_branches(&runs, &prs, "acme/web", "octo", now, day);
         let ids: Vec<(u64, Why, bool)> = got
             .iter()
             .map(|f| (f.run.id, f.why, f.superseded))
@@ -187,7 +197,7 @@ mod tests {
                 (2, Why::Actor, false),
             ]
         );
-        assert!(failed_on_my_branches(&runs, &prs, "", now, day).is_empty());
-        assert_eq!(my_prs(&prs, "octo").len(), 1);
+        assert!(failed_on_my_branches(&runs, &prs, "acme/web", "", now, day).is_empty());
+        assert_eq!(my_prs(&prs, "octo").len(), 2);
     }
 }

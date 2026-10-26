@@ -149,6 +149,18 @@ fn capture(call: &Call, dir: &Path, calls: &mut Vec<ApiCall>) -> Captured {
     }
 }
 
+/// `az version -o tsv` prints three tab-separated versions (cli, core,
+/// telemetry): keep the first.
+pub fn clean_version(t: Tool, v: &str) -> String {
+    match t {
+        Tool::Az => match v.split_whitespace().next() {
+            Some(first) if !first.is_empty() => format!("azure-cli {first}"),
+            _ => v.to_owned(),
+        },
+        _ => v.trim().to_owned(),
+    }
+}
+
 /// Check the CLI for a remote (runs one to three commands; call from a
 /// background thread).
 pub fn check(remote: &ForgeRemote, dir: &Path, calls: &mut Vec<ApiCall>) -> ToolState {
@@ -156,7 +168,7 @@ pub fn check(remote: &ForgeRemote, dir: &Path, calls: &mut Vec<ApiCall>) -> Tool
     let Some(installed) = devtools::detect(t) else {
         return ToolState::Missing;
     };
-    let version = installed.version.clone();
+    let version = clean_version(t, &installed.version);
     match remote.kind {
         ForgeKind::GitLab => {
             let status = capture(&gitlab::auth_status(remote), dir, calls);
@@ -263,6 +275,11 @@ mod tests {
         assert_eq!(signed_out[0], "az login");
         assert!(signed_out[1].contains("https://dev.azure.com/acme"));
         assert_eq!(tool(ForgeKind::Azure), Tool::Az);
+        assert_eq!(
+            clean_version(Tool::Az, &["2.91.0", "2.91.0", "1.1.0"].join("\t")),
+            "azure-cli 2.91.0"
+        );
+        assert_eq!(clean_version(Tool::Glab, " glab 1.46.1 "), "glab 1.46.1");
         assert!(!ToolState::Missing.ready());
         assert_eq!(
             ToolState::Ready {

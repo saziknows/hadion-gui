@@ -19,7 +19,7 @@ use crate::devops::gh::{Method, encode};
 use crate::{Error, Result};
 
 /// One GitLab REST request.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct GlRequest {
     pub method: Method,
     /// Relative to `/api/v4/`, e.g. `projects/a%2Fb/merge_requests`.
@@ -29,6 +29,18 @@ pub struct GlRequest {
     pub shown: Option<Value>,
     /// The GitLab host (`gitlab.com`, `gitlab.example.org`).
     pub host: String,
+}
+
+/// Debug output shows the masked body only.
+impl std::fmt::Debug for GlRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GlRequest")
+            .field("method", &self.method)
+            .field("endpoint", &self.endpoint)
+            .field("body", &self.shown)
+            .field("host", &self.host)
+            .finish()
+    }
 }
 
 impl GlRequest {
