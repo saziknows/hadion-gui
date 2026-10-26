@@ -561,7 +561,7 @@ pub fn lint(df: &Dockerfile) -> Vec<Finding> {
             if img.digest.is_none() && !img.uses_arg() {
                 out.push(Finding {
                     rule: "no-digest",
-                    severity: Severity::Low,
+                    severity: Severity::Unknown,
                     line: st.line,
                     title: format!("Base image {} is not pinned by digest", img.text),
                     explanation: "A tag can be moved to another image. A digest names exactly one image; Dependabot and Renovate keep digests up to date.",
@@ -788,9 +788,11 @@ pub struct ComposeImage {
 
 /// Services and their images in a compose file.
 pub fn compose_images(path: &str, text: &str) -> Vec<ComposeImage> {
-    let Ok(v) = serde_yaml::from_str::<serde_yaml::Value>(text) else {
+    let Ok(mut v) = serde_yaml::from_str::<serde_yaml::Value>(text) else {
         return Vec::new();
     };
+    // `<<: *defaults` merge keys (shared service settings).
+    let _ = v.apply_merge();
     let Some(services) = v.get("services").and_then(|s| s.as_mapping()) else {
         return Vec::new();
     };

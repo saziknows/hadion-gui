@@ -229,12 +229,9 @@ impl std::fmt::Debug for SecretSet {
 impl SecretSet {
     /// The command as shown in confirmations: never the value.
     pub fn display(&self) -> String {
-        format!(
-            "gh {}   (value from standard input, {} characters, not shown)",
-            crate::devops::proc::render_args(
-                &self.args.iter().map(String::as_str).collect::<Vec<_>>()
-            ),
-            String::from_utf8_lossy(&self.stdin).chars().count()
+        secret_set_preview(
+            &self.args,
+            String::from_utf8_lossy(&self.stdin).chars().count(),
         )
     }
 
@@ -243,6 +240,55 @@ impl SecretSet {
         self.stdin.fill(0);
         self.stdin.clear();
     }
+}
+
+/// `gh secret set NAME --repo o/r   (value from standard input, N characters, not shown)`.
+pub fn secret_set_preview(args: &[String], chars: usize) -> String {
+    format!(
+        "gh {}   (value from standard input, {chars} characters, not shown)",
+        crate::devops::proc::render_args(&args.iter().map(String::as_str).collect::<Vec<_>>())
+    )
+}
+
+/// The arguments of [`secret_set`] alone (for previews before the value is
+/// taken out of the form).
+pub fn secret_set_args(full_name: &str, name: &str, env: Option<&str>) -> Vec<String> {
+    secret_set(full_name, name, env, Vec::new()).args
+}
+
+/// `secrets.NAME` references in `.github/workflows/*.yml`: `(name, files)`,
+/// sorted by name. `GITHUB_TOKEN` is left out (GitHub provides it).
+pub fn workflow_secret_refs(workdir: &std::path::Path) -> Vec<(String, Vec<String>)> {
+    use std::collections::BTreeMap;
+    let re = regex::Regex::new(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)").expect("valid regex");
+    let mut map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let dir = workdir.join(".github").join("workflows");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".yml") || n.ends_with(".yaml"))
+        .collect();
+    files.sort();
+    for f in files {
+        let Ok(text) = std::fs::read_to_string(dir.join(&f)) else {
+            continue;
+        };
+        let rel = format!(".github/workflows/{f}");
+        for c in re.captures_iter(&text) {
+            let name = c[1].to_ascii_uppercase();
+            if name == "GITHUB_TOKEN" {
+                continue;
+            }
+            let v = map.entry(name).or_default();
+            if !v.contains(&rel) {
+                v.push(rel.clone());
+            }
+        }
+    }
+    map.into_iter().collect()
 }
 
 /// `gh secret set NAME --repo o/r [--env E]` with the value on standard
@@ -354,6 +400,42 @@ mod tests {
             secret_delete_args("o/r", "X", None),
             vec!["secret", "delete", "X", "--repo", "o/r"]
         );
+    }
+
+    #[test]
+    fn workflow_refs() {
+        let dir = std::env::temp_dir().join(format!("gitvis-govern-wf-{}", std::process::id()));
+        let wf = dir.join(".github/workflows");
+        std::fs::create_dir_all(&wf).unwrap();
+        std::fs::write(
+            wf.join("ci.yml"),
+            "env:\n  A: ${{ secrets.NPM_TOKEN }}\n  B: ${{ secrets.GITHUB_TOKEN }}\n  C: ${{secrets.deploy_key}}\n",
+        )
+        .unwrap();
+        std::fs::write(wf.join("release.yaml"), "x: ${{ secrets.NPM_TOKEN }}\n").unwrap();
+        std::fs::write(wf.join("notes.md"), "secrets.IGNORED").unwrap();
+        let refs = workflow_secret_refs(&dir);
+        assert_eq!(
+            refs,
+            vec![
+                (
+                    "DEPLOY_KEY".to_string(),
+                    vec![".github/workflows/ci.yml".to_string()]
+                ),
+                (
+                    "NPM_TOKEN".to_string(),
+                    vec![
+                        ".github/workflows/ci.yml".to_string(),
+                        ".github/workflows/release.yaml".to_string()
+                    ]
+                ),
+            ]
+        );
+        assert_eq!(
+            secret_set_preview(&secret_set_args("o/r", "x", None), 5),
+            "gh secret set X --repo o/r   (value from standard input, 5 characters, not shown)"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

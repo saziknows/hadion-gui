@@ -427,6 +427,9 @@ impl Matcher {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Lookup {
     pub path: String,
+    /// The path is a directory (it ends with `/` or has tracked files
+    /// below it): the rules are those of a new file directly inside it.
+    pub is_dir: bool,
     /// Every matching rule (indices into `rules`), in file order; the last
     /// one wins.
     pub matching: Vec<usize>,
@@ -437,12 +440,14 @@ pub struct Lookup {
     pub files_below: usize,
 }
 
+/// The name of the imaginary new file a directory lookup probes with
+/// (no extension, so extension rules do not match it).
+pub const PROBE: &str = "new-file";
+
 /// Look up `path` (a file or a directory) against the rules.
 pub fn lookup(matcher: &Matcher, path: &str, tracked: &[String]) -> Lookup {
     let path = path.trim().trim_start_matches("./").trim_start_matches('/');
     let dir = path.trim_end_matches('/');
-    let matching = matcher.matching(dir);
-    let winner = matching.last().copied();
     let prefix = format!("{dir}/");
     let mut below: HashMap<Option<usize>, usize> = HashMap::new();
     let mut files_below = 0;
@@ -452,10 +457,18 @@ pub fn lookup(matcher: &Matcher, path: &str, tracked: &[String]) -> Lookup {
             *below.entry(matcher.owner_rule(f)).or_insert(0) += 1;
         }
     }
+    let is_dir = path.ends_with('/') || files_below > 0;
+    let matching = if is_dir {
+        matcher.matching(&format!("{dir}/{PROBE}"))
+    } else {
+        matcher.matching(dir)
+    };
+    let winner = matching.last().copied();
     let mut below: Vec<(Option<usize>, usize)> = below.into_iter().collect();
     below.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     Lookup {
         path: path.to_owned(),
+        is_dir,
         matching,
         winner,
         below,
@@ -857,10 +870,16 @@ bad-owner @not/valid/owner user@
         assert_eq!(a.stats[line4].won, 0);
         // Lookup of a directory.
         let l = lookup(&m, "apps", &tracked);
+        assert!(l.is_dir);
         assert_eq!(l.files_below, 2);
         assert_eq!(l.below.len(), 2);
-        assert_eq!(f.rules[l.winner.unwrap()].line, 2);
+        // A new file directly in apps/ falls under `/apps/` (line 11).
+        assert_eq!(f.rules[l.winner.unwrap()].line, 11);
+        let l = lookup(&m, "docs/", &tracked);
+        assert!(l.is_dir);
+        assert_eq!(f.rules[l.winner.unwrap()].line, 6);
         let l = lookup(&m, "/src/app.js", &tracked);
+        assert!(!l.is_dir);
         assert_eq!(l.matching.len(), 3);
         assert_eq!(f.rules[l.winner.unwrap()].line, 15);
     }
