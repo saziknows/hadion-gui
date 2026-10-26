@@ -42,10 +42,15 @@ pub fn show(
             bottom: (space::L + 4.0) as i8,
         })
         .shadow(style.visuals.window_shadow);
+    // Confirmations that show request bodies or commands get more room.
+    let width = match dialog {
+        Dialog::ConfirmAction { details, .. } if !details.is_empty() => 620.0,
+        _ => WIDTH,
+    };
     let modal = egui::Modal::new(egui::Id::unique("dialog"))
         .frame(frame)
         .show(ctx, |ui| {
-            ui.set_width(WIDTH);
+            ui.set_width(width);
             ui.spacing_mut().item_spacing.y = space::S;
             body(ui, dialog, fresh, snap, actions)
         });
@@ -543,6 +548,58 @@ fn body(
             let o = buttons(ui, confirm, true, *danger, true);
             if matches!(o, Outcome::Confirm) {
                 actions.push(Action::RunSeq(ops.clone()));
+            }
+            o
+        }
+        Dialog::ConfirmAction {
+            title: t,
+            body,
+            confirm,
+            danger,
+            details,
+            action,
+        } => {
+            title(ui, t);
+            if !body.is_empty() {
+                text(ui, body);
+            }
+            if !details.is_empty() {
+                let p = *pal(ui);
+                ui.add_space(2.0);
+                label(ui, "What gitvis will run");
+                Frame::NONE
+                    .fill(if ui.visuals().dark_mode {
+                        p.chrome
+                    } else {
+                        p.canvas
+                    })
+                    .stroke(Stroke::new(1.0, p.border))
+                    .corner_radius(CornerRadius::same(radius::M))
+                    .inner_margin(Margin::symmetric(10, 8))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        egui::ScrollArea::vertical()
+                            .id_salt("confirm_details")
+                            .max_height(260.0)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                for d in details.iter() {
+                                    ui.add(
+                                        Label::new(
+                                            RichText::new(d)
+                                                .family(egui::FontFamily::Monospace)
+                                                .size(size::MONO - 0.5)
+                                                .color(p.text),
+                                        )
+                                        .wrap(),
+                                    );
+                                }
+                            });
+                    });
+            }
+            let o = buttons(ui, confirm, true, *danger, false);
+            if matches!(o, Outcome::Confirm) {
+                actions.push((**action).clone());
             }
             o
         }

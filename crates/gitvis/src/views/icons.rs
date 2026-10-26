@@ -12,6 +12,8 @@ use egui::{
 use crate::theme;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// Some icons exist for pages still being filled in (removed at integration).
+#[allow(dead_code)]
 pub enum Icon {
     Pull,
     Push,
@@ -53,6 +55,52 @@ pub enum Icon {
     Chart,
     /// Commit nodes on a line with a branch: the history page.
     Graph,
+    /// A house: the home page.
+    Home,
+    /// A rocket: releases and deployments (Ship).
+    Rocket,
+    /// A padlock: governance, protection, secrets.
+    Lock,
+    /// A terminal window with a prompt: the workbench and console.
+    Terminal,
+    /// A circle with a dot: an issue.
+    Issue,
+    /// A tray: the inbox.
+    Inbox,
+    /// A cube: a package or container image.
+    Package,
+    /// A cloud: environments, clusters.
+    Cloud,
+    /// A price tag: tags and releases.
+    Tag,
+    /// A bug: bisect.
+    Bug,
+    /// A folder: worktrees, directories.
+    Folder,
+    /// Two lines joining: merge.
+    Merge,
+    /// A speech bubble: comments and reviews.
+    Comment,
+    /// A key: secrets and variables.
+    Key,
+    /// A gauge: metrics.
+    Gauge,
+    /// An eye: watch, reveal.
+    Eye,
+    /// A pencil: edit.
+    Edit,
+    /// A bin: delete.
+    Trash,
+    /// A bell: notifications.
+    Bell,
+    /// Two chain links: a link.
+    Link,
+    /// A funnel: filter.
+    Filter,
+    /// A ship's wheel: Kubernetes / Helm.
+    Wheel,
+    /// An arrow down onto a line: download.
+    Download,
 }
 
 /// Draw `icon` centred on `center` inside a `size`×`size` box.
@@ -340,6 +388,343 @@ pub fn paint(p: &Painter, icon: Icon, center: Pos2, size: f32, color: Color32) {
                 ],
                 st,
             );
+        }
+        Icon::Home => {
+            p.line(vec![pt(-0.44, -0.02), pt(0.0, -0.42), pt(0.44, -0.02)], st);
+            p.line(
+                vec![
+                    pt(-0.3, -0.14),
+                    pt(-0.3, 0.42),
+                    pt(0.3, 0.42),
+                    pt(0.3, -0.14),
+                ],
+                st,
+            );
+            p.line(
+                vec![
+                    pt(-0.08, 0.42),
+                    pt(-0.08, 0.16),
+                    pt(0.08, 0.16),
+                    pt(0.08, 0.42),
+                ],
+                st,
+            );
+        }
+        Icon::Rocket => {
+            p.line(
+                vec![
+                    pt(0.0, -0.46),
+                    pt(0.12, -0.32),
+                    pt(0.16, -0.16),
+                    pt(0.16, 0.18),
+                    pt(-0.16, 0.18),
+                    pt(-0.16, -0.16),
+                    pt(-0.12, -0.32),
+                    pt(0.0, -0.46),
+                ],
+                st,
+            );
+            p.line(vec![pt(-0.16, 0.0), pt(-0.34, 0.2), pt(-0.16, 0.2)], st);
+            p.line(vec![pt(0.16, 0.0), pt(0.34, 0.2), pt(0.16, 0.2)], st);
+            p.circle_stroke(pt(0.0, -0.12), 0.06 * s, st);
+            p.line(vec![pt(-0.07, 0.26), pt(0.0, 0.44), pt(0.07, 0.26)], st);
+        }
+        Icon::Lock => {
+            let arc: Vec<Pos2> = (0..=16)
+                .map(|i| {
+                    let a = std::f32::consts::PI + std::f32::consts::PI * i as f32 / 16.0;
+                    pt(0.2 * a.cos(), -0.2 + 0.2 * a.sin())
+                })
+                .collect();
+            let mut shackle = vec![pt(-0.2, -0.04)];
+            shackle.extend(arc);
+            shackle.push(pt(0.2, -0.04));
+            p.line(shackle, st);
+            p.rect_stroke(
+                Rect::from_min_max(pt(-0.32, -0.04), pt(0.32, 0.42)),
+                CornerRadius::same(2),
+                st,
+                StrokeKind::Middle,
+            );
+            p.circle_filled(pt(0.0, 0.17), 0.055 * s, color);
+        }
+        Icon::Terminal => {
+            p.rect_stroke(
+                Rect::from_min_max(pt(-0.44, -0.36), pt(0.44, 0.36)),
+                CornerRadius::same(2),
+                st,
+                StrokeKind::Middle,
+            );
+            p.line(vec![pt(-0.24, -0.12), pt(-0.08, 0.02), pt(-0.24, 0.16)], st);
+            p.line_segment([pt(0.02, 0.18), pt(0.24, 0.18)], st);
+        }
+        Icon::Issue => {
+            p.circle_stroke(c, 0.42 * s, st);
+            p.circle_filled(c, 0.09 * s, color);
+        }
+        Icon::Inbox => {
+            p.line(
+                vec![
+                    pt(-0.42, 0.06),
+                    pt(-0.28, -0.36),
+                    pt(0.28, -0.36),
+                    pt(0.42, 0.06),
+                ],
+                st,
+            );
+            p.line(
+                vec![
+                    pt(-0.42, 0.06),
+                    pt(-0.42, 0.38),
+                    pt(0.42, 0.38),
+                    pt(0.42, 0.06),
+                    pt(0.16, 0.06),
+                    pt(0.1, 0.18),
+                    pt(-0.1, 0.18),
+                    pt(-0.16, 0.06),
+                    pt(-0.42, 0.06),
+                ],
+                st,
+            );
+        }
+        Icon::Package => {
+            p.line(
+                vec![
+                    pt(0.0, -0.44),
+                    pt(0.4, -0.22),
+                    pt(0.4, 0.22),
+                    pt(0.0, 0.44),
+                    pt(-0.4, 0.22),
+                    pt(-0.4, -0.22),
+                    pt(0.0, -0.44),
+                ],
+                st,
+            );
+            p.line(vec![pt(-0.4, -0.22), pt(0.0, 0.0), pt(0.4, -0.22)], st);
+            p.line_segment([pt(0.0, 0.0), pt(0.0, 0.44)], st);
+        }
+        Icon::Cloud => {
+            let arc = |cx: f32, cy: f32, r: f32, a0: f32, a1: f32| -> Vec<Pos2> {
+                (0..=12)
+                    .map(|i| {
+                        let a = a0 + (a1 - a0) * i as f32 / 12.0;
+                        pt(cx + r * a.cos(), cy + r * a.sin())
+                    })
+                    .collect()
+            };
+            let pi = std::f32::consts::PI;
+            let mut pts = vec![pt(0.26, 0.26), pt(-0.24, 0.26)];
+            pts.extend(arc(-0.24, 0.1, 0.16, 0.5 * pi, 1.5 * pi));
+            pts.extend(arc(0.0, -0.02, 0.24, 1.08 * pi, 1.9 * pi));
+            pts.extend(arc(0.26, 0.12, 0.14, 1.6 * pi, 2.5 * pi));
+            p.line(pts, st);
+        }
+        Icon::Tag => {
+            p.line(
+                vec![
+                    pt(-0.42, -0.42),
+                    pt(0.02, -0.42),
+                    pt(0.44, 0.0),
+                    pt(0.0, 0.44),
+                    pt(-0.42, 0.02),
+                    pt(-0.42, -0.42),
+                ],
+                st,
+            );
+            p.circle_filled(pt(-0.2, -0.2), 0.065 * s, color);
+        }
+        Icon::Bug => {
+            p.circle_stroke(pt(0.0, 0.1), 0.24 * s, st);
+            p.circle_stroke(pt(0.0, -0.26), 0.1 * s, st);
+            p.line_segment([pt(0.0, -0.14), pt(0.0, 0.34)], st);
+            for y in [-0.02, 0.12, 0.26] {
+                p.line_segment([pt(-0.24, y), pt(-0.42, y + 0.06)], st);
+                p.line_segment([pt(0.24, y), pt(0.42, y + 0.06)], st);
+            }
+        }
+        Icon::Folder => {
+            p.line(
+                vec![
+                    pt(-0.44, -0.32),
+                    pt(-0.12, -0.32),
+                    pt(-0.04, -0.2),
+                    pt(0.44, -0.2),
+                    pt(0.44, 0.36),
+                    pt(-0.44, 0.36),
+                    pt(-0.44, -0.32),
+                ],
+                st,
+            );
+        }
+        Icon::Merge => {
+            let r = 0.1 * s;
+            p.circle_stroke(pt(-0.24, -0.32), r, st);
+            p.circle_stroke(pt(-0.24, 0.32), r, st);
+            p.circle_stroke(pt(0.26, 0.06), r, st);
+            p.line_segment([pt(-0.24, -0.22), pt(-0.24, 0.22)], st);
+            p.line(
+                vec![
+                    pt(-0.24, -0.14),
+                    pt(-0.12, 0.0),
+                    pt(0.04, 0.06),
+                    pt(0.16, 0.06),
+                ],
+                st,
+            );
+        }
+        Icon::Comment => {
+            p.line(
+                vec![
+                    pt(-0.42, -0.36),
+                    pt(0.42, -0.36),
+                    pt(0.42, 0.2),
+                    pt(0.0, 0.2),
+                    pt(-0.26, 0.42),
+                    pt(-0.2, 0.2),
+                    pt(-0.42, 0.2),
+                    pt(-0.42, -0.36),
+                ],
+                st,
+            );
+        }
+        Icon::Key => {
+            p.circle_stroke(pt(-0.22, 0.0), 0.18 * s, st);
+            p.line_segment([pt(-0.04, 0.0), pt(0.44, 0.0)], st);
+            p.line_segment([pt(0.28, 0.0), pt(0.28, 0.16)], st);
+            p.line_segment([pt(0.42, 0.0), pt(0.42, 0.13)], st);
+        }
+        Icon::Gauge => {
+            let pi = std::f32::consts::PI;
+            let pts: Vec<Pos2> = (0..=20)
+                .map(|i| {
+                    let a = pi + pi * i as f32 / 20.0;
+                    pt(0.4 * a.cos(), 0.16 + 0.4 * a.sin())
+                })
+                .collect();
+            p.line(pts, st);
+            p.line_segment([pt(-0.4, 0.16), pt(0.4, 0.16)], st);
+            p.line_segment([pt(0.0, 0.16), pt(0.2, -0.1)], st);
+            p.circle_filled(pt(0.0, 0.16), 0.06 * s, color);
+        }
+        Icon::Eye => {
+            let pi = std::f32::consts::PI;
+            let top: Vec<Pos2> = (0..=16)
+                .map(|i| {
+                    let a = pi + pi * i as f32 / 16.0;
+                    pt(0.44 * a.cos(), 0.3 * a.sin())
+                })
+                .collect();
+            let bottom: Vec<Pos2> = (0..=16)
+                .map(|i| {
+                    let a = pi * i as f32 / 16.0;
+                    pt(0.44 * a.cos(), 0.3 * a.sin())
+                })
+                .collect();
+            p.line(top, st);
+            p.line(bottom, st);
+            p.circle_stroke(c, 0.12 * s, st);
+        }
+        Icon::Edit => {
+            p.line(
+                vec![
+                    pt(-0.38, 0.38),
+                    pt(-0.32, 0.16),
+                    pt(0.2, -0.36),
+                    pt(0.36, -0.2),
+                    pt(-0.16, 0.32),
+                    pt(-0.38, 0.38),
+                ],
+                st,
+            );
+            p.line_segment([pt(0.08, -0.24), pt(0.24, -0.08)], st);
+        }
+        Icon::Trash => {
+            p.line_segment([pt(-0.4, -0.28), pt(0.4, -0.28)], st);
+            p.line(
+                vec![
+                    pt(-0.12, -0.28),
+                    pt(-0.12, -0.42),
+                    pt(0.12, -0.42),
+                    pt(0.12, -0.28),
+                ],
+                st,
+            );
+            p.line(
+                vec![
+                    pt(-0.28, -0.28),
+                    pt(-0.22, 0.42),
+                    pt(0.22, 0.42),
+                    pt(0.28, -0.28),
+                ],
+                st,
+            );
+            p.line_segment([pt(-0.06, -0.12), pt(-0.06, 0.28)], st);
+            p.line_segment([pt(0.08, -0.12), pt(0.08, 0.28)], st);
+        }
+        Icon::Bell => {
+            let pi = std::f32::consts::PI;
+            let mut pts = vec![pt(-0.38, 0.26), pt(-0.26, 0.1), pt(-0.26, -0.08)];
+            pts.extend((0..=14).map(|i| {
+                let a = pi + pi * i as f32 / 14.0;
+                pt(0.26 * a.cos(), -0.08 + 0.3 * a.sin())
+            }));
+            pts.extend([pt(0.26, 0.1), pt(0.38, 0.26), pt(-0.38, 0.26)]);
+            p.line(pts, st);
+            p.line(vec![pt(-0.1, 0.34), pt(0.0, 0.42), pt(0.1, 0.34)], st);
+        }
+        Icon::Link => {
+            let r = CornerRadius::same((0.12 * s) as u8);
+            let a = Rect::from_center_size(pt(-0.16, 0.16), vec2(0.42 * s, 0.24 * s));
+            let b = Rect::from_center_size(pt(0.16, -0.16), vec2(0.42 * s, 0.24 * s));
+            let rot_a = egui::emath::Rot2::from_angle(-std::f32::consts::FRAC_PI_4);
+            for (rect, center) in [(a, pt(-0.16, 0.16)), (b, pt(0.16, -0.16))] {
+                let corners = [
+                    rect.left_top(),
+                    rect.right_top(),
+                    rect.right_bottom(),
+                    rect.left_bottom(),
+                    rect.left_top(),
+                ];
+                let pts: Vec<Pos2> = corners
+                    .iter()
+                    .map(|q| center + rot_a * (*q - center))
+                    .collect();
+                p.line(pts, st);
+            }
+            let _ = r;
+        }
+        Icon::Filter => {
+            p.line(
+                vec![
+                    pt(-0.42, -0.36),
+                    pt(0.42, -0.36),
+                    pt(0.1, 0.02),
+                    pt(0.1, 0.36),
+                    pt(-0.1, 0.44),
+                    pt(-0.1, 0.02),
+                    pt(-0.42, -0.36),
+                ],
+                st,
+            );
+        }
+        Icon::Wheel => {
+            p.circle_stroke(c, 0.28 * s, st);
+            p.circle_stroke(c, 0.08 * s, st);
+            for k in 0..6 {
+                let a = std::f32::consts::TAU * k as f32 / 6.0;
+                p.line_segment(
+                    [
+                        pt(0.08 * a.cos(), 0.08 * a.sin()),
+                        pt(0.44 * a.cos(), 0.44 * a.sin()),
+                    ],
+                    st,
+                );
+            }
+        }
+        Icon::Download => {
+            p.line_segment([pt(0.0, -0.44), pt(0.0, 0.16)], st);
+            p.line(vec![pt(-0.22, -0.06), pt(0.0, 0.16), pt(0.22, -0.06)], st);
+            p.line_segment([pt(-0.4, 0.42), pt(0.4, 0.42)], st);
         }
     }
 }

@@ -88,6 +88,56 @@ pub fn run_program<S: AsRef<str>>(
     Err(Error::new(message))
 }
 
+/// What a program printed and how it exited, whatever the exit code.
+pub struct RawOutput {
+    pub success: bool,
+    /// `None` when the process was killed by a signal.
+    pub code: Option<i32>,
+    pub stdout: Vec<u8>,
+    pub stderr: String,
+}
+
+/// Run a program and return its output even when it fails, so callers can
+/// read error bodies (`gh api` prints the response on stdout on HTTP errors).
+/// `env` adds variables on top of the usual conventions. Fails only when the
+/// program cannot be started.
+pub fn run_raw<S: AsRef<str>>(
+    program: &str,
+    dir: &Path,
+    args: &[S],
+    stdin: Option<&[u8]>,
+    env: &[(&str, &str)],
+) -> Result<RawOutput> {
+    let mut cmd = command(program, dir);
+    cmd.args(args.iter().map(AsRef::as_ref));
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    if stdin.is_some() {
+        cmd.stdin(Stdio::piped());
+    }
+    let mut child = cmd.spawn().map_err(|e| {
+        Error::new(format!(
+            "Could not start {program} ({e}). Is it installed and on PATH?"
+        ))
+    })?;
+    if let (Some(data), Some(mut pipe)) = (stdin, child.stdin.take()) {
+        let data = data.to_vec();
+        std::thread::spawn(move || {
+            let _ = pipe.write_all(&data);
+        });
+    }
+    let out = child
+        .wait_with_output()
+        .map_err(|e| Error::new(format!("{program} failed: {e}")))?;
+    Ok(RawOutput {
+        success: out.status.success(),
+        code: out.status.code(),
+        stdout: out.stdout,
+        stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+    })
+}
+
 /// Start `git args…` with stdout piped for streaming reads (large outputs
 /// such as `git log -p`). Stderr is discarded; the caller waits on the child.
 pub fn spawn<S: AsRef<str>>(dir: &Path, args: &[S]) -> Result<std::process::Child> {

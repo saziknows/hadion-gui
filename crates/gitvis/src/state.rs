@@ -5,10 +5,11 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
+use gitvis_core::devops::forge::ForgeRemote;
 use gitvis_core::diff::FileDiff;
 use gitvis_core::github::{
     AdminSurface, Annotation, CheckRun, CodeAlert, DependabotAlert, DorkResult, Fork, GitHubData,
-    Job, Outcome, PrDetail, RateLimit, RepoInfo, SecretAlert,
+    Job, Outcome, RateLimit, RepoInfo, SecretAlert,
 };
 use gitvis_core::insights::InsightsReport;
 use gitvis_core::insights::health::Weight;
@@ -22,6 +23,8 @@ use gitvis_core::reflog::{ReflogEntry, Undo};
 use gitvis_core::secrets::{Progress, Report, Severity};
 use gitvis_core::{CommitDetails, DiffTarget, GraphFilter, Oid, Snapshot};
 use serde::{Deserialize, Serialize};
+
+use crate::devops::{ConsoleAction, DevOpsAction, DevOpsPrefs, DevOpsState};
 
 /// A coloured run of characters in a diff line.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -152,9 +155,23 @@ pub struct Dirty {
 /// What the centre of the window shows for a repository.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Page {
+    /// Every open repository at a glance and the GitHub inbox.
+    Home,
     #[default]
     Graph,
+    /// Pull requests, reviews and issues (merge requests on GitLab).
+    Review,
+    /// Actions: runs, workflows, artifacts, caches, validation, local runs
+    /// (pipelines on GitLab / Azure DevOps).
     GitHub,
+    /// Releases, deployments, where a commit is, DORA metrics, packages,
+    /// Kubernetes, Terraform.
+    Ship,
+    /// Alerts, SBOM, image scans, protection, CODEOWNERS, environments,
+    /// secrets and variables.
+    Govern,
+    /// Tasks, interactive rebase, bisect, worktrees, file history, console.
+    Workbench,
     /// Secrets, sensitive files and leaky configuration.
     Security,
     /// Health, hotspots, ownership, branches, commits, releases, timeline,
@@ -644,13 +661,6 @@ impl SecurityPage {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum GitHubTab {
-    #[default]
-    Actions,
-    PullRequests,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum RunFilter {
     #[default]
     All,
@@ -744,24 +754,15 @@ impl RunDetail {
     }
 }
 
-pub struct PrState {
-    pub loading: bool,
-    pub detail: Option<Result<PrDetail, String>>,
-}
-
-/// State of the GitHub page (Actions and pull requests).
+/// State of the Actions page's run list.
 #[derive(Default)]
 pub struct GitHubPage {
-    pub tab: GitHubTab,
     pub run_filter: String,
     pub run_status: RunFilter,
     pub selected_run: Option<u64>,
     /// A run asked for that is not in the list yet (being fetched).
     pub pending_run: Option<u64>,
     pub runs: HashMap<u64, RunDetail>,
-    pub pr_filter: String,
-    pub selected_pr: Option<u64>,
-    pub prs: HashMap<u64, PrState>,
     pub show_timestamps: bool,
     pub log_filter: String,
     /// `(job, step number)` to scroll the log to once it is loaded.
@@ -799,6 +800,8 @@ pub struct RepoState {
     pub undo: Option<Undo>,
     /// `(owner, repo)` when a remote points at github.com.
     pub github_remote: Option<(String, String)>,
+    /// A GitLab or Azure DevOps remote (when there is no GitHub one).
+    pub forge_remote: Option<ForgeRemote>,
     pub github: Option<GitHubData>,
     pub github_error: Option<String>,
     pub github_loading: bool,
@@ -813,6 +816,8 @@ pub struct RepoState {
     pub gh_page: GitHubPage,
     pub sec_page: SecurityPage,
     pub ins_page: InsightsPage,
+    /// Review, CI control, Ship, Govern, Workbench, forge state.
+    pub devops: DevOpsState,
     /// Fingerprints of exposure findings marked as false positives.
     pub dismissed: HashSet<String>,
     pub commit_message: String,
@@ -863,6 +868,7 @@ impl RepoState {
             reflog: Vec::new(),
             undo: None,
             github_remote: None,
+            forge_remote: None,
             github: None,
             github_error: None,
             github_loading: false,
@@ -875,6 +881,7 @@ impl RepoState {
             gh_page: GitHubPage::default(),
             sec_page: SecurityPage::default(),
             ins_page: InsightsPage::default(),
+            devops: DevOpsState::default(),
             dismissed: HashSet::new(),
             commit_message: String::new(),
             amend: false,
@@ -960,6 +967,7 @@ impl RepoState {
             scan_all_refs: self.sec_page.all_refs,
             insights_depth: Some(self.ins_page.depth),
             insights_all_refs: self.ins_page.all_refs,
+            devops: self.devops.prefs(),
         }
     }
 
@@ -977,6 +985,7 @@ impl RepoState {
             self.ins_page.depth = d;
         }
         self.ins_page.all_refs = p.insights_all_refs;
+        self.devops.apply_prefs(&p.devops);
     }
 }
 
@@ -1021,6 +1030,8 @@ pub struct RepoPrefs {
     /// Commits the insights history pass reads (0 = all).
     pub insights_depth: Option<usize>,
     pub insights_all_refs: bool,
+    /// Review, CI, Ship, Govern, Workbench and forge preferences.
+    pub devops: DevOpsPrefs,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1043,6 +1054,8 @@ pub struct Settings {
     pub show_status_bar: bool,
     /// Scan the working tree for secrets when a repository is opened.
     pub scan_on_open: bool,
+    /// Home page (inbox) preferences.
+    pub home: crate::devops::home::Prefs,
 }
 
 impl Default for Settings {
@@ -1063,6 +1076,7 @@ impl Default for Settings {
             verbose: true,
             show_status_bar: true,
             scan_on_open: true,
+            home: Default::default(),
         }
     }
 }
@@ -1116,6 +1130,16 @@ pub enum Dialog {
         confirm: String,
         danger: bool,
         ops: Vec<GitOp>,
+    },
+    /// Confirm, then run any action (DevOps changes). `details` are shown
+    /// in a monospace block: the exact commands and request bodies.
+    ConfirmAction {
+        title: String,
+        body: String,
+        confirm: String,
+        danger: bool,
+        details: Vec<String>,
+        action: Box<Action>,
     },
     Reset {
         branch: String,
@@ -1220,7 +1244,10 @@ pub enum Action {
     /// Escape in the diff view: clear the line selection, else close the file.
     DiffEscape,
     ShowPage(Page),
-    SetGitHubTab(GitHubTab),
+    /// Review, CI, Ship, Govern, Workbench, forge and home actions.
+    DevOps(DevOpsAction),
+    /// Stop, re-run, copy or remove a console run.
+    Console(ConsoleAction),
     /// Show a run on the GitHub page, loading its jobs; optionally focus a job.
     OpenRun {
         run: u64,
@@ -1238,7 +1265,7 @@ pub enum Action {
         run: u64,
         job: u64,
     },
-    /// Show a pull request on the GitHub page, loading its details.
+    /// Show a pull request on the Review page.
     OpenPr(u64),
     RefreshChecks(Oid),
     FindContaining(Oid),

@@ -7,9 +7,10 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 
+use gitvis_core::devops::proc::{self, Exit, Line, ProcSpec};
 use gitvis_core::github::{
     AdminSurface, Annotation, ApiCall, CheckRun, CodeAlert, DependabotAlert, DorkResult, Fork,
-    GitHubData, Job as GhJob, PrDetail, RepoInfo, SecretAlert, WorkflowRun,
+    GitHubData, Job as GhJob, RepoInfo, SecretAlert, WorkflowRun,
 };
 use gitvis_core::insights::debt::{Dated, Marker};
 use gitvis_core::insights::health::Weight;
@@ -27,6 +28,7 @@ use gitvis_core::{
     github, joblog, reflog, repo,
 };
 
+use crate::devops::{Task, TaskDone, TaskKind};
 use crate::state::{DiffDoc, RepoId};
 
 pub enum Job {
@@ -136,11 +138,28 @@ pub enum Event {
         calls: Vec<ApiCall>,
         result: Result<Vec<CheckRun>, String>,
     },
-    PrDetail {
-        repo: RepoId,
-        number: u64,
-        calls: Vec<ApiCall>,
-        result: Result<PrDetail, String>,
+    /// A DevOps task finished (read or change); see `devops::ctx`.
+    DevOps {
+        repo: Option<RepoId>,
+        label: String,
+        kind: TaskKind,
+        elapsed_ms: u64,
+        done: TaskDone,
+    },
+    /// A console process started.
+    ConsoleStarted {
+        id: u64,
+        pid: u32,
+    },
+    /// Output lines of a console process.
+    ConsoleOutput {
+        id: u64,
+        lines: Vec<Line>,
+    },
+    /// A console process ended (`Err` when it could not be started).
+    ConsoleDone {
+        id: u64,
+        exit: Result<Exit, String>,
     },
     /// Progress of a running secrets scan.
     ScanProgress {
@@ -508,18 +527,53 @@ impl Worker {
         });
     }
 
-    pub fn fetch_pr(&self, gh: GhRepo, number: u64) {
-        self.spawn("gh-pr", move || {
-            let mut calls = Vec::new();
-            let result = github::fetch_pr(&gh.workdir, &gh.owner, &gh.name, number, &mut calls)
-                .map_err(|e| e.to_string());
-            Event::PrDetail {
-                repo: gh.repo,
-                number,
-                calls,
-                result,
+    /// Run a DevOps task on its own thread.
+    pub fn run_task(&self, task: Task) {
+        let Task {
+            repo,
+            label,
+            kind,
+            run,
+        } = task;
+        self.spawn("devops", move || {
+            let started = Instant::now();
+            let done = run();
+            Event::DevOps {
+                repo,
+                label,
+                kind,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+                done,
             }
         });
+    }
+
+    /// Run a console process, streaming its output as events.
+    pub fn run_console(&self, id: u64, spec: ProcSpec, cancel: Arc<AtomicBool>) {
+        let tx = self.events.clone();
+        let ctx = self.ctx.clone();
+        std::thread::Builder::new()
+            .name("gitvis-console".into())
+            .spawn(move || {
+                let out_tx = tx.clone();
+                let out_ctx = ctx.clone();
+                let start_tx = tx.clone();
+                let exit = proc::run_streaming(
+                    &spec,
+                    &cancel,
+                    |pid| {
+                        let _ = start_tx.send(Event::ConsoleStarted { id, pid });
+                    },
+                    move |lines| {
+                        let _ = out_tx.send(Event::ConsoleOutput { id, lines });
+                        out_ctx.request_repaint();
+                    },
+                )
+                .map_err(|e| e.to_string());
+                let _ = tx.send(Event::ConsoleDone { id, exit });
+                ctx.request_repaint();
+            })
+            .expect("spawn console thread");
     }
 
     /// Repository visibility and open secret-scanning alerts.

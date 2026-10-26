@@ -1,7 +1,9 @@
 //! Actions page: workflow runs with their jobs, steps, annotations and full
-//! logs; pull requests with their numbers, reviews and checks. Everything
+//! logs (the `Runs` tab); the other tabs (workflows, artifacts, caches,
+//! validation, local runs) are drawn by `devops::ci::show_tab`. Everything
 //! comes through `gh api`. Also the commit checks section shared with the
-//! details panel ([`checks_section`]).
+//! details panel ([`checks_section`]). Pull requests live on the Review page
+//! (`devops::review`).
 
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -13,17 +15,15 @@ use egui::{
     RichText, Sense, Stroke, Ui, pos2, vec2,
 };
 
-use gitvis_core::github::{
-    Annotation, CheckRun, GitHubData, Job, Outcome, PullRequest, RateLimit, WorkflowRun,
-};
+use gitvis_core::github::{Annotation, CheckRun, GitHubData, Job, Outcome, RateLimit, WorkflowRun};
 use gitvis_core::joblog::{LogKind, LogLine};
 use gitvis_core::ops::GitOp;
 use gitvis_core::{Oid, Snapshot};
 
+use crate::devops::{Console, ci};
 use crate::format;
 use crate::state::{
-    Action, ChecksState, Dialog, GitHubPage, GitHubTab, LogState, RepoState, RunDetail, RunFilter,
-    Settings,
+    Action, ChecksState, Dialog, GitHubPage, LogState, RepoState, RunDetail, RunFilter, Settings,
 };
 use crate::theme::{Palette, Tone, medium, pal, semibold, size, space};
 use crate::views::icons::{self, Icon, IconButton, outcome_dot};
@@ -67,7 +67,6 @@ pub fn visible_runs<'a>(data: &'a GitHubData, page: &GitHubPage) -> Vec<&'a Work
 struct Cx<'a> {
     data: &'a GitHubData,
     snap: Option<&'a Snapshot>,
-    checks: &'a HashMap<Oid, ChecksState>,
     busy: bool,
     now: i64,
     /// `ui.input().time`, for the running-arc animation.
@@ -131,37 +130,46 @@ fn run_title(run: &WorkflowRun) -> &str {
 // Page
 // ---------------------------------------------------------------------------
 
-pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mut Vec<Action>) {
+pub fn show(
+    ui: &mut Ui,
+    repo: &mut RepoState,
+    console: &Console,
+    settings: &Settings,
+    actions: &mut Vec<Action>,
+) {
+    let tab = repo.devops.ci.tab;
+    let Some((owner, name)) = repo.github_remote.clone() else {
+        return;
+    };
+    let now = format::now_secs();
+    page_head(
+        ui,
+        &owner,
+        &name,
+        repo.github_loading,
+        repo.github_at,
+        repo.rate.as_ref(),
+        tab,
+        now,
+        actions,
+    );
+    if tab != ci::Tab::Runs {
+        ci::show_tab(ui, repo, tab, console, settings, actions);
+        return;
+    }
     let RepoState {
         github,
         github_remote,
         github_error,
-        github_loading,
-        github_at,
         gh_page,
         snapshot,
-        rate,
-        checks,
         busy,
         ..
     } = repo;
-    let Some((owner, name)) = github_remote.as_ref() else {
+    if github_remote.is_none() {
         return;
-    };
-    let now = format::now_secs();
+    }
     let t = ui.input(|i| i.time);
-
-    page_head(
-        ui,
-        owner,
-        name,
-        *github_loading,
-        *github_at,
-        rate.as_ref(),
-        gh_page.tab,
-        now,
-        actions,
-    );
 
     if let Some(err) = github_error.as_deref()
         && github.is_none()
@@ -195,16 +203,12 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
     let cx = Cx {
         data,
         snap: snapshot.as_ref(),
-        checks,
         busy: busy.is_some(),
         now,
         t,
         dark: settings.dark,
     };
-    match gh_page.tab {
-        GitHubTab::Actions => actions_tab(ui, &cx, gh_page, actions),
-        GitHubTab::PullRequests => prs_tab(ui, &cx, gh_page, actions),
-    }
+    actions_tab(ui, &cx, gh_page, actions);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -215,14 +219,11 @@ fn page_head(
     loading: bool,
     at: Option<std::time::Instant>,
     rate: Option<&RateLimit>,
-    tab: GitHubTab,
+    tab: ci::Tab,
     now: i64,
     actions: &mut Vec<Action>,
 ) {
-    let title = match tab {
-        GitHubTab::Actions => "Actions",
-        GitHubTab::PullRequests => "Pull requests",
-    };
+    let title = "Actions";
     let mut sub = vec![format!("{owner}/{name}")];
     if loading {
         sub.push("refreshing…".to_owned());
@@ -268,16 +269,15 @@ fn page_head(
             )));
         }
         ui.add_space(6.0);
-        let options = [
-            (GitHubTab::Actions, "Runs"),
-            (GitHubTab::PullRequests, "Pull requests"),
-        ];
-        let w = segmented_width(ui, &options);
-        ui.allocate_ui_with_layout(vec2(w, 28.0), Layout::left_to_right(Align::Center), |ui| {
-            if let Some(t) = kit::segmented(ui, &options, tab) {
-                actions.push(Action::SetGitHubTab(t));
-            }
-        });
+        let options: Vec<(ci::Tab, &str)> = ci::Tab::ALL.iter().map(|t| (*t, t.label())).collect();
+        if options.len() > 1 {
+            let w = segmented_width(ui, &options);
+            ui.allocate_ui_with_layout(vec2(w, 28.0), Layout::left_to_right(Align::Center), |ui| {
+                if let Some(t) = kit::segmented(ui, &options, tab) {
+                    actions.push(ci::Act::SetTab(t).into());
+                }
+            });
+        }
     });
 }
 
@@ -2219,544 +2219,4 @@ fn check_row(ui: &mut Ui, c: &CheckRun, now: i64, t: f64, actions: &mut Vec<Acti
             ui.close();
         }
     });
-}
-
-// ---------------------------------------------------------------------------
-// Pull requests
-// ---------------------------------------------------------------------------
-
-fn prs_tab(ui: &mut Ui, cx: &Cx, page: &mut GitHubPage, actions: &mut Vec<Action>) {
-    list_pane(ui, "gh_prs", |ui| prs_list(ui, cx, page, actions));
-    let Some(number) = page.selected_pr else {
-        empty_pane(ui, |ui| {
-            kit::empty_state(
-                ui,
-                Icon::PullRequest,
-                "Select a pull request",
-                "Its reviews, checks, workflow runs and description appear here.",
-                None,
-            );
-        });
-        return;
-    };
-    detail_pane(ui, ("gh_pr", number), |ui| {
-        pr_detail(ui, cx, page, number, actions)
-    });
-}
-
-fn prs_list(ui: &mut Ui, cx: &Cx, page: &mut GitHubPage, actions: &mut Vec<Action>) {
-    let hint = format!(
-        "Filter {}",
-        format::plural(cx.data.prs.len(), "pull request", "pull requests")
-    );
-    search_field(ui, "gh_pr_filter", &mut page.pr_filter, &hint);
-    ui.add_space(space::S);
-    let needle = page.pr_filter.trim().to_lowercase();
-    let prs: Vec<&PullRequest> = cx
-        .data
-        .prs
-        .iter()
-        .filter(|p| {
-            needle.is_empty()
-                || p.title.to_lowercase().contains(&needle)
-                || p.author.to_lowercase().contains(&needle)
-                || p.head.to_lowercase().contains(&needle)
-                || p.base.to_lowercase().contains(&needle)
-                || p.labels.iter().any(|l| l.to_lowercase().contains(&needle))
-                || p.number.to_string() == needle.trim_start_matches('#')
-        })
-        .collect();
-    if prs.is_empty() {
-        ui.add_space(space::S);
-        ui.horizontal(|ui| {
-            ui.add_space(6.0);
-            kit::muted(
-                ui,
-                if cx.data.prs.is_empty() {
-                    "No open pull requests."
-                } else {
-                    "No pull requests match the filter."
-                },
-            );
-        });
-        return;
-    }
-    let selected = page.selected_pr;
-    let p = *pal(ui);
-    kit::list(
-        ui,
-        "gh_prs_list",
-        prs.len(),
-        kit::ROW_H,
-        |i| selected == Some(prs[i].number),
-        |ui, rect, resp, i| {
-            let pr = prs[i];
-            let subtitle = format!(
-                "#{}  ·  {}  ·  {} → {}",
-                pr.number, pr.author, pr.head, pr.base
-            );
-            let meta = pr
-                .updated
-                .map(|s| format::relative(s, cx.now))
-                .unwrap_or_default();
-            let badges = pr_badges(cx, page, pr, false);
-            let color = if pr.draft { p.text_3 } else { p.text_2 };
-            kit::paint_row(
-                ui,
-                rect,
-                &kit::Row::new(&pr.title)
-                    .leading(kit::Leading::Icon(Icon::PullRequest, color))
-                    .subtitle(&subtitle)
-                    .meta(&meta)
-                    .badges(&badges),
-                selected == Some(pr.number),
-            );
-            if resp.clicked() {
-                actions.push(Action::OpenPr(pr.number));
-            }
-            resp.context_menu(|ui| pr_menu(ui, cx, pr, actions));
-        },
-    );
-}
-
-/// The newest review per reviewer.
-fn latest_reviews(reviews: &[gitvis_core::github::Review]) -> Vec<&gitvis_core::github::Review> {
-    let mut latest: Vec<&gitvis_core::github::Review> = Vec::new();
-    for r in reviews.iter().rev() {
-        if !latest.iter().any(|l| l.user == r.user) {
-            latest.push(r);
-        }
-    }
-    latest
-}
-
-/// Checks outcome of a PR's head: the loaded check runs, else the workflow
-/// runs on that commit.
-fn head_outcome(cx: &Cx, pr: &PullRequest) -> Option<Outcome> {
-    let from_checks = Oid::from_str(&pr.head_sha)
-        .ok()
-        .and_then(|o| cx.checks.get(&o))
-        .and_then(|s| match &s.result {
-            Some(Ok(list)) if !list.is_empty() => Some(gitvis_core::github::aggregate(
-                list.iter().map(|c| c.outcome()),
-            )),
-            _ => None,
-        });
-    from_checks.or_else(|| {
-        let mut runs = cx.data.runs_for_sha(&pr.head_sha).peekable();
-        runs.peek()?;
-        Some(gitvis_core::github::aggregate(runs.map(|r| r.outcome())))
-    })
-}
-
-/// Review state, failing or running CI, draft. `pending` adds "Review
-/// requested", which the list leaves out to stay calm.
-fn pr_badges(cx: &Cx, page: &GitHubPage, pr: &PullRequest, pending: bool) -> Vec<(String, Tone)> {
-    let mut b = Vec::new();
-    let reviews = page
-        .prs
-        .get(&pr.number)
-        .and_then(|s| s.detail.as_ref())
-        .and_then(|d| d.as_ref().ok())
-        .map(|d| latest_reviews(&d.reviews));
-    match reviews {
-        Some(r) if r.iter().any(|r| r.state == "CHANGES_REQUESTED") => {
-            b.push(("Changes requested".to_owned(), Tone::Danger));
-        }
-        Some(r) if r.iter().any(|r| r.state == "APPROVED") => {
-            b.push(("Approved".to_owned(), Tone::Success));
-        }
-        _ if pending && !pr.reviewers.is_empty() => {
-            b.push(("Review requested".to_owned(), Tone::Neutral))
-        }
-        _ => {}
-    }
-    match head_outcome(cx, pr) {
-        Some(o) if o.is_bad() => b.push(("CI failing".to_owned(), Tone::Danger)),
-        Some(o) if o.is_running() => b.push(("CI running".to_owned(), Tone::Warning)),
-        _ => {}
-    }
-    if pr.draft {
-        b.push(("Draft".to_owned(), Tone::Neutral));
-    }
-    b
-}
-
-fn pr_menu(ui: &mut Ui, cx: &Cx, pr: &PullRequest, actions: &mut Vec<Action>) {
-    ui.set_min_width(220.0);
-    if ui.button("Show pull request").clicked() {
-        actions.push(Action::OpenPr(pr.number));
-        ui.close();
-    }
-    if ui
-        .add_enabled(!cx.busy, egui::Button::new("Check out PR branch"))
-        .on_hover_text("gh pr checkout")
-        .clicked()
-    {
-        actions.push(Action::Run(GitOp::GhPrCheckout { number: pr.number }));
-        ui.close();
-    }
-    if ui.button("Open on GitHub").clicked() {
-        actions.push(Action::OpenUrl(pr.url.clone()));
-        ui.close();
-    }
-    ui.separator();
-    if ui.button("Copy URL").clicked() {
-        actions.push(Action::Copy(pr.url.clone()));
-        ui.close();
-    }
-    if ui.button("Copy head SHA").clicked() {
-        actions.push(Action::Copy(pr.head_sha.clone()));
-        ui.close();
-    }
-}
-
-fn pr_detail(ui: &mut Ui, cx: &Cx, page: &GitHubPage, number: u64, actions: &mut Vec<Action>) {
-    let p = *pal(ui);
-    let Some(pr) = cx.data.pr(number) else {
-        kit::callout(
-            ui,
-            Tone::Neutral,
-            "Pull request closed",
-            &format!("#{number} is no longer open."),
-        );
-        return;
-    };
-    let state = page.prs.get(&number);
-    let head_oid = Oid::from_str(&pr.head_sha).ok();
-    let in_graph = head_oid.filter(|o| cx.snap.is_some_and(|s| s.index_of.contains_key(o)));
-
-    title_row(
-        ui,
-        &pr.title,
-        |ui, r| {
-            icons::paint(
-                ui.painter(),
-                Icon::PullRequest,
-                r.center(),
-                16.0,
-                if pr.draft { p.text_3 } else { p.text_2 },
-            )
-        },
-        |ui| {
-            if IconButton::icon(Icon::External)
-                .compact()
-                .show(ui)
-                .on_hover_text("Open on GitHub")
-                .clicked()
-            {
-                actions.push(Action::OpenUrl(pr.url.clone()));
-            }
-            if IconButton::icon(Icon::Copy)
-                .compact()
-                .show(ui)
-                .on_hover_text("Copy the URL")
-                .clicked()
-            {
-                actions.push(Action::Copy(pr.url.clone()));
-            }
-            if IconButton::new(Icon::Branch, "Check out")
-                .compact()
-                .primary(true)
-                .enabled(!cx.busy)
-                .show(ui)
-                .on_hover_text("gh pr checkout: fetch the PR branch and switch to it")
-                .clicked()
-            {
-                actions.push(Action::Run(GitOp::GhPrCheckout { number: pr.number }));
-            }
-            if let Some(oid) = in_graph
-                && IconButton::new(Icon::Graph, "Show in graph")
-                    .compact()
-                    .show(ui)
-                    .on_hover_text("Select the head commit on the History page")
-                    .clicked()
-            {
-                actions.push(Action::JumpTo(oid));
-            }
-        },
-    );
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
-        ui.add_space(28.0);
-        ui.label(kit::mono(format!("#{}", pr.number)).color(p.text_2));
-        if pr.draft {
-            kit::badge(ui, "Draft", Tone::Neutral);
-        } else {
-            kit::badge(ui, "Open", Tone::Neutral);
-        }
-        for (text, tone) in pr_badges(cx, page, pr, true)
-            .into_iter()
-            .filter(|(t, _)| t != "Draft")
-        {
-            kit::badge(ui, &text, tone);
-        }
-    });
-
-    kit::section(ui, "Details", None);
-    let detail = state.and_then(|s| s.detail.as_ref());
-    kit::kv(ui, 92.0, |kv| {
-        kv.row("Author", |ui| {
-            ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::hover());
-                crate::views::avatar(ui.painter(), r.center(), 9.0, &pr.author, cx.dark);
-                ui.label(RichText::new(&pr.author).color(p.text));
-            });
-        });
-        kv.row("Branches", |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
-                kit::badge(ui, &pr.head, Tone::Neutral);
-                ui.label(small(&p, "into"));
-                kit::badge(ui, &pr.base, Tone::Neutral);
-                if let Some(repo) = &pr.head_repo
-                    && *repo != format!("{}/{}", cx.data.owner, cx.data.repo)
-                {
-                    ui.label(small(&p, format!("from the fork {repo}")));
-                }
-            });
-        });
-        if !pr.head_sha.is_empty() {
-            kv.row("Head", |ui| {
-                let r = link_text(ui, short_sha(&pr.head_sha), true).on_hover_text(
-                    if in_graph.is_some() {
-                        "Show in the graph"
-                    } else {
-                        "Copy the SHA (not in the graph; fetch the PR to see it)"
-                    },
-                );
-                if r.clicked() {
-                    match in_graph {
-                        Some(oid) => actions.push(Action::JumpTo(oid)),
-                        None => actions.push(Action::Copy(pr.head_sha.clone())),
-                    }
-                }
-            });
-        }
-        if let Some(c) = pr.created {
-            kv.text("Opened", when(c, cx.now));
-        }
-        if let Some(u) = pr.updated {
-            kv.text("Updated", when(u, cx.now));
-        }
-        if !pr.labels.is_empty() {
-            kv.row("Labels", |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-                    for l in &pr.labels {
-                        kit::badge(ui, l, Tone::Neutral);
-                    }
-                });
-            });
-        }
-        if let Some(m) = &pr.milestone {
-            kv.text("Milestone", m.as_str());
-        }
-        if !pr.assignees.is_empty() {
-            kv.text("Assignees", pr.assignees.join(", "));
-        }
-        if !pr.reviewers.is_empty() {
-            kv.text("Reviewers", pr.reviewers.join(", "));
-        }
-        if let Some(Ok(d)) = detail {
-            kv.row("Changes", |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    ui.label(
-                        RichText::new(format!("+{}", format::count(d.additions as usize)))
-                            .color(p.success),
-                    );
-                    ui.label(
-                        RichText::new(format!("\u{2212}{}", format::count(d.deletions as usize)))
-                            .color(p.danger),
-                    );
-                    ui.label(small(
-                        &p,
-                        format!(
-                            "in {}",
-                            format::plural(d.changed_files as usize, "file", "files")
-                        ),
-                    ));
-                });
-            });
-            kv.text("Commits", d.commits.to_string());
-            kv.text(
-                "Comments",
-                format!(
-                    "{} in the conversation, {} on the code",
-                    d.comments, d.review_comments
-                ),
-            );
-        }
-    });
-
-    match detail {
-        None => {
-            ui.add_space(space::S);
-            kit::loading(ui, "Loading size, merge state and reviews…");
-        }
-        Some(Err(e)) => {
-            ui.add_space(space::M);
-            kit::callout(ui, Tone::Danger, "Could not load the pull request", e);
-        }
-        Some(Ok(d)) => {
-            ui.add_space(space::M);
-            let (tone, title, body) = match (d.mergeable, d.mergeable_state.as_str()) {
-                (Some(true), "clean") => (
-                    Tone::Success,
-                    "Ready to merge",
-                    "No conflicts with the base branch, and the required checks pass.",
-                ),
-                (Some(true), "unstable") => (
-                    Tone::Warning,
-                    "Checks are failing",
-                    "It merges cleanly, but some checks did not pass.",
-                ),
-                (Some(true), "blocked") => (
-                    Tone::Warning,
-                    "Blocked",
-                    "Required reviews or checks are missing.",
-                ),
-                (Some(true), "behind") => (
-                    Tone::Warning,
-                    "Behind the base branch",
-                    "The base branch has commits this branch does not have yet.",
-                ),
-                (Some(false), _) => (
-                    Tone::Danger,
-                    "Conflicts with the base branch",
-                    "The conflicts must be resolved before it can be merged.",
-                ),
-                (_, "draft") => (
-                    Tone::Neutral,
-                    "Draft",
-                    "Marked as a draft: not ready to be merged.",
-                ),
-                (_, s) if !s.is_empty() => (Tone::Neutral, "Merge state", s),
-                _ => (
-                    Tone::Neutral,
-                    "Mergeability unknown",
-                    "GitHub is still computing it; refresh in a moment.",
-                ),
-            };
-            kit::callout(ui, tone, title, body);
-
-            let latest = latest_reviews(&d.reviews);
-            kit::section(ui, "Reviews", (!latest.is_empty()).then_some(latest.len()));
-            if latest.is_empty() {
-                kit::muted(ui, "No reviews yet.");
-            }
-            ui.scope(|ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                for r in latest {
-                    review_row(ui, cx, r);
-                }
-            });
-        }
-    }
-
-    // Checks and runs on the head commit.
-    if let Some(oid) = head_oid {
-        checks_section(ui, oid, cx.checks.get(&oid), cx.now, actions);
-    }
-    let runs: Vec<&WorkflowRun> = cx.data.runs_for_sha(&pr.head_sha).collect();
-    if runs.iter().any(|r| r.is_running()) {
-        ui.ctx().request_repaint_after(Duration::from_millis(90));
-    }
-    if !runs.is_empty() {
-        kit::section(ui, "Workflow runs on the head commit", Some(runs.len()));
-        ui.scope(|ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            for run in runs {
-                let title = format!("{} #{}", run.name, run.run_number);
-                let secondary = run
-                    .started
-                    .or(run.created)
-                    .map(|s| format::relative(s, cx.now))
-                    .unwrap_or_default();
-                let dur = run
-                    .duration_secs(cx.now)
-                    .map(format::duration)
-                    .unwrap_or_else(|| outcome_text(run.outcome()).to_owned());
-                let resp = line_row(ui, run.outcome(), &title, &secondary, &dur, false, cx.t);
-                if resp.clicked() {
-                    actions.push(Action::OpenRun {
-                        run: run.id,
-                        job: None,
-                    });
-                }
-                resp.context_menu(|ui| run_menu(ui, cx, run, actions));
-            }
-        });
-    }
-
-    kit::section(ui, "Description", None);
-    let body = pr.body.trim();
-    if body.is_empty() {
-        kit::muted(ui, "No description.");
-    } else {
-        let shown: String = body.chars().take(20_000).collect();
-        kit::body(ui, &shown);
-        if body.chars().count() > 20_000 {
-            kit::muted(
-                ui,
-                "Truncated; open the pull request on GitHub for the rest.",
-            );
-        }
-    }
-}
-
-fn review_row(ui: &mut Ui, cx: &Cx, r: &gitvis_core::github::Review) {
-    let p = *pal(ui);
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), LINE_ROW_H), Sense::hover());
-    if !ui.is_rect_visible(rect) {
-        return;
-    }
-    let painter = ui.painter();
-    let mid = rect.center().y;
-    crate::views::avatar(
-        painter,
-        pos2(rect.left() + 15.0, mid),
-        9.0,
-        &r.user,
-        cx.dark,
-    );
-    let (label, tone) = match r.state.as_str() {
-        "APPROVED" => ("Approved", Tone::Success),
-        "CHANGES_REQUESTED" => ("Changes requested", Tone::Danger),
-        "COMMENTED" => ("Commented", Tone::Neutral),
-        "DISMISSED" => ("Dismissed", Tone::Neutral),
-        "PENDING" => ("Pending", Tone::Warning),
-        other => (other, Tone::Neutral),
-    };
-    let mut right = rect.right() - 10.0;
-    if let Some(s) = r.submitted {
-        let t = painter.text(
-            pos2(right, mid),
-            Align2::RIGHT_CENTER,
-            format::relative(s, cx.now),
-            FontId::proportional(size::SMALL),
-            p.text_3,
-        );
-        right = t.left() - space::M;
-    }
-    let g = truncated(
-        painter,
-        &r.user,
-        FontId::proportional(size::BODY - 0.5),
-        p.text,
-        (right - rect.left() - 140.0).max(40.0),
-    );
-    let name_w = g.size().x;
-    painter.galley(pos2(rect.left() + 32.0, mid - g.size().y / 2.0), g, p.text);
-    let w = kit::badge_width(painter, label);
-    kit::paint_badge(
-        painter,
-        &p,
-        ui.visuals().dark_mode,
-        rect.left() + 32.0 + name_w + 10.0 + w,
-        mid,
-        label,
-        tone,
-    );
 }

@@ -53,8 +53,9 @@ Toolchain on this machine: `stable-x86_64-pc-windows-gnu` with WinLibs gcc; libg
 - `crates/gitvis` — egui app. `app.rs` owns all orchestration (loads, ops, watcher debounce, selection,
   the verbose activity log); views in `src/views/` only read state and push `Action`s. Background work:
   `worker.rs` (one reader thread that coalesces stale jobs, one thread per op / API request),
-  `watcher.rs` (notify; `.git/objects`, `index.lock` ignored). `views/github.rs` is the GitHub page
-  (runs → jobs → steps → log viewer; PRs; `checks_section` is shared with the details panel).
+  `watcher.rs` (notify; `.git/objects`, `index.lock` ignored). `views/github.rs` is the Actions page's
+  Runs tab (runs → jobs → steps → log viewer; `checks_section` is shared with the details panel); its
+  other tabs come from `devops::ci`, and pull requests live on the Review page (`devops::review`).
   `views/security.rs` is the Exposure page (`visible_items` applies the filters; the commit guard in
   `views/details.rs` reads `sec_page.report`, which is the full scan merged with the quick scan);
   its OSINT tabs live in `views/osint.rs` (`SecurityTab`, `OsintState` in `state.rs`; the analysis
@@ -71,14 +72,63 @@ Toolchain on this machine: `stable-x86_64-pc-windows-gnu` with WinLibs gcc; libg
   `.family(theme::semibold())` / `theme::medium()` set real weights. `views/kit.rs` is the component kit every
   page builds from (text, sections, cards, callouts, code blocks, key-value, stats, badges, bars, tables,
   virtualised two-line rows, search box, chips, segmented control, section nav, page frames, progress).
-  Shell: `views/rail.rs` (left navigation: History, Actions, Exposure, Insights; Activity and Settings at
-  the bottom; a dot only when something needs attention), `views/toolbar.rs` (repo tabs + git actions
+  Shell: `views/rail.rs` (left navigation: Home, History, Review, Actions, Ship, Exposure, Insights,
+  Govern, Tools; Activity and Settings at the bottom; a dot only when something needs attention, which
+  each DevOps area reports through its `rail_badge`), `views/toolbar.rs` (repo tabs + git actions
   only), `views/statusbar.rs` (location, working tree, last activity). The refs sidebar shows on the
   History page only; Exposure and Insights use `kit::page_with_nav` (grouped section navigation).
 - GitHub specifics: job logs need `gh api --allow-escape-sequences` (gh refuses ANSI output otherwise)
   and are unavailable for running or never-started jobs (HTTP 404 from blob storage). An Actions job's id
   is its check-run id (annotations live there). Check runs of a commit are fetched 400 ms after it is
   selected, so arrow-keying through the graph does not spend the 5,000/h API budget.
+
+## DevOps areas (`crates/gitvis-core/src/devops/`, `crates/gitvis/src/devops/`)
+
+Everything around the repository: review loop, CI control, releases and deployments, what is running,
+governance, the local workbench, GitLab / Azure DevOps, the cross-repository home page. One area =
+one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`, `Event::DevOps`,
+`Event::Console*`) and never needs an area's internals.
+
+| Area (app `devops/X`) | Page | Core `devops::X` |
+|---|---|---|
+| `home` (global state in `GitVis.home`) | Home (`Page::Home`) | inbox, dashboard rows |
+| `review` | Review (`Page::Review`) | PRs, reviews, threads, issues |
+| `ci` | Actions tabs beside Runs (`ci::Tab`; Runs is `views/github.rs`) | dispatch, artifacts, caches, history, compare, lint, act |
+| `ship`, `runtime` | Ship (`devops/pages.rs` owns the nav, `ShipTab`) | releases, deployments, DORA / GHCR, kubectl, terraform |
+| `govern` | Govern (`Page::Govern`) | alerts, SBOM, images, protection, CODEOWNERS, envs, secrets |
+| `workbench` | Tools (`Page::Workbench`) | tasks, interactive rebase, bisect, worktrees, file history |
+| `forge` | Review / Actions when `RepoState::forge_remote` is GitLab / Azure | `glab api`, `az` |
+
+- App module contract: `State` (in `RepoState::devops`), `Act` (Clone + Debug; `impl From<Act> for
+  Action` exists, so views do `actions.push(Act::X.into())`), `Msg` with `summary()` for the log,
+  `Prefs` (serde, persisted in `RepoPrefs::devops`), `apply`, `on_msg`, `on_console_done`,
+  `on_page_shown` (Ship areas: `on_tab_shown`), `script(cmd, arg)`, `rail_badge`, `show` / `show_tab`.
+- `devops::Ctx` is a command buffer: `gh_read` / `user_read` (GitHub API, logged as API activity),
+  `read` (local, logged as a read with the commands pushed to `TaskLog`), `gh_change` / `remote_change`
+  (always logged as an operation with every request and its JSON body, toast), `local_change` (busy
+  indicator, operation log, repository reload), `console(title, ProcSpec)` (streamed process; returns
+  the run id; every area gets `on_console_done`), `action`, `toast`, `ops` (GitOps through the normal
+  pipeline), `confirm` (`Dialog::ConfirmAction` showing the exact commands / bodies, then an action).
+- Core helpers: `devops::gh::Gh` (`path`, `get_json`, `get_pages`, `get_wrapped_pages`, `send` /
+  `send_json` of a `Request` built by a pure function, `graphql`, `cli` for other `gh` subcommands with
+  never-logged stdin, `encode`); `github::api_request` underneath records `ApiCall { input }` (the JSON
+  body, or only its size for `Request::withheld()`), and error messages carry GitHub's `message`, every
+  `errors[]` entry and `(HTTP nnn)`. `devops::proc` (`ProcSpec` with env / stdin / `with_color`,
+  `resolve` through PATHEXT so `npm` finds `npm.cmd`, `run_streaming`, `run_capture` with timeout,
+  `kill_tree`). `devops::tools` (`Tool`, `available`, `detect` (cached version), `install_hint`).
+  `GITVIS_GH` overrides the `gh` executable (a recording test double).
+- Views: `views/form.rs` (inputs with stable ids, `field`, `row`, `checkbox`, `radio`, `select`, `tags`,
+  `primary` / `button` / `danger`, `actions_row`, `card`, `error`), `views/console.rs` (`output`,
+  `lines`, `run_list`; `ConsoleAction` stop / rerun / copy / remove).
+- Rules: secret values only on standard input (`gh secret set NAME` reads stdin; `Request::withheld`),
+  never in argv, logs, toasts or errors; masked inputs cleared after sending. Network calls only on an
+  explicit action or when the user opens the page / tab that needs them. Writes are pure request
+  builders with unit tests. Never run a write against a real remote, registry or cluster while
+  testing (brave-core, the owner's GitHub repositories, the local kube contexts are read-only test
+  beds); test writes through their request builders and stop UI flows at the confirmation dialog.
+  `kubectl` always gets an explicit `--context`; never change the user's current context or kubeconfig.
+- Script commands: anything unknown goes to `devops::script` → each area's `script`. Built in: `page
+  home|graph|review|actions|ship|exposure|insights|govern|tools`, `ship TAB`, `ship-tab TAB`.
 
 ## egui 0.37 gotchas (verified against the crate source)
 

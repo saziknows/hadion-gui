@@ -12,12 +12,13 @@ use gitvis_core::osint::{OsintOptions, OsintReport};
 use gitvis_core::secrets::{HistoryScope, Report, ScanOptions, Severity};
 use gitvis_core::{DiffOptions, DiffTarget, LoadOptions, Oid, Snapshot, github, reflog, repo};
 
+use crate::devops::{self, Console, ConsoleAction, Effect, Task, TaskDone, TaskKind, TaskLog};
 use crate::format;
 use crate::script::{Cmd, Script};
 use crate::state::{
     Action, ActivityEntry, ActivityKind, ActivityTab, ChecksState, CiInfo, Dialog, Dirty,
-    GitHubTab, InsightsTab, LogDoc, LogState, Page, PrState, RepoId, RepoState, RunDetail, ScanRun,
-    SecurityTab, Selection, Settings, Toast, ToastKind,
+    InsightsTab, LogDoc, LogState, Page, RepoId, RepoState, RunDetail, ScanRun, SecurityTab,
+    Selection, Settings, Toast, ToastKind,
 };
 use crate::state::{DiffMode, DiffSelection};
 use crate::theme;
@@ -55,6 +56,13 @@ pub struct GitVis {
     activity_tab: ActivityTab,
     /// `GITVIS_SCRIPT` smoke-test driver, if set.
     script: Option<Script>,
+    /// Streamed processes (tasks, act, terraform, kubectl logs, bisect).
+    console: Console,
+    /// The home page's inbox and dashboard state (global).
+    home: devops::home::State,
+    /// Actions queued by DevOps controllers while no egui context was at
+    /// hand (event handling); applied at the start of the next `logic`.
+    deferred: Vec<Action>,
 }
 
 impl GitVis {
@@ -83,7 +91,11 @@ impl GitVis {
             activity: Vec::new(),
             activity_tab: ActivityTab::Log,
             script: Script::from_env(),
+            console: Console::default(),
+            home: devops::home::State::default(),
+            deferred: Vec::new(),
         };
+        app.home.apply_prefs(&app.settings.home);
         for path in app.settings.open_repos.clone() {
             app.open_repo(path, false);
         }
@@ -390,7 +402,7 @@ impl GitVis {
         };
         let r = &mut self.repos[i];
         r.page = Page::GitHub;
-        r.gh_page.tab = GitHubTab::Actions;
+        r.devops.ci.tab = devops::ci::Tab::Runs;
         r.gh_page.selected_run = Some(run);
         let known = r.github.as_ref().is_some_and(|d| d.run(run).is_some());
         if !known {
@@ -465,34 +477,6 @@ impl GitVis {
         }
         detail.annotations_loading.insert(job);
         self.worker.fetch_annotations(gh, run, job);
-    }
-
-    /// Show a pull request on the GitHub page, loading its numbers and the
-    /// checks of its head commit.
-    fn open_pr(&mut self, i: usize, number: u64) {
-        let Some(gh) = self.gh_repo(i) else {
-            return;
-        };
-        let r = &mut self.repos[i];
-        r.page = Page::GitHub;
-        r.gh_page.tab = GitHubTab::PullRequests;
-        r.gh_page.selected_pr = Some(number);
-        let head = r
-            .github
-            .as_ref()
-            .and_then(|d| d.pr(number))
-            .and_then(|p| Oid::from_str(&p.head_sha).ok());
-        let state = r.gh_page.prs.entry(number).or_insert(PrState {
-            loading: false,
-            detail: None,
-        });
-        if state.detail.is_none() && !state.loading {
-            state.loading = true;
-            self.worker.fetch_pr(gh, number);
-        }
-        if let Some(sha) = head {
-            self.ensure_checks(i, sha, false);
-        }
     }
 
     /// Re-scan the staged, unstaged and untracked changes for secrets. A
@@ -1109,6 +1093,19 @@ impl GitVis {
                 .filter(|re| re.name == "origin")
                 .chain(snap.remotes.iter())
                 .find_map(|re| github::parse_remote(&re.url));
+            let forge = if remote.is_some() {
+                None
+            } else {
+                snap.remotes
+                    .iter()
+                    .filter(|re| re.name == "origin")
+                    .chain(snap.remotes.iter())
+                    .find_map(|re| gitvis_core::devops::forge::detect(&re.url))
+            };
+            if forge != r.forge_remote {
+                r.forge_remote = forge;
+                r.devops.forge = Default::default();
+            }
             r.recompute_search();
             if let Selection::Commit(id) = r.selection {
                 want_details = Some(id);
@@ -1121,7 +1118,12 @@ impl GitVis {
                 r.ci.clear();
                 r.checks.clear();
                 r.gh_page = Default::default();
-                if r.github_remote.is_none() {
+                r.devops.review = Default::default();
+                r.devops.ci = Default::default();
+                if r.github_remote.is_none()
+                    && r.forge_remote.is_none()
+                    && matches!(r.page, Page::GitHub | Page::Review)
+                {
                     r.page = Page::Graph;
                 }
                 github_changed = true;
@@ -1673,41 +1675,6 @@ impl GitVis {
                     &calls,
                     summary,
                 );
-            }
-            Event::PrDetail {
-                repo,
-                number,
-                calls,
-                result,
-            } => {
-                let Some(i) = self.repo_idx(repo) else { return };
-                let r = &mut self.repos[i];
-                let summary = match &result {
-                    Ok(d) => Ok(format!(
-                        "+{} −{} in {} files · {} commits · {} comments · {} review comments · {} reviews · mergeable: {}",
-                        d.additions,
-                        d.deletions,
-                        d.changed_files,
-                        d.commits,
-                        d.comments,
-                        d.review_comments,
-                        d.reviews.len(),
-                        if d.mergeable_state.is_empty() {
-                            "unknown"
-                        } else {
-                            &d.mergeable_state
-                        }
-                    )),
-                    Err(e) => Err(e.clone()),
-                };
-                r.gh_page.prs.insert(
-                    number,
-                    PrState {
-                        loading: false,
-                        detail: Some(result),
-                    },
-                );
-                self.log_api(i, format!("Pull request #{number}"), &calls, summary);
             }
             Event::ScanProgress {
                 repo,
@@ -2482,6 +2449,16 @@ impl GitVis {
                     None,
                 );
             }
+            Event::DevOps {
+                repo,
+                label,
+                kind,
+                elapsed_ms,
+                done,
+            } => self.devops_done(repo, label, kind, elapsed_ms, done),
+            Event::ConsoleStarted { id, pid } => self.console.started(id, pid),
+            Event::ConsoleOutput { id, lines } => self.console.output(id, lines),
+            Event::ConsoleDone { id, exit } => self.console_done(id, exit),
             Event::OpDone {
                 repo,
                 label,
@@ -2636,13 +2613,14 @@ impl GitVis {
         let file_open = repo.is_some_and(|r| r.file.is_some());
         let page = repo.map(|r| r.page).unwrap_or_default();
         let on_github = page != Page::Graph;
-        let has_github = repo.is_some_and(|r| r.github_remote.is_some());
+        let has_remote =
+            repo.is_some_and(|r| r.github_remote.is_some() || r.forge_remote.is_some());
         let has_repo = !self.repos.is_empty();
         ctx.input_mut(|i| {
             if i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::O) {
                 actions.push(Action::CloneDialog);
             }
-            if has_github && i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::G) {
+            if has_remote && i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::G) {
                 actions.push(Action::ShowPage(if page == Page::GitHub {
                     Page::Graph
                 } else {
@@ -2662,6 +2640,25 @@ impl GitVis {
                 } else {
                     Page::Insights
                 }));
+            }
+            // Home, Review, Ship, Govern (admin), Workbench (tools).
+            for (key, target, needs_remote) in [
+                (Key::H, Page::Home, false),
+                (Key::R, Page::Review, true),
+                (Key::D, Page::Ship, false),
+                (Key::A, Page::Govern, false),
+                (Key::T, Page::Workbench, false),
+            ] {
+                if has_repo
+                    && (!needs_remote || has_remote)
+                    && i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, key)
+                {
+                    actions.push(Action::ShowPage(if page == target {
+                        Page::Graph
+                    } else {
+                        target
+                    }));
+                }
             }
             if i.consume_key(Modifiers::COMMAND, Key::O) {
                 actions.push(Action::PickRepo);
@@ -2822,10 +2819,14 @@ impl GitVis {
                 Cmd::Undo => self.apply(ctx, Action::Undo),
                 Cmd::Github => self.apply(ctx, Action::ShowPage(Page::GitHub)),
                 Cmd::Graph => self.apply(ctx, Action::ShowPage(Page::Graph)),
-                Cmd::Prs => {
-                    self.apply(ctx, Action::ShowPage(Page::GitHub));
-                    self.apply(ctx, Action::SetGitHubTab(GitHubTab::PullRequests));
-                }
+                Cmd::Ext(name, arg) => match devops::script(&name, &arg) {
+                    Some(actions) => {
+                        for a in actions {
+                            self.apply(ctx, a);
+                        }
+                    }
+                    None => eprintln!("[script] unknown command: {name}"),
+                },
                 Cmd::Filter(text) => {
                     if let Some(r) = self.repos.get_mut(i) {
                         r.gh_page.run_filter = text;
@@ -2868,16 +2869,6 @@ impl GitVis {
                                 step: None,
                             },
                         );
-                    }
-                }
-                Cmd::Pr(n) => {
-                    let number = self
-                        .repos
-                        .get(i)
-                        .and_then(|r| r.github.as_ref())
-                        .and_then(|d| d.prs.get(n).map(|p| p.number));
-                    if let Some(number) = number {
-                        self.apply(ctx, Action::OpenPr(number));
                     }
                 }
                 Cmd::Verbose => self.apply(ctx, Action::ToggleVerbose),
@@ -3006,6 +2997,301 @@ impl GitVis {
             self.dialog_fresh = true;
         } else {
             self.run_ops(i, undo.ops);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // DevOps areas (see `devops/`)
+    // -----------------------------------------------------------------------
+
+    /// The context an area controller gets for repository `i`.
+    fn devops_ctx(&self, i: Option<usize>) -> devops::Ctx {
+        let r = i.and_then(|i| self.repos.get(i));
+        let gh = i
+            .and_then(|i| self.gh_repo(i))
+            .map(|g| gitvis_core::devops::gh::Gh::new(g.workdir, g.owner, g.name));
+        devops::Ctx::new(
+            r.map(|r| r.id),
+            r.map(|r| r.workdir.clone()),
+            gh,
+            r.and_then(|r| r.forge_remote.clone()),
+            self.settings.dark,
+            self.settings.verbose,
+        )
+    }
+
+    /// Start what a controller asked for. Actions are deferred so they can
+    /// be applied with an egui context (`drain_deferred`).
+    fn run_effects(&mut self, effects: Vec<Effect>) {
+        for e in effects {
+            match e {
+                Effect::Action(a) => self.deferred.push(a),
+                Effect::Task(t) => self.start_task(t),
+                Effect::Console {
+                    id,
+                    repo,
+                    title,
+                    spec,
+                } => {
+                    self.console.add(id, repo, title, spec.clone());
+                    if let Some(run) = self.console.get(id) {
+                        let cancel = run.cancel.clone();
+                        self.worker.run_console(id, spec, cancel);
+                    }
+                }
+            }
+        }
+    }
+
+    fn drain_deferred(&mut self, ctx: &egui::Context) {
+        // Bounded: an action may queue more, which run in the same pass.
+        for _ in 0..16 {
+            if self.deferred.is_empty() {
+                break;
+            }
+            for a in std::mem::take(&mut self.deferred) {
+                self.apply(ctx, a);
+            }
+        }
+    }
+
+    fn start_task(&mut self, t: Task) {
+        if t.kind == TaskKind::LocalChange
+            && let Some(i) = t.repo.and_then(|id| self.repo_idx(id))
+        {
+            self.repos[i].busy = Some(t.label.clone());
+        }
+        self.worker.run_task(t);
+    }
+
+    fn devops_apply(&mut self, ctx: &egui::Context, i: usize, a: devops::DevOpsAction) {
+        let mut cx = self.devops_ctx(Some(i));
+        match a {
+            devops::DevOpsAction::Home(h) => {
+                devops::home::apply(&mut cx, &mut self.home, &self.repos, h);
+                self.settings.home = self.home.prefs();
+            }
+            other => {
+                devops::apply(&mut cx, &mut self.repos[i], other);
+                self.save_prefs(i);
+            }
+        }
+        let effects = cx.take_effects();
+        self.run_effects(effects);
+        self.drain_deferred(ctx);
+    }
+
+    fn devops_page_shown(&mut self, ctx: &egui::Context, i: usize, page: Page) {
+        let mut cx = self.devops_ctx(Some(i));
+        if page == Page::Home {
+            devops::home::on_page_shown(&mut cx, &mut self.home, &self.repos);
+        } else {
+            devops::page_shown(&mut cx, &mut self.repos[i], page);
+        }
+        let effects = cx.take_effects();
+        self.run_effects(effects);
+        self.drain_deferred(ctx);
+    }
+
+    /// A DevOps task finished: log it, give feedback, route its message.
+    fn devops_done(
+        &mut self,
+        repo: Option<RepoId>,
+        label: String,
+        kind: TaskKind,
+        elapsed_ms: u64,
+        done: TaskDone,
+    ) {
+        let TaskDone { log, result, msg } = done;
+        let i = repo.and_then(|id| self.repo_idx(id));
+        match kind {
+            TaskKind::GhRead => {
+                let summary = msg
+                    .as_ref()
+                    .map(|m| m.summary())
+                    .unwrap_or_else(|| Ok(String::new()));
+                if let Some(i) = i {
+                    self.log_api(i, label.clone(), &log.calls, summary);
+                }
+            }
+            TaskKind::LocalRead => {
+                let summary = msg
+                    .as_ref()
+                    .map(|m| m.summary())
+                    .unwrap_or_else(|| Ok(String::new()));
+                if let Some(i) = i {
+                    self.log_task(i, ActivityKind::Read, &label, &log, &summary, elapsed_ms);
+                    if !log.calls.is_empty() {
+                        self.log_api(i, label.clone(), &log.calls, Ok(String::new()));
+                    }
+                }
+            }
+            TaskKind::GhChange | TaskKind::LocalChange => {
+                let result = result.unwrap_or_else(|| Ok(String::new()));
+                if let Some(i) = i {
+                    self.log_task(i, ActivityKind::Op, &label, &log, &result, elapsed_ms);
+                    if let Some(rate) = log.calls.iter().rev().find_map(|c| c.rate) {
+                        self.repos[i].rate = Some(rate);
+                    }
+                }
+                match &result {
+                    Ok(m) => self.toast(ToastKind::Success, label.clone(), trim_output(m)),
+                    Err(e) => self.toast(ToastKind::Error, format!("{label} failed"), e.clone()),
+                }
+                if kind == TaskKind::LocalChange
+                    && let Some(i) = i
+                {
+                    let r = &mut self.repos[i];
+                    if r.busy.as_deref() == Some(label.as_str()) {
+                        r.busy = None;
+                    }
+                    r.suppress_watch_until = Some(Instant::now() + SUPPRESS_AFTER_OP);
+                    self.request_load(i, true);
+                }
+            }
+        }
+        let Some(msg) = msg else {
+            return;
+        };
+        let mut cx = self.devops_ctx(i);
+        match msg {
+            devops::DevOpsMsg::Home(m) => {
+                devops::home::on_msg(&mut cx, &mut self.home, &self.repos, m);
+            }
+            other => {
+                if let Some(i) = i {
+                    devops::on_msg(&mut cx, &mut self.repos[i], other);
+                }
+            }
+        }
+        let effects = cx.take_effects();
+        self.run_effects(effects);
+    }
+
+    /// One activity entry for a DevOps task: its commands, every API call
+    /// with the body it sent (unless withheld), and the outcome.
+    fn log_task(
+        &mut self,
+        i: usize,
+        kind: ActivityKind,
+        label: &str,
+        log: &TaskLog,
+        result: &Result<String, String>,
+        elapsed_ms: u64,
+    ) {
+        let (name, cwd) = (
+            self.repos[i].name.clone(),
+            self.repos[i].workdir.display().to_string(),
+        );
+        let mut commands: Vec<String> = log.commands.clone();
+        commands.extend(log.calls.iter().map(|c| c.command.clone()));
+        let mut detail = String::new();
+        for c in &log.calls {
+            detail.push_str(&format!(
+                "\n{} · {} · {}{}",
+                c.command,
+                format::bytes(c.bytes),
+                format::millis(c.elapsed_ms),
+                match c.rate {
+                    Some(rate) => format!(" · {} of {} requests left", rate.remaining, rate.limit),
+                    None => String::new(),
+                }
+            ));
+            if let Some(input) = &c.input {
+                for line in input.lines() {
+                    detail.push_str(&format!("\n    {line}"));
+                }
+            }
+            if let Some(e) = &c.error {
+                detail.push_str(&format!("\n  {e}"));
+            }
+        }
+        let result = match result {
+            Ok(m) => Ok(format!("{m}{detail}")),
+            Err(e) => Err(format!("{e}{detail}")),
+        };
+        let bytes: usize = log.calls.iter().map(|c| c.bytes).sum();
+        self.log(
+            kind,
+            name,
+            cwd,
+            label.to_owned(),
+            commands,
+            &result,
+            elapsed_ms,
+            Some(bytes),
+        );
+    }
+
+    fn console_done(&mut self, id: u64, exit: Result<gitvis_core::devops::proc::Exit, String>) {
+        self.console.finished(id, exit);
+        let Some(run) = self.console.get(id) else {
+            return;
+        };
+        let repo = run.repo;
+        let i = repo.and_then(|r| self.repo_idx(r));
+        if let Some(i) = i {
+            let result = if run.succeeded() {
+                Ok(format!(
+                    "{} · {} lines\n{}",
+                    run.status_text(),
+                    run.lines.len() + run.dropped,
+                    run.tail(40)
+                ))
+            } else {
+                Err(format!(
+                    "{} · {} lines\n{}",
+                    run.status_text(),
+                    run.lines.len() + run.dropped,
+                    run.tail(40)
+                ))
+            };
+            let entry = (
+                run.title.clone(),
+                run.command.clone(),
+                run.spec.cwd.display().to_string(),
+                run.elapsed_ms(),
+                run.bytes,
+            );
+            let name = self.repos[i].name.clone();
+            self.log(
+                ActivityKind::Op,
+                name,
+                entry.2,
+                entry.0,
+                vec![entry.1],
+                &result,
+                entry.3,
+                Some(entry.4),
+            );
+            let mut cx = self.devops_ctx(Some(i));
+            if let Some(run) = self.console.get(id) {
+                devops::on_console_done(&mut cx, &mut self.repos[i], run);
+            }
+            let effects = cx.take_effects();
+            self.run_effects(effects);
+        }
+    }
+
+    fn console_action(&mut self, ctx: &egui::Context, a: ConsoleAction) {
+        match a {
+            ConsoleAction::Stop(id) => self.console.stop(id),
+            ConsoleAction::Rerun(id) => {
+                if let Some((spec, cancel)) = self.console.restart(id) {
+                    self.worker.run_console(id, spec, cancel);
+                }
+            }
+            ConsoleAction::Remove(id) => self.console.remove(id),
+            ConsoleAction::ClearFinished => {
+                let repo = self.repos.get(self.active).map(|r| r.id);
+                self.console.clear_finished(repo);
+            }
+            ConsoleAction::Copy(id) => {
+                if let Some(run) = self.console.get(id) {
+                    ctx.copy_text(run.text());
+                    self.toast(ToastKind::Info, "Output copied to the clipboard", "");
+                }
+            }
         }
     }
 
@@ -3220,16 +3506,23 @@ impl GitVis {
             }
             Action::ShowPage(page) if has_repo => {
                 let r = &mut self.repos[i];
-                if page == Page::GitHub && r.github_remote.is_none() {
+                if matches!(page, Page::GitHub | Page::Review)
+                    && r.github_remote.is_none()
+                    && r.forge_remote.is_none()
+                {
                     self.toast(
                         ToastKind::Info,
-                        "No GitHub remote",
-                        "Add a remote on github.com to see pull requests and workflow runs.",
+                        "No GitHub, GitLab or Azure DevOps remote",
+                        "Add a remote on github.com, a GitLab host or dev.azure.com to see pull requests and pipelines.",
                     );
                     return;
                 }
                 r.page = page;
-                if page == Page::GitHub {
+                self.devops_page_shown(ctx, i, page);
+                if matches!(
+                    page,
+                    Page::GitHub | Page::Review | Page::Ship | Page::Govern
+                ) {
                     self.maybe_fetch_github(i, false);
                 }
                 if page == Page::Security {
@@ -3345,12 +3638,16 @@ impl GitVis {
                     run.cancel.store(true, Ordering::Relaxed);
                 }
             }
-            Action::SetGitHubTab(tab) if has_repo => self.repos[i].gh_page.tab = tab,
             Action::OpenRun { run, job } if has_repo => self.open_run(i, run, job),
             Action::RefreshRun(run) if has_repo => self.refresh_run(i, run),
             Action::ShowLog { run, job, step } if has_repo => self.show_log(i, run, job, step),
             Action::LoadAnnotations { run, job } if has_repo => self.load_annotations(i, run, job),
-            Action::OpenPr(number) if has_repo => self.open_pr(i, number),
+            Action::OpenPr(number) if has_repo => {
+                self.apply(ctx, Action::ShowPage(Page::Review));
+                self.apply(ctx, devops::review::Act::OpenPr(number).into());
+            }
+            Action::DevOps(a) if has_repo => self.devops_apply(ctx, i, a),
+            Action::Console(a) => self.console_action(ctx, a),
             Action::RefreshChecks(sha) if has_repo => self.ensure_checks(i, sha, true),
             Action::FindContaining(id) if has_repo => self.request_contains(i, id),
             _ => {}
@@ -3762,6 +4059,7 @@ impl eframe::App for GitVis {
         for ev in events {
             self.handle_event(ev);
         }
+        self.drain_deferred(ctx);
         self.tick_dirty(ctx);
         self.tick_checks(ctx);
         self.run_script(ctx);
@@ -3792,6 +4090,8 @@ impl eframe::App for GitVis {
                 views::rail::show(
                     ui,
                     self.repos.get(self.active),
+                    &self.home,
+                    &self.console,
                     &self.settings,
                     &mut actions,
                 )
@@ -3848,74 +4148,112 @@ impl eframe::App for GitVis {
 
         if self.repos.is_empty() {
             views::welcome::show(ui, &self.settings, &mut actions);
+        } else if self.repos[self.active].page == Page::Home {
+            let panel_fill = ui.visuals().panel_fill;
+            egui::CentralPanel::default()
+                .frame(Frame::NONE.fill(panel_fill))
+                .show(ui, |ui| {
+                    devops::home::show(
+                        ui,
+                        &mut self.home,
+                        &self.repos,
+                        self.active,
+                        &self.settings,
+                        &mut actions,
+                    )
+                });
         } else {
             let settings = &self.settings;
+            let console = &self.console;
             let dark = settings.dark;
             let panel_fill = ui.visuals().panel_fill;
             let style = ui.style().clone();
             let repo = &mut self.repos[self.active];
+            let on_github = repo.github_remote.is_some();
+            let on_forge = !on_github && repo.forge_remote.is_some();
+            // Review / Actions without any remote fall back to the graph.
+            let page = match repo.page {
+                Page::GitHub | Page::Review if !on_github && !on_forge => Page::Graph,
+                p => p,
+            };
+            let central = |ui: &mut egui::Ui, add: &mut dyn FnMut(&mut egui::Ui)| {
+                egui::CentralPanel::default()
+                    .frame(Frame::NONE.fill(panel_fill))
+                    .show(ui, |ui| add(ui));
+            };
 
-            if repo.page == Page::Graph
-                || (repo.page == Page::GitHub && repo.github_remote.is_none())
-            {
-                egui::Panel::left("sidebar")
-                    .resizable(true)
-                    .default_size(250.0)
-                    .size_range(170.0..=520.0)
-                    .frame(Frame::NONE.fill(panel_fill))
-                    .show(ui, |ui| {
-                        // Panels shrink to their content; claim the whole width.
-                        ui.set_min_width(ui.available_width());
-                        views::sidebar::show(ui, repo, settings, &mut actions)
-                    });
-            }
-
-            if repo.page == Page::GitHub && repo.github_remote.is_some() {
-                egui::CentralPanel::default()
-                    .frame(Frame::NONE.fill(panel_fill))
-                    .show(ui, |ui| {
-                        views::github::show(ui, repo, settings, &mut actions)
-                    });
-            } else if repo.page == Page::Security {
-                egui::CentralPanel::default()
-                    .frame(Frame::NONE.fill(panel_fill))
-                    .show(ui, |ui| {
-                        views::security::show(ui, repo, settings, &mut actions)
-                    });
-            } else if repo.page == Page::Insights {
-                egui::CentralPanel::default()
-                    .frame(Frame::NONE.fill(panel_fill))
-                    .show(ui, |ui| {
-                        views::insights::show(ui, repo, settings, &mut actions)
-                    });
-            } else {
-                if repo.file.is_some() {
-                    egui::Panel::right("diff")
+            match page {
+                Page::Review if on_github => central(ui, &mut |ui| {
+                    devops::review::show(ui, repo, console, settings, &mut actions)
+                }),
+                Page::Review => central(ui, &mut |ui| {
+                    devops::forge::show_review(ui, repo, console, settings, &mut actions)
+                }),
+                Page::GitHub if on_github => central(ui, &mut |ui| {
+                    views::github::show(ui, repo, console, settings, &mut actions)
+                }),
+                Page::GitHub => central(ui, &mut |ui| {
+                    devops::forge::show_pipelines(ui, repo, console, settings, &mut actions)
+                }),
+                Page::Ship => central(ui, &mut |ui| {
+                    devops::pages::show_ship(ui, repo, console, settings, &mut actions)
+                }),
+                Page::Govern => central(ui, &mut |ui| {
+                    devops::govern::show(ui, repo, console, settings, &mut actions)
+                }),
+                Page::Workbench => central(ui, &mut |ui| {
+                    devops::workbench::show(ui, repo, console, settings, &mut actions)
+                }),
+                Page::Security => central(ui, &mut |ui| {
+                    views::security::show(ui, repo, settings, &mut actions)
+                }),
+                Page::Insights => central(ui, &mut |ui| {
+                    views::insights::show(ui, repo, settings, &mut actions)
+                }),
+                _ => {
+                    egui::Panel::left("sidebar")
                         .resizable(true)
-                        .default_size(680.0)
-                        .size_range(320.0..=1600.0)
-                        .frame(Frame::side_top_panel(&style).inner_margin(Margin::symmetric(6, 4)))
+                        .default_size(250.0)
+                        .size_range(170.0..=520.0)
+                        .frame(Frame::NONE.fill(panel_fill))
                         .show(ui, |ui| {
+                            // Panels shrink to their content; claim the whole width.
                             ui.set_min_width(ui.available_width());
-                            views::diff::show(ui, repo, settings, &mut actions)
+                            views::sidebar::show(ui, repo, settings, &mut actions)
                         });
-                } else {
-                    egui::Panel::right("details")
-                        .resizable(true)
-                        .default_size(420.0)
-                        .size_range(280.0..=1000.0)
-                        .frame(Frame::side_top_panel(&style).inner_margin(Margin::symmetric(10, 6)))
+                    if repo.file.is_some() {
+                        egui::Panel::right("diff")
+                            .resizable(true)
+                            .default_size(680.0)
+                            .size_range(320.0..=1600.0)
+                            .frame(
+                                Frame::side_top_panel(&style).inner_margin(Margin::symmetric(6, 4)),
+                            )
+                            .show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                views::diff::show(ui, repo, settings, &mut actions)
+                            });
+                    } else {
+                        egui::Panel::right("details")
+                            .resizable(true)
+                            .default_size(420.0)
+                            .size_range(280.0..=1000.0)
+                            .frame(
+                                Frame::side_top_panel(&style)
+                                    .inner_margin(Margin::symmetric(10, 6)),
+                            )
+                            .show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                views::details::show(ui, repo, settings, &mut actions)
+                            });
+                    }
+
+                    egui::CentralPanel::default()
+                        .frame(Frame::NONE.fill(views::graph::background(dark)))
                         .show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            views::details::show(ui, repo, settings, &mut actions)
+                            views::graph::show(ui, repo, settings, &mut actions)
                         });
                 }
-
-                egui::CentralPanel::default()
-                    .frame(Frame::NONE.fill(views::graph::background(dark)))
-                    .show(ui, |ui| {
-                        views::graph::show(ui, repo, settings, &mut actions)
-                    });
             }
         }
 
@@ -3955,6 +4293,7 @@ impl eframe::App for GitVis {
             // Scripted smoke tests never write the user's session.
             return;
         }
+        self.settings.home = self.home.prefs();
         self.settings.open_repos = self.repos.iter().map(|r| r.workdir.clone()).collect();
         self.settings.active = self.active;
         for i in 0..self.repos.len() {

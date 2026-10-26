@@ -435,6 +435,9 @@ pub struct ApiCall {
     pub bytes: usize,
     pub rate: Option<RateLimit>,
     pub error: Option<String>,
+    /// What the request sent on standard input: the JSON body for logged
+    /// requests, only its size for withheld ones (secret values).
+    pub input: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -844,43 +847,202 @@ fn rate_limit(headers: &str) -> Option<RateLimit> {
     })
 }
 
+/// The GitHub CLI executable: `gh`, or the program named by `GITVIS_GH`
+/// (a recording test double) when that is set.
+pub fn gh_program() -> String {
+    std::env::var("GITVIS_GH")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "gh".to_owned())
+}
+
+/// A request body sent to `gh api --input -` on standard input.
+#[derive(Clone, Copy, Debug)]
+pub enum Body<'a> {
+    /// Shown in the activity log (pretty-printed, truncated).
+    Logged(&'a [u8]),
+    /// Never shown anywhere: only its size is recorded.
+    Withheld(&'a [u8]),
+}
+
+impl<'a> Body<'a> {
+    fn bytes(&self) -> &'a [u8] {
+        match self {
+            Body::Logged(b) | Body::Withheld(b) => b,
+        }
+    }
+
+    fn preview(&self) -> String {
+        match self {
+            Body::Withheld(b) => format!(
+                "{} sent on standard input (not logged)",
+                crate::devops::plural_bytes(b.len())
+            ),
+            Body::Logged(b) => {
+                let pretty = serde_json::from_slice::<serde_json::Value>(b)
+                    .ok()
+                    .and_then(|v| serde_json::to_string_pretty(&v).ok())
+                    .unwrap_or_else(|| String::from_utf8_lossy(b).into_owned());
+                const MAX: usize = 4_000;
+                if pretty.len() > MAX {
+                    let mut cut = MAX;
+                    while !pretty.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    format!("{}\n… ({} more bytes)", &pretty[..cut], pretty.len() - cut)
+                } else {
+                    pretty
+                }
+            }
+        }
+    }
+}
+
+/// `HTTP 422 Unprocessable Entity` from the status line of `gh api -i`.
+fn status_line(headers: &str) -> Option<(u16, String)> {
+    let first = headers.lines().next()?.trim();
+    let mut parts = first.splitn(3, ' ');
+    let proto = parts.next()?;
+    if !proto.starts_with("HTTP/") {
+        return None;
+    }
+    let code: u16 = parts.next()?.parse().ok()?;
+    Some((code, parts.next().unwrap_or("").trim().to_owned()))
+}
+
+/// A readable message for a failed request: GitHub's `message`, every entry
+/// of `errors`, the documentation link, and the HTTP status, e.g.
+/// `Validation Failed: head is invalid (HTTP 422)`.
+fn api_error(headers: &str, body: &[u8], stderr: &str) -> String {
+    let status = status_line(headers);
+    let mut msg = String::new();
+    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) {
+        if let Some(m) = v.get("message").and_then(|m| m.as_str()) {
+            msg.push_str(m);
+        }
+        if let Some(errs) = v.get("errors").and_then(|e| e.as_array()) {
+            let parts: Vec<String> = errs
+                .iter()
+                .filter_map(|e| {
+                    if let Some(s) = e.as_str() {
+                        return Some(s.to_owned());
+                    }
+                    if let Some(m) = e.get("message").and_then(|m| m.as_str()) {
+                        return Some(m.to_owned());
+                    }
+                    let field = e.get("field").and_then(|f| f.as_str());
+                    let code = e.get("code").and_then(|c| c.as_str());
+                    match (field, code) {
+                        (Some(f), Some(c)) => Some(format!("{f} is {}", c.replace('_', " "))),
+                        (None, Some(c)) => Some(c.replace('_', " ")),
+                        _ => None,
+                    }
+                })
+                .collect();
+            if !parts.is_empty() {
+                if !msg.is_empty() {
+                    msg.push_str(": ");
+                }
+                msg.push_str(&parts.join("; "));
+            }
+        }
+        if let Some(doc) = v.get("documentation_url").and_then(|d| d.as_str()) {
+            msg.push_str(&format!("\nSee {doc}"));
+        }
+    }
+    if msg.is_empty() {
+        // No JSON body: gh's own `gh: Not Found (HTTP 404)` line, or the text.
+        let lines: Vec<&str> = stderr
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        msg = lines.join("\n");
+        if msg.is_empty() {
+            msg = String::from_utf8_lossy(body).trim().to_owned();
+        }
+        if let Some(rest) = msg.strip_prefix("gh: ") {
+            msg = rest.to_owned();
+        }
+    }
+    match status {
+        Some((code, _)) if !msg.contains(&format!("HTTP {code}")) => {
+            if let Some(nl) = msg.find('\n') {
+                msg.insert_str(nl, &format!(" (HTTP {code})"));
+            } else {
+                msg.push_str(&format!(" (HTTP {code})"));
+            }
+        }
+        _ => {}
+    }
+    if msg.is_empty() {
+        "The GitHub CLI failed without a message".to_owned()
+    } else {
+        msg
+    }
+}
+
 /// Run `gh api ENDPOINT` and record the call. Response headers are included
 /// (`-i`) so the rate limit can be read.
 fn api(dir: &Path, endpoint: &str, extra: &[&str], calls: &mut Vec<ApiCall>) -> Result<Vec<u8>> {
+    api_request(dir, endpoint, extra, None, calls)
+}
+
+/// `gh api -i [extra…] [--input -] ENDPOINT`, recording an [`ApiCall`].
+/// `extra` holds flags such as `--method POST`; a `body` goes to standard
+/// input, so nothing in it ever appears on a command line.
+pub fn api_request(
+    dir: &Path,
+    endpoint: &str,
+    extra: &[&str],
+    body: Option<Body>,
+    calls: &mut Vec<ApiCall>,
+) -> Result<Vec<u8>> {
     let mut args = vec!["api", "-i"];
     args.extend_from_slice(extra);
+    if body.is_some() {
+        args.extend(["--input", "-"]);
+    }
     args.push(endpoint);
     let command = format!("gh {}", args.join(" "));
+    let input = body.map(|b| b.preview());
+    let program = gh_program();
     let started = Instant::now();
-    let out = cli::run_program("gh", dir, &args, None);
+    let out = cli::run_raw(&program, dir, &args, body.map(|b| b.bytes()), &[]);
     let elapsed_ms = started.elapsed().as_millis() as u64;
     match out {
         Ok(out) => {
-            let (headers, body) = split_response(&out.stdout);
-            calls.push(ApiCall {
-                command,
-                elapsed_ms,
-                bytes: body.len(),
-                rate: rate_limit(&headers),
-                error: None,
-            });
-            Ok(body.to_vec())
+            let (headers, resp) = split_response(&out.stdout);
+            let rate = rate_limit(&headers);
+            if out.success {
+                calls.push(ApiCall {
+                    command,
+                    elapsed_ms,
+                    bytes: resp.len(),
+                    rate,
+                    error: None,
+                    input,
+                });
+                Ok(resp.to_vec())
+            } else {
+                let message = api_error(&headers, resp, &out.stderr);
+                calls.push(ApiCall {
+                    command,
+                    elapsed_ms,
+                    bytes: resp.len(),
+                    rate,
+                    error: Some(message.clone()),
+                    input,
+                });
+                Err(Error::new(message))
+            }
         }
         Err(e) => {
             let m = e.to_string();
-            let message = if m.contains("Could not start gh") {
+            let message = if m.contains("Could not start") {
                 "GitHub CLI (gh) is not installed. Install it and run `gh auth login`.".to_owned()
             } else {
-                // `-i` echoes the response headers on failure; keep the last lines.
-                let tail: Vec<&str> = m
-                    .lines()
-                    .filter(|l| !l.is_empty() && !l.contains(": ") || l.starts_with("gh:"))
-                    .collect();
-                if tail.is_empty() {
-                    m.clone()
-                } else {
-                    tail.join("\n")
-                }
+                m
             };
             calls.push(ApiCall {
                 command,
@@ -888,6 +1050,7 @@ fn api(dir: &Path, endpoint: &str, extra: &[&str], calls: &mut Vec<ApiCall>) -> 
                 bytes: 0,
                 rate: None,
                 error: Some(message.clone()),
+                input,
             });
             Err(Error::new(message))
         }

@@ -560,9 +560,12 @@ impl GitOp {
     /// stderr) on success.
     pub fn run(&self, workdir: &Path) -> Result<String> {
         let mut messages = Vec::new();
-        let program = self.program();
+        let program = match self.program() {
+            "gh" => crate::github::gh_program(),
+            p => p.to_owned(),
+        };
         for args in self.commands() {
-            let out = cli::run_program(program, workdir, &args, self.stdin())?;
+            let out = cli::run_program(&program, workdir, &args, self.stdin())?;
             let stdout = String::from_utf8_lossy(&out.stdout).trim().to_owned();
             match (stdout.is_empty(), out.stderr.is_empty()) {
                 (true, true) => {}

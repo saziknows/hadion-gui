@@ -4,6 +4,7 @@
 //! executable so behaviour matches the user's command line exactly.
 
 pub mod cli;
+pub mod devops;
 pub mod diff;
 pub mod github;
 pub mod graph;

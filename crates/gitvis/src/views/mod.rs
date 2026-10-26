@@ -1,7 +1,9 @@
 pub mod activity;
+pub mod console;
 pub mod details;
 pub mod dialogs;
 pub mod diff;
+pub mod form;
 pub mod github;
 pub mod graph;
 pub mod icons;

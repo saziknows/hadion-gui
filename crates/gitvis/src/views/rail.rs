@@ -4,11 +4,14 @@
 
 use egui::{Align2, Color32, CornerRadius, FontId, Layout, Rect, Response, Sense, Ui, pos2, vec2};
 
+use crate::devops::{self, Console};
 use crate::state::{Action, Page, PullPref, RepoState, Settings};
 use crate::theme::{self, Tone, pal, size};
 use crate::views::icons::{self, Icon};
 
 pub const WIDTH: f32 = 72.0;
+/// Height of one rail entry (icon pill and label).
+const ENTRY_H: f32 = 51.0;
 
 /// What a rail entry signals.
 struct Item<'a> {
@@ -21,8 +24,8 @@ struct Item<'a> {
 
 fn entry(ui: &mut Ui, item: &Item) -> Response {
     let p = *pal(ui);
-    let (rect, resp) = ui.allocate_exact_size(vec2(WIDTH, 56.0), Sense::click());
-    let pill = Rect::from_center_size(pos2(rect.center().x, rect.top() + 20.0), vec2(44.0, 28.0));
+    let (rect, resp) = ui.allocate_exact_size(vec2(WIDTH, ENTRY_H), Sense::click());
+    let pill = Rect::from_center_size(pos2(rect.center().x, rect.top() + 18.0), vec2(44.0, 26.0));
     if item.selected {
         ui.painter()
             .rect_filled(pill, CornerRadius::same(theme::radius::L), p.selection);
@@ -44,7 +47,7 @@ fn entry(ui: &mut Ui, item: &Item) -> Response {
         FontId::new(size::CAPTION, theme::medium())
     };
     ui.painter().text(
-        pos2(rect.center().x, rect.top() + 44.0),
+        pos2(rect.center().x, rect.top() + 40.0),
         Align2::CENTER_CENTER,
         item.label,
         font,
@@ -60,7 +63,14 @@ fn entry(ui: &mut Ui, item: &Item) -> Response {
         .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-pub fn show(ui: &mut Ui, repo: Option<&RepoState>, settings: &Settings, actions: &mut Vec<Action>) {
+pub fn show(
+    ui: &mut Ui,
+    repo: Option<&RepoState>,
+    home: &devops::home::State,
+    console: &Console,
+    settings: &Settings,
+    actions: &mut Vec<Action>,
+) {
     let p = *pal(ui);
     ui.spacing_mut().item_spacing.y = 2.0;
     // App mark, level with the repository tabs.
@@ -78,50 +88,144 @@ pub fn show(ui: &mut Ui, repo: Option<&RepoState>, settings: &Settings, actions:
     ui.add_space(10.0);
     if let Some(r) = repo {
         let page = r.page;
-        let go = |target: Page| Action::ShowPage(target);
+        let has_remote = r.github_remote.is_some() || r.forge_remote.is_some();
+        let forge = r
+            .forge_remote
+            .as_ref()
+            .filter(|_| r.github_remote.is_none());
+        let mut items: Vec<(Item, Page)> = Vec::new();
 
-        let history = Item {
-            icon: Icon::Graph,
-            label: "History",
-            selected: page == Page::Graph,
-            dot: None,
-            tip: "Commit graph, branches, working tree".into(),
-        };
-        if entry(ui, &history).clicked() && page != Page::Graph {
-            actions.push(go(Page::Graph));
-        }
+        let with_badge =
+            |mut tip: String, badge: Option<(Tone, String)>| -> (String, Option<Tone>) {
+                match badge {
+                    Some((tone, line)) => {
+                        if !line.is_empty() {
+                            tip.push('\n');
+                            tip.push_str(&line);
+                        }
+                        (tip, Some(tone))
+                    }
+                    None => (tip, None),
+                }
+            };
 
-        if r.github_remote.is_some() {
-            let runs = r.github.as_ref().map(|d| d.runs.as_slice()).unwrap_or(&[]);
-            let failed = runs.iter().filter(|x| x.is_failure()).count();
-            let running = runs.iter().filter(|x| x.is_running()).count();
-            let mut tip = "Workflow runs, jobs, logs and pull requests (Ctrl+Shift+G)".to_owned();
-            if failed > 0 {
-                tip.push_str(&format!(
-                    "\n{}",
-                    crate::format::plural(failed, "failed run", "failed runs")
-                ));
-            }
-            if running > 0 {
-                tip.push_str(&format!("\n{running} running"));
-            }
-            let item = Item {
-                icon: Icon::Play,
-                label: "Actions",
-                selected: page == Page::GitHub,
-                dot: if failed > 0 {
+        let (tip, dot) = with_badge(
+            "Every open repository and your GitHub inbox (Ctrl+Shift+H)".into(),
+            devops::home::rail_badge(home),
+        );
+        items.push((
+            Item {
+                icon: Icon::Home,
+                label: "Home",
+                selected: page == Page::Home,
+                dot,
+                tip,
+            },
+            Page::Home,
+        ));
+        items.push((
+            Item {
+                icon: Icon::Graph,
+                label: "History",
+                selected: page == Page::Graph,
+                dot: None,
+                tip: "Commit graph, branches, working tree".into(),
+            },
+            Page::Graph,
+        ));
+
+        if has_remote {
+            let noun = match forge {
+                Some(f) => format!(
+                    "{} {}s and reviews on {} (Ctrl+Shift+R)",
+                    f.kind.label(),
+                    f.kind.review_noun(),
+                    f.host
+                ),
+                None => "Pull requests, reviews and issues (Ctrl+Shift+R)".to_owned(),
+            };
+            let badge = if forge.is_some() {
+                devops::forge::rail_badge(r, console, Page::Review)
+            } else {
+                devops::review::rail_badge(r, console)
+            };
+            let (tip, dot) = with_badge(noun, badge);
+            items.push((
+                Item {
+                    icon: Icon::PullRequest,
+                    label: "Review",
+                    selected: page == Page::Review,
+                    dot,
+                    tip,
+                },
+                Page::Review,
+            ));
+
+            let (tip, dot) = if forge.is_some() {
+                with_badge(
+                    "Pipelines, jobs and logs (Ctrl+Shift+G)".into(),
+                    devops::forge::rail_badge(r, console, Page::GitHub),
+                )
+            } else {
+                let runs = r.github.as_ref().map(|d| d.runs.as_slice()).unwrap_or(&[]);
+                let failed = runs.iter().filter(|x| x.is_failure()).count();
+                let running = runs.iter().filter(|x| x.is_running()).count();
+                let mut tip =
+                    "Workflow runs, workflows, artifacts, caches, validation (Ctrl+Shift+G)"
+                        .to_owned();
+                if failed > 0 {
+                    tip.push_str(&format!(
+                        "\n{}",
+                        crate::format::plural(failed, "failed run", "failed runs")
+                    ));
+                }
+                if running > 0 {
+                    tip.push_str(&format!("\n{running} running"));
+                }
+                let base = if failed > 0 {
                     Some(Tone::Danger)
                 } else if running > 0 {
                     Some(Tone::Accent)
                 } else {
                     None
-                },
-                tip,
+                };
+                match devops::ci::rail_badge(r, console) {
+                    Some((tone, line)) => {
+                        if !line.is_empty() {
+                            tip.push('\n');
+                            tip.push_str(&line);
+                        }
+                        (tip, base.or(Some(tone)))
+                    }
+                    None => (tip, base),
+                }
             };
-            if entry(ui, &item).clicked() && page != Page::GitHub {
-                actions.push(go(Page::GitHub));
-            }
+            items.push((
+                Item {
+                    icon: Icon::Play,
+                    label: "Actions",
+                    selected: page == Page::GitHub,
+                    dot,
+                    tip,
+                },
+                Page::GitHub,
+            ));
         }
+
+        let (tip, dot) = with_badge(
+            "Releases, environments, where a commit is, DORA, packages, Kubernetes, Terraform (Ctrl+Shift+D)".into(),
+            devops::ship::rail_badge(r, console).or_else(|| devops::runtime::rail_badge(r, console)),
+        );
+        items.push((
+            Item {
+                icon: Icon::Rocket,
+                label: "Ship",
+                selected: page == Page::Ship,
+                dot,
+                tip,
+            },
+            Page::Ship,
+        ));
 
         let sp = &r.sec_page;
         let staged = sp.staged_count();
@@ -139,30 +243,67 @@ pub fn show(ui: &mut Ui, repo: Option<&RepoState>, settings: &Settings, actions:
                 crate::format::plural(urgent, "finding", "findings")
             ));
         }
-        let item = Item {
-            icon: Icon::Shield,
-            label: "Exposure",
-            selected: page == Page::Security,
-            dot: if staged > 0 || urgent > 0 {
-                Some(Tone::Danger)
-            } else {
-                None
+        items.push((
+            Item {
+                icon: Icon::Shield,
+                label: "Exposure",
+                selected: page == Page::Security,
+                dot: if staged > 0 || urgent > 0 {
+                    Some(Tone::Danger)
+                } else {
+                    None
+                },
+                tip,
             },
-            tip,
-        };
-        if entry(ui, &item).clicked() && page != Page::Security {
-            actions.push(go(Page::Security));
-        }
+            Page::Security,
+        ));
 
-        let item = Item {
-            icon: Icon::Chart,
-            label: "Insights",
-            selected: page == Page::Insights,
-            dot: r.ins_page.running().then_some(Tone::Accent),
-            tip: "Health, hotspots, owners, branches, releases, debt, CI, licences, search, recovery (Ctrl+Shift+I)".into(),
-        };
-        if entry(ui, &item).clicked() && page != Page::Insights {
-            actions.push(go(Page::Insights));
+        items.push((
+            Item {
+                icon: Icon::Chart,
+                label: "Insights",
+                selected: page == Page::Insights,
+                dot: r.ins_page.running().then_some(Tone::Accent),
+                tip: "Health, hotspots, owners, branches, releases, debt, CI, licences, search, recovery (Ctrl+Shift+I)".into(),
+            },
+            Page::Insights,
+        ));
+
+        let (tip, dot) = with_badge(
+            "Alerts, SBOM, images, branch protection, CODEOWNERS, environments, secrets and variables (Ctrl+Shift+A)".into(),
+            devops::govern::rail_badge(r, console),
+        );
+        items.push((
+            Item {
+                icon: Icon::Lock,
+                label: "Govern",
+                selected: page == Page::Govern,
+                dot,
+                tip,
+            },
+            Page::Govern,
+        ));
+
+        let (tip, dot) = with_badge(
+            "Tasks, interactive rebase, bisect, worktrees, file history, console (Ctrl+Shift+T)"
+                .into(),
+            devops::workbench::rail_badge(r, console),
+        );
+        items.push((
+            Item {
+                icon: Icon::Terminal,
+                label: "Tools",
+                selected: page == Page::Workbench,
+                dot,
+                tip,
+            },
+            Page::Workbench,
+        ));
+
+        for (item, target) in &items {
+            if entry(ui, item).clicked() && page != *target {
+                actions.push(Action::ShowPage(*target));
+            }
         }
     }
 

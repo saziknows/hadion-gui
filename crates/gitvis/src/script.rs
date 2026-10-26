@@ -10,13 +10,15 @@
 //! HEAD commit), `wip` (select the working tree), `open PATH` (diff of a file
 //! in the selected commit), `open-wip PATH` (unstaged diff), `split`,
 //! `unified`, `select HUNK FROM TO` (diff line rows), `activity`, `reflog`,
-//! `theme`, `github` / `graph` / `prs` (centre page), `run N` (open the N-th
-//! listed workflow run), `job N` (log of the N-th job), `pr N`, `verbose`,
+//! `theme`, `github` / `graph` (centre page), `run N` (open the N-th
+//! listed workflow run), `job N` (log of the N-th job), `verbose`,
 //! `security` (exposure page), `scan`, `scan-history N`, `finding N`,
 //! `reveal`, `sec-tab NAME`, `osint`, `unreachable`, `osv`, `dorks`,
 //! `pr-refs`, `item N`, `insights`, `ins-tab NAME`, `analyse N`, `weight`,
 //! `date-debt`, `pickaxe TEXT`, `grep TEXT`, `recover`, `ins-item N`,
-//! `blame PATH`, `quit`.
+//! `blame PATH`, `quit`. Anything else goes to the DevOps areas
+//! (`crate::devops::script`): `home`, `review`, `prs`, `pr N`, `ship TAB`,
+//! `govern`, `workbench`, … (see each area's `script`).
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -45,8 +47,6 @@ pub enum Cmd {
     /// Open the GitHub page (Actions tab) / go back to the graph.
     Github,
     Graph,
-    /// GitHub page, pull requests tab.
-    Prs,
     /// Set the run list's text filter.
     Filter(String),
     /// Set the run list's status chip: `all`, `failed`, `running`, `passed`.
@@ -55,8 +55,6 @@ pub enum Cmd {
     Run(usize),
     /// Show the log of the N-th job of the selected run.
     JobLog(usize),
-    /// Open the N-th pull request.
-    Pr(usize),
     Verbose,
     /// Exposure page.
     Security,
@@ -102,6 +100,9 @@ pub enum Cmd {
     InsItem(usize),
     /// Blame the selected / given file on the Owners tab.
     Blame(String),
+    /// A command of a DevOps area (`devops::script`), e.g. `review`,
+    /// `pr N`, `ship releases`, `govern`, `tasks`.
+    Ext(String, String),
     Quit,
 }
 
@@ -174,12 +175,10 @@ fn parse(s: &str) -> Option<Cmd> {
         "undo" => Cmd::Undo,
         "github" => Cmd::Github,
         "graph" => Cmd::Graph,
-        "prs" => Cmd::Prs,
         "filter" => Cmd::Filter(arg.to_owned()),
         "status" => Cmd::Status(arg.to_owned()),
         "run" => Cmd::Run(num(arg)?),
         "job" => Cmd::JobLog(num(arg)?),
-        "pr" => Cmd::Pr(num(arg)?),
         "verbose" => Cmd::Verbose,
         "security" => Cmd::Security,
         "scan" => Cmd::Scan,
@@ -204,10 +203,7 @@ fn parse(s: &str) -> Option<Cmd> {
         "ins-item" => Cmd::InsItem(num(arg)?),
         "blame" => Cmd::Blame(arg.to_owned()),
         "quit" => Cmd::Quit,
-        other => {
-            eprintln!("[script] unknown command: {other}");
-            return None;
-        }
+        other => Cmd::Ext(other.to_owned(), arg.to_owned()),
     };
     Some(cmd)
 }

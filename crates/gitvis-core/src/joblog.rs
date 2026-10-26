@@ -182,7 +182,7 @@ impl Pen {
 }
 
 /// Strip CSI escape sequences, turning SGR colours into spans.
-fn strip_ansi(s: &str) -> (String, Vec<ColorSpan>) {
+pub fn strip_ansi(s: &str) -> (String, Vec<ColorSpan>) {
     if !s.contains('\x1b') {
         return (s.to_owned(), Vec::new());
     }
