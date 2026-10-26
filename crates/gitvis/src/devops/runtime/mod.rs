@@ -1821,3 +1821,230 @@ pub fn rail_badge(repo: &RepoState, _console: &Console) -> Option<(Tone, String)
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gitvis_core::devops::proc::{Exit, Line, Stream};
+    use gitvis_core::devops::tools::Installed;
+
+    const PODS: &str =
+        include_str!("../../../../gitvis-core/src/devops/runtime/fixtures/pods.json");
+    const WORKLOADS: &str =
+        include_str!("../../../../gitvis-core/src/devops/runtime/fixtures/workloads.json");
+
+    fn repo() -> RepoState {
+        RepoState::new(1, PathBuf::from("."))
+    }
+
+    fn cx() -> Ctx {
+        Ctx::new(Some(1), Some(PathBuf::from(".")), None, None, true, false)
+    }
+
+    fn installed(name: &str) -> Installed {
+        Installed {
+            path: PathBuf::from(name),
+            version: format!("{name} v1"),
+        }
+    }
+
+    #[test]
+    fn script_commands_map_to_actions() {
+        for (cmd, arg) in [
+            ("workload", "2"),
+            ("pod", "0"),
+            ("pod-logs", "1"),
+            ("tf-root", "0"),
+            ("tf-validate", ""),
+            ("tf-fmt", ""),
+            ("pkg", "3"),
+            ("k8s-context", "k3d-shop"),
+            ("k8s-ns", "shop"),
+            ("k8s-scale", "2"),
+            ("k8s-restart", ""),
+        ] {
+            let a = script(cmd, arg).unwrap_or_else(|| panic!("{cmd} {arg}"));
+            assert_eq!(a.len(), 1, "{cmd}");
+        }
+        assert!(script("workload", "x").is_none());
+        assert!(script("k8s-scale", "").is_none());
+        assert!(script("nope", "").is_none());
+    }
+
+    #[test]
+    fn failing_pods_raise_the_rail_badge() {
+        let mut r = repo();
+        assert!(rail_badge(&r, &Console::default()).is_none());
+        let pods = kube::parse_pods(PODS.as_bytes()).unwrap();
+        let workloads = kube::parse_workloads(WORKLOADS.as_bytes()).unwrap();
+        r.devops.runtime.kube.load = Some(NamespaceLoad {
+            target: Target::new("k3d-shop", "shop"),
+            namespaces: Ok(Vec::new()),
+            workloads: Some(Ok(workloads)),
+            pods: Some(Ok(pods)),
+        });
+        let (tone, text) = rail_badge(&r, &Console::default()).unwrap();
+        assert_eq!(tone, Tone::Danger);
+        assert_eq!(text, "3 pods failing in shop");
+        // Failed first in the list, then by kind and name.
+        let k = &r.devops.runtime.kube;
+        assert_eq!(k.visible()[0].name, "temporal-worker");
+        let web = k
+            .workload(&(WorkloadKind::Deployment, "web".into()))
+            .unwrap();
+        assert_eq!(k.pods_of(web).len(), 3);
+        r.devops.runtime.kube.filter = "envoy".into();
+        assert_eq!(r.devops.runtime.kube.visible().len(), 1, "filter by image");
+    }
+
+    #[test]
+    fn drift_raises_a_warning_badge() {
+        let mut r = repo();
+        r.devops.runtime.tf.roots.insert(
+            "infra/live".into(),
+            RootRuns {
+                drift: Some(DriftResult {
+                    outcome: DriftOutcome::Drift,
+                    text: PlanText::default(),
+                    cause: None,
+                    tail: String::new(),
+                    at: 0,
+                    ms: 0,
+                }),
+                ..RootRuns::default()
+            },
+        );
+        let (tone, text) = rail_badge(&r, &Console::default()).unwrap();
+        assert_eq!(tone, Tone::Warning);
+        assert_eq!(text, "terraform drift in infra/live");
+    }
+
+    #[test]
+    fn binary_choice() {
+        let mut tf = TfState::default();
+        assert_eq!(tf.binary(), None);
+        tf.tools = Some((None, Some(installed("tofu"))));
+        assert_eq!(tf.binary(), Some(Binary::Tofu));
+        tf.tools = Some((Some(installed("terraform")), Some(installed("tofu"))));
+        assert_eq!(tf.binary(), Some(Binary::Terraform));
+        tf.binary = Some(Binary::Tofu);
+        assert_eq!(tf.binary(), Some(Binary::Tofu));
+        tf.tools = Some((Some(installed("terraform")), None));
+        assert_eq!(
+            tf.binary(),
+            Some(Binary::Terraform),
+            "the choice needs the tool"
+        );
+    }
+
+    #[test]
+    fn packages_linked_first() {
+        let packages: Vec<Package> = serde_json::from_str(
+            r#"[{"name":"other","updated_at":"2026-10-26T00:00:00Z"},
+                {"name":"shop/web","updated_at":"2026-10-01T00:00:00Z","repository":{"full_name":"acme/shop"}},
+                {"name":"shop/api","updated_at":"2026-10-20T00:00:00Z","repository":{"full_name":"acme/shop"}}]"#,
+        )
+        .unwrap();
+        let mut st = PkgState {
+            listing: Some(Ok(Listing {
+                owner: "acme".into(),
+                kind: OwnerKind::User,
+                repo: "acme/shop".into(),
+                private: false,
+                packages,
+            })),
+            ..PkgState::default()
+        };
+        let names = |st: &PkgState| -> Vec<String> {
+            st.visible().iter().map(|p| p.name.clone()).collect()
+        };
+        assert_eq!(names(&st), ["shop/api", "shop/web"]);
+        st.show_all = true;
+        assert_eq!(names(&st), ["shop/api", "shop/web", "other"]);
+        st.filter = "WEB".into();
+        assert_eq!(names(&st), ["shop/web"]);
+    }
+
+    fn finish(console: &mut Console, id: u64, title: &str, out: &str, code: i32) {
+        console.add(
+            id,
+            Some(1),
+            title.into(),
+            gitvis_core::devops::proc::ProcSpec::new("terraform", "."),
+        );
+        console.output(
+            id,
+            out.lines()
+                .map(|l| Line {
+                    stream: Stream::Stdout,
+                    text: l.to_owned(),
+                })
+                .collect(),
+        );
+        console.finished(
+            id,
+            Ok(Exit {
+                code: Some(code),
+                cancelled: false,
+                elapsed_ms: 10,
+            }),
+        );
+    }
+
+    #[test]
+    fn console_runs_are_parsed_into_results() {
+        let mut r = repo();
+        let mut console = Console::default();
+        let tf = &mut r.devops.runtime.tf;
+        tf.run_index
+            .insert(901, ("infra".into(), Command::Validate, Binary::Terraform));
+        tf.run_index
+            .insert(902, ("infra".into(), Command::Drift, Binary::Terraform));
+        tf.run_index
+            .insert(903, ("infra".into(), Command::Plan, Binary::Terraform));
+        finish(
+            &mut console,
+            901,
+            "validate",
+            r#"{"format_version":"1.0","valid":false,"error_count":1,"warning_count":0,"diagnostics":[{"severity":"error","summary":"Missing required provider","detail":"This configuration requires provider registry.terraform.io/hashicorp/aws, but that provider isn't available."}]}"#,
+            1,
+        );
+        finish(
+            &mut console,
+            902,
+            "drift",
+            "Note: Objects have changed outside of Terraform\n  # aws_instance.web has changed\n",
+            2,
+        );
+        finish(
+            &mut console,
+            903,
+            "plan",
+            "\u{2577}\n\u{2502} Error: No valid credential sources found\n\u{2502} \n\u{2502}   on main.tf line 3, in provider \"aws\":\n\u{2575}\n",
+            1,
+        );
+        let mut c = cx();
+        for id in [901, 902, 903] {
+            on_console_done(&mut c, &mut r, console.get(id).unwrap());
+        }
+        let runs = &r.devops.runtime.tf.roots["infra"];
+        let v = runs.validation.as_ref().unwrap();
+        assert_eq!(v.result.as_ref().unwrap().errors, 1);
+        assert!(v.cause.as_deref().unwrap().contains("run Init first"));
+        let d = runs.drift.as_ref().unwrap();
+        assert_eq!(d.outcome, DriftOutcome::Drift);
+        assert_eq!(d.text.drift.len(), 1);
+        let p = runs.plan.as_ref().unwrap();
+        assert_eq!(p.outcome, PlanOutcome::Failed);
+        assert_eq!(
+            p.text.errors[0].summary,
+            "No valid credential sources found"
+        );
+        assert!(p.cause.as_deref().unwrap().contains("credentials"));
+        assert!(!p.json_loading, "no plan file, no show -json");
+        assert_eq!(
+            rail_badge(&r, &console).unwrap().1,
+            "terraform drift in infra"
+        );
+    }
+}
