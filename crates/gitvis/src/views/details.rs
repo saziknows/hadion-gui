@@ -449,6 +449,13 @@ fn commit_panel(
                         actions.push(Action::Copy(f.path.clone()));
                         ui.close();
                     }
+                    if ui.button("File history").clicked() {
+                        actions.push(Action::ShowPage(crate::state::Page::Workbench));
+                        actions.push(
+                            crate::devops::workbench::Act::FileHistory(f.path.clone()).into(),
+                        );
+                        ui.close();
+                    }
                 });
             }
         });
@@ -1042,6 +1049,11 @@ fn common_file_items(ui: &mut Ui, snap: &Snapshot, path: &str, actions: &mut Vec
     }
     if ui.button("Copy path").clicked() {
         actions.push(Action::Copy(path.to_owned()));
+        ui.close();
+    }
+    if ui.button("File history").clicked() {
+        actions.push(Action::ShowPage(crate::state::Page::Workbench));
+        actions.push(crate::devops::workbench::Act::FileHistory(path.to_owned()).into());
         ui.close();
     }
 }

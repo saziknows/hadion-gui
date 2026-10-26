@@ -568,6 +568,11 @@ pub fn commit(ui: &mut Ui, cx: &MenuCtx, c: &Commit, actions: &mut Vec<Action>) 
         );
     }
     separator(ui);
+    if entry(ui, "Interactive rebase from here…", false).clicked() {
+        actions.push(Action::ShowPage(crate::state::Page::Workbench));
+        actions.push(crate::devops::workbench::Act::RebaseFrom(sha.clone()).into());
+        ui.close();
+    }
     dialog(
         ui,
         "Create branch here…",
