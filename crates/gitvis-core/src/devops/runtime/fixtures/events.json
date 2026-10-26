@@ -1,0 +1,98 @@
+{
+    "apiVersion": "v1",
+    "items": [
+        {
+            "apiVersion": "v1",
+            "count": 1,
+            "firstTimestamp": "2026-10-26T17:40:01Z",
+            "involvedObject": {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "name": "temporal-worker",
+                "namespace": "shop"
+            },
+            "kind": "Event",
+            "lastTimestamp": "2026-10-26T17:40:01Z",
+            "message": "Scaled up replica set temporal-worker-84b7c9d5f to 2",
+            "metadata": {
+                "creationTimestamp": "2026-10-26T17:40:01Z",
+                "name": "temporal-worker.18f2a1",
+                "namespace": "shop"
+            },
+            "reason": "ScalingReplicaSet",
+            "source": {
+                "component": "deployment-controller"
+            },
+            "type": "Normal"
+        },
+        {
+            "apiVersion": "v1",
+            "count": 61,
+            "firstTimestamp": "2026-10-26T17:41:12Z",
+            "involvedObject": {
+                "kind": "Pod",
+                "name": "temporal-worker-84b7c9d5f-h2j4k",
+                "namespace": "shop"
+            },
+            "kind": "Event",
+            "lastTimestamp": "2026-10-26T19:03:56Z",
+            "message": "Back-off restarting failed container worker in pod temporal-worker-84b7c9d5f-h2j4k_shop(1d2e)",
+            "metadata": {
+                "name": "temporal-worker-84b7c9d5f-h2j4k.18f2a3",
+                "namespace": "shop"
+            },
+            "reason": "BackOff",
+            "source": {
+                "component": "kubelet",
+                "host": "k3d-shop-agent-0"
+            },
+            "type": "Warning"
+        },
+        {
+            "apiVersion": "v1",
+            "eventTime": "2026-10-26T17:50:12.402119Z",
+            "involvedObject": {
+                "kind": "Deployment",
+                "name": "temporal-worker",
+                "namespace": "shop"
+            },
+            "kind": "Event",
+            "message": "Deployment does not have minimum availability.",
+            "metadata": {
+                "creationTimestamp": "2026-10-26T17:50:12Z",
+                "name": "temporal-worker.18f2b0",
+                "namespace": "shop"
+            },
+            "reason": "MinimumReplicasUnavailable",
+            "reportingComponent": "deployment-controller",
+            "series": {
+                "count": 4,
+                "lastObservedTime": "2026-10-26T18:55:02.000000Z"
+            },
+            "type": "Warning"
+        },
+        {
+            "apiVersion": "v1",
+            "count": null,
+            "firstTimestamp": null,
+            "involvedObject": {
+                "kind": "Deployment",
+                "name": "temporal-worker"
+            },
+            "kind": "Event",
+            "lastTimestamp": null,
+            "message": "Scaled down replica set temporal-worker-6b9f8d7c4 to 0 from 2",
+            "metadata": {
+                "creationTimestamp": "2026-10-26T17:42:30Z",
+                "name": "temporal-worker.18f2a9"
+            },
+            "reason": "ScalingReplicaSet",
+            "source": {},
+            "type": "Normal"
+        }
+    ],
+    "kind": "List",
+    "metadata": {
+        "resourceVersion": ""
+    }
+}

@@ -1,0 +1,62 @@
+{
+    "kind": "Config",
+    "apiVersion": "v1",
+    "preferences": {},
+    "clusters": [
+        {
+            "name": "k3d-shop",
+            "cluster": {
+                "server": "https://0.0.0.0:55271",
+                "certificate-authority-data": "DATA+OMITTED"
+            }
+        },
+        {
+            "name": "k3d-shopdb",
+            "cluster": {
+                "server": "https://0.0.0.0:55379",
+                "certificate-authority-data": "DATA+OMITTED"
+            }
+        },
+        {
+            "name": "kind-dev",
+            "cluster": {
+                "server": "https://127.0.0.1:59043",
+                "certificate-authority-data": "DATA+OMITTED"
+            }
+        }
+    ],
+    "users": [
+        {
+            "name": "admin@k3d-shop",
+            "user": {
+                "client-certificate-data": "DATA+OMITTED",
+                "client-key-data": "DATA+OMITTED"
+            }
+        }
+    ],
+    "contexts": [
+        {
+            "name": "k3d-shop",
+            "context": {
+                "cluster": "k3d-shop",
+                "user": "admin@k3d-shop",
+                "namespace": "shop"
+            }
+        },
+        {
+            "name": "k3d-shopdb",
+            "context": {
+                "cluster": "k3d-shopdb",
+                "user": "admin@k3d-shopdb"
+            }
+        },
+        {
+            "name": "kind-dev",
+            "context": {
+                "cluster": "kind-dev",
+                "user": "kind-dev"
+            }
+        }
+    ],
+    "current-context": "k3d-shopdb"
+}

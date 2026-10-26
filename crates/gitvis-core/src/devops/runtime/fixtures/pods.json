@@ -1,0 +1,512 @@
+{
+    "apiVersion": "v1",
+    "items": [
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "creationTimestamp": "2026-10-24T11:01:58Z",
+                "labels": {
+                    "app.kubernetes.io/name": "api-gateway",
+                    "pod-template-hash": "6d4cf56db6"
+                },
+                "name": "api-gateway-6d4cf56db6-2xk8p",
+                "namespace": "shop",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "apps/v1",
+                        "controller": true,
+                        "kind": "ReplicaSet",
+                        "name": "api-gateway-6d4cf56db6"
+                    }
+                ]
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "image": "ghcr.io/acme/shop/api-gateway:sha-9a9d91b",
+                        "name": "api-gateway"
+                    }
+                ],
+                "nodeName": "k3d-shop-agent-0"
+            },
+            "status": {
+                "conditions": [
+                    {
+                        "status": "True",
+                        "type": "Ready"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "containerID": "containerd://8a1b",
+                        "image": "ghcr.io/acme/shop/api-gateway:sha-9a9d91b",
+                        "imageID": "ghcr.io/acme/shop/api-gateway@sha256:9f2c1d0b7a4e5f60718293a4b5c6d7e8f9011223344556677889900aabbccdd",
+                        "lastState": {},
+                        "name": "api-gateway",
+                        "ready": true,
+                        "restartCount": 0,
+                        "started": true,
+                        "state": {
+                            "running": {
+                                "startedAt": "2026-10-24T11:02:20Z"
+                            }
+                        }
+                    }
+                ],
+                "hostIP": "172.18.0.3",
+                "phase": "Running",
+                "podIP": "10.42.1.17",
+                "qosClass": "Burstable",
+                "startTime": "2026-10-24T11:01:58Z"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "creationTimestamp": "2026-10-24T11:02:30Z",
+                "labels": {
+                    "app.kubernetes.io/name": "api-gateway",
+                    "pod-template-hash": "6d4cf56db6"
+                },
+                "name": "api-gateway-6d4cf56db6-9qtrv",
+                "namespace": "shop"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "image": "ghcr.io/acme/shop/api-gateway:sha-9a9d91b",
+                        "name": "api-gateway"
+                    }
+                ],
+                "nodeName": "k3d-shop-agent-1"
+            },
+            "status": {
+                "containerStatuses": [
+                    {
+                        "image": "ghcr.io/acme/shop/api-gateway:sha-9a9d91b",
+                        "imageID": "ghcr.io/acme/shop/api-gateway@sha256:9f2c1d0b7a4e5f60718293a4b5c6d7e8f9011223344556677889900aabbccdd",
+                        "lastState": {
+                            "terminated": {
+                                "containerID": "containerd://77aa",
+                                "exitCode": 137,
+                                "finishedAt": "2026-10-25T23:12:09Z",
+                                "reason": "OOMKilled",
+                                "startedAt": "2026-10-24T11:02:41Z"
+                            }
+                        },
+                        "name": "api-gateway",
+                        "ready": true,
+                        "restartCount": 1,
+                        "started": true,
+                        "state": {
+                            "running": {
+                                "startedAt": "2026-10-25T23:12:10Z"
+                            }
+                        }
+                    }
+                ],
+                "phase": "Running",
+                "podIP": "10.42.2.9",
+                "startTime": "2026-10-24T11:02:30Z"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "creationTimestamp": "2026-10-26T17:40:02Z",
+                "labels": {
+                    "app": "temporal-worker",
+                    "pod-template-hash": "84b7c9d5f"
+                },
+                "name": "temporal-worker-84b7c9d5f-h2j4k",
+                "namespace": "shop"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "image": "ghcr.io/acme/shop/temporal-worker:sha-33df645",
+                        "name": "worker"
+                    }
+                ],
+                "initContainers": [
+                    {
+                        "image": "ghcr.io/acme/shop/migrate:sha-33df645",
+                        "name": "migrate"
+                    }
+                ],
+                "nodeName": "k3d-shop-agent-0"
+            },
+            "status": {
+                "containerStatuses": [
+                    {
+                        "image": "ghcr.io/acme/shop/temporal-worker:sha-33df645",
+                        "imageID": "ghcr.io/acme/shop/temporal-worker@sha256:4e1d2c3b4a5968778695a4b3c2d1e0f9e8d7c6b5a4938271605f4e3d2c1b0a99",
+                        "lastState": {
+                            "terminated": {
+                                "exitCode": 1,
+                                "finishedAt": "2026-10-26T19:03:55Z",
+                                "message": "panic: TEMPORAL_HOST is not set",
+                                "reason": "Error",
+                                "startedAt": "2026-10-26T19:03:54Z"
+                            }
+                        },
+                        "name": "worker",
+                        "ready": false,
+                        "restartCount": 14,
+                        "started": false,
+                        "state": {
+                            "waiting": {
+                                "message": "back-off 5m0s restarting failed container=worker pod=temporal-worker-84b7c9d5f-h2j4k_shop(1d2e)",
+                                "reason": "CrashLoopBackOff"
+                            }
+                        }
+                    }
+                ],
+                "initContainerStatuses": [
+                    {
+                        "image": "ghcr.io/acme/shop/migrate:sha-33df645",
+                        "name": "migrate",
+                        "ready": true,
+                        "restartCount": 0,
+                        "state": {
+                            "terminated": {
+                                "exitCode": 0,
+                                "reason": "Completed"
+                            }
+                        }
+                    }
+                ],
+                "phase": "Running",
+                "startTime": "2026-10-26T17:40:02Z"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "creationTimestamp": "2026-10-26T17:40:02Z",
+                "labels": {
+                    "app": "temporal-worker",
+                    "pod-template-hash": "84b7c9d5f"
+                },
+                "name": "temporal-worker-84b7c9d5f-p9x7m",
+                "namespace": "shop"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "image": "ghcr.io/acme/shop/temporal-worker:sha-33df645",
+                        "name": "worker"
+                    }
+                ],
+                "nodeName": "k3d-shop-agent-1"
+            },
+            "status": {
+                "containerStatuses": [
+                    {
+                        "image": "ghcr.io/acme/shop/temporal-worker:sha-33df645",
+                        "imageID": "",
+                        "lastState": {
+                            "terminated": {
+                                "exitCode": 1,
+                                "finishedAt": "2026-10-26T19:04:01Z",
+                                "reason": "Error",
+                                "startedAt": "2026-10-26T19:04:00Z"
+                            }
+                        },
+                        "name": "worker",
+                        "ready": false,
+                        "restartCount": 13,
+                        "state": {
+                            "terminated": {
+                                "exitCode": 1,
+                                "finishedAt": "2026-10-26T19:04:01Z",
+                                "reason": "Error",
+                                "startedAt": "2026-10-26T19:04:00Z"
+                            }
+                        }
+                    }
+                ],
+                "phase": "Running",
+                "startTime": "2026-10-26T17:40:02Z"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "creationTimestamp": "2026-10-26T19:01:41Z",
+                "labels": {
+                    "app": "web",
+                    "tier": "frontend",
+                    "pod-template-hash": "7c9d8f6b5"
+                },
+                "name": "web-7c9d8f6b5-qwert",
+                "namespace": "shop"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "image": "ghcr.io/acme/shop/web:master",
+                        "name": "web"
+                    },
+                    {
+                        "image": "docker.io/envoyproxy/envoy:v1.31.2",
+                        "name": "envoy"
+                    }
+                ],
+                "nodeName": "k3d-shop-agent-1"
+            },
+            "status": {
+                "containerStatuses": [
+                    {
+                        "image": "docker.io/envoyproxy/envoy:v1.31.2",
+                        "name": "envoy",
+                        "ready": true,
+                        "restartCount": 0,
+                        "state": {
+                            "running": {
+                                "startedAt": "2026-10-26T19:01:50Z"
+                            }
+                        }
+                    },
+                    {
+                        "image": "ghcr.io/acme/shop/web:master",
+                        "name": "web",
+                        "ready": false,
+                        "restartCount": 0,
+                        "state": {
+                            "waiting": {
+                                "message": "Back-off pulling image \"ghcr.io/acme/shop/web:master\": unauthorized",
+                                "reason": "ImagePullBackOff"
+                            }
+                        }
+                    }
+                ],
+                "phase": "Pending",
+                "startTime": "2026-10-26T19:01:41Z"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "creationTimestamp": "2026-10-20T09:00:00Z",
+                "labels": {
+                    "app": "web",
+                    "tier": "frontend",
+                    "pod-template-hash": "5f7b9c8d4"
+                },
+                "name": "web-5f7b9c8d4-abcde",
+                "namespace": "shop"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "image": "ghcr.io/acme/shop/web:master",
+                        "name": "web"
+                    },
+                    {
+                        "image": "docker.io/envoyproxy/envoy:v1.31.2",
+                        "name": "envoy"
+                    }
+                ],
+                "nodeName": "k3d-shop-agent-0"
+            },
+            "status": {
+                "containerStatuses": [
+                    {
+                        "image": "docker.io/envoyproxy/envoy:v1.31.2",
+                        "name": "envoy",
+                        "ready": true,
+                        "restartCount": 0,
+                        "state": {
+                            "running": {
+                                "startedAt": "2026-10-20T09:00:09Z"
+                            }
+                        }
+                    },
+                    {
+                        "image": "ghcr.io/acme/shop/web:master",
+                        "name": "web",
+                        "ready": true,
+                        "restartCount": 2,
+                        "state": {
+                            "running": {
+                                "startedAt": "2026-10-21T02:11:00Z"
+                            }
+                        }
+                    }
+                ],
+                "phase": "Running",
+                "startTime": "2026-10-20T09:00:00Z"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "creationTimestamp": "2026-10-20T09:00:01Z",
+                "deletionTimestamp": "2026-10-26T19:04:30Z",
+                "labels": {
+                    "app": "web",
+                    "tier": "frontend",
+                    "pod-template-hash": "5f7b9c8d4"
+                },
+                "name": "web-5f7b9c8d4-fghij",
+                "namespace": "shop"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "image": "ghcr.io/acme/shop/web:master",
+                        "name": "web"
+                    }
+                ],
+                "nodeName": "k3d-shop-agent-1"
+            },
+            "status": {
+                "containerStatuses": [
+                    {
+                        "image": "ghcr.io/acme/shop/web:master",
+                        "name": "web",
+                        "ready": true,
+                        "restartCount": 0,
+                        "state": {
+                            "running": {
+                                "startedAt": "2026-10-20T09:00:10Z"
+                            }
+                        }
+                    }
+                ],
+                "phase": "Running",
+                "startTime": "2026-10-20T09:00:01Z"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "creationTimestamp": "2026-09-19T08:13:41Z",
+                "labels": {
+                    "app": "postgres",
+                    "statefulset.kubernetes.io/pod-name": "postgres-0"
+                },
+                "name": "postgres-0",
+                "namespace": "shop"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "image": "postgres:16.4",
+                        "name": "postgres"
+                    }
+                ],
+                "nodeName": "k3d-shop-server-0"
+            },
+            "status": {
+                "containerStatuses": [
+                    {
+                        "image": "docker.io/library/postgres:16.4",
+                        "name": "postgres",
+                        "ready": true,
+                        "restartCount": 0,
+                        "state": {
+                            "running": {
+                                "startedAt": "2026-09-19T08:13:55Z"
+                            }
+                        }
+                    }
+                ],
+                "phase": "Running"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "creationTimestamp": "2026-10-26T18:30:00Z",
+                "labels": {
+                    "app": "node-exporter"
+                },
+                "name": "node-exporter-x7k2d",
+                "namespace": "shop"
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "image": "quay.io/prometheus/node-exporter:v1.8.2",
+                        "name": "node-exporter"
+                    }
+                ],
+                "nodeName": "k3d-shop-agent-1"
+            },
+            "status": {
+                "containerStatuses": [
+                    {
+                        "image": "quay.io/prometheus/node-exporter:v1.8.2",
+                        "name": "node-exporter",
+                        "ready": false,
+                        "restartCount": 0,
+                        "state": {
+                            "waiting": {
+                                "reason": "ContainerCreating"
+                            }
+                        }
+                    }
+                ],
+                "phase": "Pending"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "creationTimestamp": "2026-10-26T12:00:00Z",
+                "labels": {
+                    "job-name": "nightly-report"
+                },
+                "name": "nightly-report-29384-t6v2c",
+                "namespace": "shop",
+                "ownerReferences": [
+                    {
+                        "kind": "Job",
+                        "name": "nightly-report-29384"
+                    }
+                ]
+            },
+            "spec": {
+                "containers": [
+                    {
+                        "image": "ghcr.io/acme/shop/report:latest",
+                        "name": "report"
+                    }
+                ]
+            },
+            "status": {
+                "containerStatuses": [
+                    {
+                        "image": "ghcr.io/acme/shop/report:latest",
+                        "name": "report",
+                        "ready": false,
+                        "restartCount": 0,
+                        "state": {
+                            "terminated": {
+                                "exitCode": 0,
+                                "reason": "Completed"
+                            }
+                        }
+                    }
+                ],
+                "phase": "Succeeded"
+            }
+        }
+    ],
+    "kind": "List",
+    "metadata": {
+        "resourceVersion": ""
+    }
+}
