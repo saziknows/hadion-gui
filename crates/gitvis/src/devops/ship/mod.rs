@@ -2040,7 +2040,7 @@ fn recompute_dora(st: &mut State) {
 // ---------------------------------------------------------------------------
 
 /// `GITVIS_SCRIPT` commands this area understands: `release N`,
-/// `new-release`, `release-tag TAG`, `notes local|github`, `publish`,
+/// `release-more`, `new-release`, `release-tag TAG`, `notes local|github`, `publish`,
 /// `edit-release`, `delete-release`, `download N DIR` (N-th asset of the
 /// selected release), `where SHA|head|selected`, `env N`,
 /// `rollback [rerun]`, `promote ENV`, `approve N`, `reject N`,
@@ -2053,6 +2053,7 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
     let (tab, a) = match cmd {
         "release" => (ShipTab::Releases, Act::SelectReleaseIndex(num()?)),
         "new-release" => (ShipTab::Releases, Act::NewRelease),
+        "release-more" => (ShipTab::Releases, Act::LoadMoreReleases),
         "release-tag" => (ShipTab::Releases, Act::SetFormTag(arg.to_owned())),
         "notes" => (
             ShipTab::Releases,
@@ -2212,11 +2213,16 @@ mod tests {
 
     #[test]
     fn prefs_round_trip() {
-        let mut st = State::default();
-        st.order = vec!["staging".into(), "production".into()];
-        st.dora.source = Some(DoraSource::Workflow(7, "Deploy".into()));
-        st.dora.chosen = true;
-        st.dora.period = 30;
+        let mut st = State {
+            order: vec!["staging".into(), "production".into()],
+            dora: DoraState {
+                source: Some(DoraSource::Workflow(7, "Deploy".into())),
+                chosen: true,
+                period: 30,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let json = serde_json::to_string(&st.prefs()).unwrap();
         let p: Prefs = serde_json::from_str(&json).unwrap();
         let mut back = State::default();
