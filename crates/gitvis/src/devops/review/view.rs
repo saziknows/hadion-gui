@@ -289,6 +289,10 @@ fn prs_page(
     detail_area(ui, |ui| {
         let st = &repo.devops.review;
         if st.form_open && st.new_pr.is_some() {
+            // AI and other areas' tools for the new pull request.
+            if let Some(h) = crate::devops::hooks::HookCx::of(repo, settings) {
+                crate::devops::hooks::new_pr_tools(ui, &h, actions);
+            }
             forms::new_pr(ui, repo, now, actions);
             return;
         }
@@ -684,6 +688,10 @@ fn pr_detail(
         PrTab::Conversation => {
             detail_area(ui, |ui| {
                 scroll_pane(ui, ("rv_conv", n), |ui| {
+                    // AI summary, issue links and other areas' blocks.
+                    if let Some(h) = crate::devops::hooks::HookCx::of(repo, settings) {
+                        crate::devops::hooks::pr_tools(ui, &h, n, actions);
+                    }
                     conversation::show(ui, repo, n, now, actions);
                 });
             });

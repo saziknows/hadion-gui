@@ -5,7 +5,7 @@
 use egui::{Align2, Color32, CornerRadius, FontId, Layout, Rect, Response, Sense, Ui, pos2, vec2};
 
 use crate::devops::{self, Console};
-use crate::state::{Action, Page, PullPref, RepoState, Settings};
+use crate::state::{Action, Page, RepoState, Settings};
 use crate::theme::{self, Tone, pal, size};
 use crate::views::icons::{self, Icon};
 
@@ -307,24 +307,51 @@ pub fn show(
         }
     }
 
-    // Bottom: activity log and settings.
+    // Bottom: settings, terminal and the activity log.
     ui.with_layout(Layout::bottom_up(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.y = 2.0;
         ui.add_space(8.0);
+        let on_settings = repo.is_some_and(|r| r.page == Page::Settings);
+        let mut tip =
+            "Settings: appearance, safety, git config, keys, accounts, AI, updates (Ctrl+,)"
+                .to_owned();
+        if settings.safe_mode {
+            tip.push_str(
+                "
+Safe mode is on",
+            );
+        }
         let gear = entry(
             ui,
             &Item {
                 icon: Icon::Gear,
                 label: "Settings",
-                selected: false,
-                dot: None,
-                tip: "Theme, dates, pull strategy, scanning".into(),
+                selected: on_settings,
+                dot: settings.safe_mode.then_some(Tone::Warning),
+                tip,
             },
         );
-        egui::Popup::menu(&gear)
-            .id(egui::Id::unique("settings_menu"))
-            .align(egui::RectAlign::RIGHT_END)
-            .show(|ui| settings_menu(ui, settings, actions));
+        if gear.clicked() && repo.is_some() {
+            actions.push(Action::ShowPage(if on_settings {
+                Page::Graph
+            } else {
+                Page::Settings
+            }));
+        }
+        if entry(
+            ui,
+            &Item {
+                icon: Icon::Terminal,
+                label: "Terminal",
+                selected: settings.show_terminal,
+                dot: None,
+                tip: "Shells in the repository folder (Ctrl+`)".into(),
+            },
+        )
+        .clicked()
+        {
+            actions.push(Action::ToggleTerminal);
+        }
         if entry(
             ui,
             &Item {
@@ -340,56 +367,4 @@ pub fn show(
             actions.push(Action::ToggleActivity);
         }
     });
-}
-
-fn settings_menu(ui: &mut Ui, settings: &Settings, actions: &mut Vec<Action>) {
-    let p = *pal(ui);
-    ui.set_min_width(260.0);
-    ui.label(crate::views::kit::caption_text(&p, "Display"));
-    let mut dark = settings.dark;
-    if ui.checkbox(&mut dark, "Dark theme").clicked() {
-        actions.push(Action::ToggleTheme);
-    }
-    let mut rel = settings.relative_dates;
-    if ui.checkbox(&mut rel, "Relative dates").clicked() {
-        actions.push(Action::ToggleRelativeDates);
-    }
-    let mut author = settings.show_author;
-    if ui.checkbox(&mut author, "Author column").clicked() {
-        actions.push(Action::ToggleAuthor);
-    }
-    let mut status_bar = settings.show_status_bar;
-    if ui.checkbox(&mut status_bar, "Status bar").clicked() {
-        actions.push(Action::ToggleStatusBar);
-    }
-    ui.separator();
-    ui.label(crate::views::kit::caption_text(&p, "Activity"));
-    let mut verbose = settings.verbose;
-    if ui
-        .checkbox(&mut verbose, "Verbose activity log")
-        .on_hover_text("Record repository reads and GitHub API calls too, with full output")
-        .clicked()
-    {
-        actions.push(Action::ToggleVerbose);
-    }
-    let mut scan = settings.scan_on_open;
-    if ui
-        .checkbox(&mut scan, "Scan for secrets on open")
-        .on_hover_text("Read every file of the working tree for credentials when a repository is opened. Staged changes are always checked before a commit.")
-        .clicked()
-    {
-        actions.push(Action::ToggleScanOnOpen);
-    }
-    ui.separator();
-    ui.label(crate::views::kit::caption_text(&p, "Default pull"));
-    for pp in [PullPref::Merge, PullPref::FastForwardOnly, PullPref::Rebase] {
-        if ui.radio(settings.pull == pp, pp.label()).clicked() {
-            actions.push(Action::SetPull(pp));
-        }
-    }
-    ui.separator();
-    if ui.button("Reload repository   F5").clicked() {
-        actions.push(Action::Reload(true));
-        ui.close();
-    }
 }

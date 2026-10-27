@@ -79,6 +79,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
             snap,
             filter: graph_filter,
             github: github.as_ref(),
+            hook: None,
         },
         filter: &filter,
         dark: settings.dark,

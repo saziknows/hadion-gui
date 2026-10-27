@@ -58,8 +58,11 @@ pub struct GitVis {
     script: Option<Script>,
     /// Streamed processes (tasks, act, terraform, kubectl logs, bisect).
     console: Console,
-    /// The home page's inbox and dashboard state (global).
-    home: devops::home::State,
+    /// App-wide areas: home inbox, palette, Settings page, terminals,
+    /// notifications, updates.
+    globals: devops::global::Globals,
+    /// For app-wide areas whose threads must wake the UI.
+    egui_ctx: egui::Context,
     /// Actions queued by DevOps controllers while no egui context was at
     /// hand (event handling); applied at the start of the next `logic`.
     deferred: Vec<Action>,
@@ -94,11 +97,13 @@ impl GitVis {
             activity_tab: ActivityTab::Log,
             script: Script::from_env(),
             console: Console::default(),
-            home: devops::home::State::default(),
+            globals: devops::global::Globals::default(),
+            egui_ctx: cc.egui_ctx.clone(),
             deferred: Vec::new(),
             timers: Vec::new(),
         };
-        app.home.apply_prefs(&app.settings.home);
+        app.globals.home.apply_prefs(&app.settings.home);
+        gitvis_core::devops::safety::set_safe_mode(app.settings.safe_mode);
         for path in app.settings.open_repos.clone() {
             app.open_repo(path, false);
         }
@@ -1143,6 +1148,7 @@ impl GitVis {
             self.maybe_fetch_github(i, true);
         }
         self.request_quick_scan(i);
+        self.devops_snapshot(i);
         if first && self.settings.scan_on_open {
             self.start_scan(i, false, true);
         }
@@ -2666,6 +2672,21 @@ impl GitVis {
             if i.consume_key(Modifiers::COMMAND, Key::O) {
                 actions.push(Action::PickRepo);
             }
+            if i.consume_key(Modifiers::COMMAND, Key::K)
+                || i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::P)
+            {
+                actions.push(Action::TogglePalette);
+            }
+            if i.consume_key(Modifiers::COMMAND, Key::Backtick) {
+                actions.push(Action::ToggleTerminal);
+            }
+            if has_repo && i.consume_key(Modifiers::COMMAND, Key::Comma) {
+                actions.push(Action::ShowPage(if page == Page::Settings {
+                    Page::Graph
+                } else {
+                    Page::Settings
+                }));
+            }
             if has_repo && i.consume_key(Modifiers::COMMAND, Key::F) {
                 actions.push(Action::FocusSearch);
             }
@@ -3018,6 +3039,7 @@ impl GitVis {
             r.map(|r| r.workdir.clone()),
             gh,
             self.settings.dark,
+            self.settings.ext.clone(),
         )
     }
 
@@ -3044,6 +3066,34 @@ impl GitVis {
                     }
                 }
             }
+        }
+    }
+
+    /// Timers of the app-wide areas (notification polling, update checks).
+    fn tick_globals(&mut self) {
+        let active = (!self.repos.is_empty()).then_some(self.active);
+        let mut cx = self.devops_ctx(active);
+        let mut g = devops::global::GlobalCx {
+            settings: &mut self.settings,
+            repos: &self.repos,
+            active: self.active,
+            egui: &self.egui_ctx,
+        };
+        devops::global::tick(&mut cx, &mut self.globals, &mut g);
+        let effects = cx.take_effects();
+        if !effects.is_empty() {
+            self.run_effects(effects);
+        }
+    }
+
+    /// A repository finished loading: areas that follow the working tree
+    /// (conflicts, submodules, …) refresh.
+    fn devops_snapshot(&mut self, i: usize) {
+        let mut cx = self.devops_ctx(Some(i));
+        devops::on_snapshot(&mut cx, &mut self.repos[i]);
+        let effects = cx.take_effects();
+        if !effects.is_empty() {
+            self.run_effects(effects);
         }
     }
 
@@ -3086,15 +3136,18 @@ impl GitVis {
 
     fn devops_apply(&mut self, ctx: &egui::Context, i: usize, a: devops::DevOpsAction) {
         let mut cx = self.devops_ctx(Some(i));
-        match a {
-            devops::DevOpsAction::Home(h) => {
-                devops::home::apply(&mut cx, &mut self.home, &self.repos, h);
-                self.settings.home = self.home.prefs();
-            }
-            other => {
-                devops::apply(&mut cx, &mut self.repos[i], other);
-                self.save_prefs(i);
-            }
+        if a.is_global() {
+            let mut g = devops::global::GlobalCx {
+                settings: &mut self.settings,
+                repos: &self.repos,
+                active: self.active,
+                egui: &self.egui_ctx,
+            };
+            devops::global::apply(&mut cx, &mut self.globals, &mut g, a);
+            self.settings.home = self.globals.home.prefs();
+        } else {
+            devops::apply(&mut cx, &mut self.repos[i], a);
+            self.save_prefs(i);
         }
         let effects = cx.take_effects();
         self.run_effects(effects);
@@ -3104,7 +3157,15 @@ impl GitVis {
     fn devops_page_shown(&mut self, ctx: &egui::Context, i: usize, page: Page) {
         let mut cx = self.devops_ctx(Some(i));
         if page == Page::Home {
-            devops::home::on_page_shown(&mut cx, &mut self.home, &self.repos);
+            devops::home::on_page_shown(&mut cx, &mut self.globals.home, &self.repos);
+        } else if page == Page::Settings {
+            let mut g = devops::global::GlobalCx {
+                settings: &mut self.settings,
+                repos: &self.repos,
+                active: self.active,
+                egui: &self.egui_ctx,
+            };
+            devops::settings_page::section_shown(&mut cx, &mut self.globals, &mut g);
         } else {
             devops::page_shown(&mut cx, &mut self.repos[i], page);
         }
@@ -3173,16 +3234,19 @@ impl GitVis {
         let Some(msg) = msg else {
             return;
         };
-        let mut cx = self.devops_ctx(i);
-        match msg {
-            devops::DevOpsMsg::Home(m) => {
-                devops::home::on_msg(&mut cx, &mut self.home, &self.repos, m);
-            }
-            other => {
-                if let Some(i) = i {
-                    devops::on_msg(&mut cx, &mut self.repos[i], other);
-                }
-            }
+        // App-wide replies are built for the active repository when theirs
+        // is gone.
+        let mut cx = self.devops_ctx(i.or(Some(self.active)));
+        if msg.is_global() {
+            let mut g = devops::global::GlobalCx {
+                settings: &mut self.settings,
+                repos: &self.repos,
+                active: self.active,
+                egui: &self.egui_ctx,
+            };
+            devops::global::on_msg(&mut cx, &mut self.globals, &mut g, msg);
+        } else if let Some(i) = i {
+            devops::on_msg(&mut cx, &mut self.repos[i], msg);
         }
         let effects = cx.take_effects();
         self.run_effects(effects);
@@ -3679,6 +3743,25 @@ impl GitVis {
                 self.apply(ctx, devops::review::Act::OpenPr(number).into());
             }
             Action::DevOps(a) if has_repo => self.devops_apply(ctx, i, a),
+            Action::TogglePalette => devops::palette::toggle(&mut self.globals.palette),
+            Action::ToggleTerminal => self.settings.show_terminal = !self.settings.show_terminal,
+            Action::SetSafeMode(on) => {
+                self.settings.safe_mode = on;
+                gitvis_core::devops::safety::set_safe_mode(on);
+                self.toast(
+                    ToastKind::Info,
+                    if on {
+                        "Safe mode is on"
+                    } else {
+                        "Safe mode is off"
+                    },
+                    if on {
+                        "Changes outside this machine are refused until you turn it off."
+                    } else {
+                        "Changes outside this machine are allowed again (each still asks first)."
+                    },
+                );
+            }
             Action::Console(a) => self.console_action(ctx, a),
             Action::RefreshChecks(sha) if has_repo => self.ensure_checks(i, sha, true),
             Action::FindContaining(id) if has_repo => self.request_contains(i, id),
@@ -4092,6 +4175,7 @@ impl eframe::App for GitVis {
             self.handle_event(ev);
         }
         self.tick_timers(ctx);
+        self.tick_globals();
         self.drain_deferred(ctx);
         self.tick_dirty(ctx);
         self.tick_checks(ctx);
@@ -4123,7 +4207,7 @@ impl eframe::App for GitVis {
                 views::rail::show(
                     ui,
                     self.repos.get(self.active),
-                    &self.home,
+                    &self.globals.home,
                     &self.console,
                     &self.settings,
                     &mut actions,
@@ -4143,11 +4227,19 @@ impl eframe::App for GitVis {
         );
 
         if self.settings.show_status_bar && !self.repos.is_empty() {
+            let view = devops::global::GlobalView {
+                settings: &self.settings,
+                repos: &self.repos,
+                active: self.active,
+                console: &self.console,
+            };
             views::statusbar::show(
                 ui,
                 self.repos.get(self.active),
                 &self.settings,
                 self.activity.last(),
+                &self.globals,
+                &view,
                 &mut actions,
             );
         }
@@ -4179,8 +4271,50 @@ impl eframe::App for GitVis {
                 });
         }
 
+        if self.settings.show_terminal {
+            let p = theme::pal(ui);
+            egui::Panel::bottom("terminal_panel")
+                .resizable(true)
+                .default_size(320.0)
+                .size_range(160.0..=900.0)
+                .frame(
+                    Frame::NONE
+                        .fill(p.chrome)
+                        .stroke(egui::Stroke::new(1.0, p.border)),
+                )
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.set_min_height(ui.available_height());
+                    let view = devops::global::GlobalView {
+                        settings: &self.settings,
+                        repos: &self.repos,
+                        active: self.active,
+                        console: &self.console,
+                    };
+                    devops::terminal::show_panel(
+                        ui,
+                        &mut self.globals.terminal,
+                        &view,
+                        &mut actions,
+                    );
+                });
+        }
+
         if self.repos.is_empty() {
             views::welcome::show(ui, &self.settings, &mut actions);
+        } else if self.repos[self.active].page == Page::Settings {
+            let panel_fill = ui.visuals().panel_fill;
+            egui::CentralPanel::default()
+                .frame(Frame::NONE.fill(panel_fill))
+                .show(ui, |ui| {
+                    devops::settings_page::show(
+                        ui,
+                        &mut self.globals,
+                        &mut self.settings,
+                        self.repos.get(self.active),
+                        &mut actions,
+                    )
+                });
         } else if self.repos[self.active].page == Page::Home {
             let panel_fill = ui.visuals().panel_fill;
             egui::CentralPanel::default()
@@ -4188,7 +4322,7 @@ impl eframe::App for GitVis {
                 .show(ui, |ui| {
                     devops::home::show(
                         ui,
-                        &mut self.home,
+                        &mut self.globals.home,
                         &self.repos,
                         self.active,
                         &self.settings,
@@ -4243,6 +4377,23 @@ impl eframe::App for GitVis {
                 Page::Insights => central(ui, &mut |ui| {
                     views::insights::show(ui, repo, settings, &mut actions)
                 }),
+                Page::Compare => central(ui, &mut |ui| {
+                    devops::history::show_compare(ui, repo, console, settings, &mut actions)
+                }),
+                _ if devops::conflict::is_open(repo) => {
+                    egui::Panel::left("sidebar")
+                        .resizable(true)
+                        .default_size(250.0)
+                        .size_range(170.0..=520.0)
+                        .frame(Frame::NONE.fill(panel_fill))
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            views::sidebar::show(ui, repo, settings, &mut actions)
+                        });
+                    central(ui, &mut |ui| {
+                        devops::conflict::show_editor(ui, repo, console, settings, &mut actions)
+                    });
+                }
                 _ => {
                     egui::Panel::left("sidebar")
                         .resizable(true)
@@ -4302,6 +4453,16 @@ impl eframe::App for GitVis {
             }
         }
 
+        if devops::palette::is_open(&self.globals.palette) {
+            let view = devops::global::GlobalView {
+                settings: &self.settings,
+                repos: &self.repos,
+                active: self.active,
+                console: &self.console,
+            };
+            devops::palette::show(&ctx, &mut self.globals.palette, &view, &mut actions);
+        }
+
         views::toasts::show(&ctx, &mut self.toasts);
         views::graph::drag_overlay(&ctx);
 
@@ -4326,7 +4487,7 @@ impl eframe::App for GitVis {
             // Scripted smoke tests never write the user's session.
             return;
         }
-        self.settings.home = self.home.prefs();
+        self.settings.home = self.globals.home.prefs();
         self.settings.open_repos = self.repos.iter().map(|r| r.workdir.clone()).collect();
         self.settings.active = self.active;
         for i in 0..self.repos.len() {

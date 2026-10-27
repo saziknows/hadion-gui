@@ -13,6 +13,7 @@ use gitvis_core::{
     ChangeKind, CommitDetails, DiffTarget, FileEntry, Head, Pending, RefKind, Snapshot,
 };
 
+use crate::devops::hooks::{self, HookCx, WipList};
 use crate::format;
 use crate::state::{Action, Dialog, Page, RepoState, Selection, Settings};
 use crate::theme::{self, Tone, pal, size};
@@ -32,10 +33,16 @@ pub struct CommitCx<'a> {
     pub contains: Option<&'a Option<Vec<String>>>,
     /// The pull request the commit belongs to (Review page link).
     pub pr: Option<u64>,
+    /// For the extension hooks (`devops::hooks`).
+    pub hook: &'a HookCx<'a>,
 }
 
 pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mut Vec<Action>) {
     let RepoState {
+        id: repo_id,
+        workdir,
+        multi,
+        github,
         snapshot,
         selection,
         details,
@@ -54,6 +61,20 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
     let Some(snap) = snapshot.as_ref() else {
         return;
     };
+    let hook = HookCx {
+        repo: *repo_id,
+        workdir: workdir.as_path(),
+        snap,
+        devops: &*devops,
+        settings,
+        github: github_remote.as_ref(),
+        github_data: github.as_ref(),
+        busy: busy.is_some(),
+    };
+    // Several commits picked in the graph: their own panel.
+    if !multi.is_empty() && hooks::multi_selection(ui, &hook, multi, actions) {
+        return;
+    }
     let selected_file = file.as_ref();
     match *selection {
         Selection::None => {
@@ -69,6 +90,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
                 busy.is_some(),
                 selected_file,
                 sec_page.report.as_ref(),
+                &hook,
                 actions,
             );
         }
@@ -88,11 +110,12 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
                         contains: contains.get(&id),
                         pr: github_remote.as_ref().and_then(|_| {
                             crate::devops::review::pr_for_commit(
-                                &devops.review,
+                                &hook.devops.review,
                                 id,
                                 &commit.summary,
                             )
                         }),
+                        hook: &hook,
                     };
                     commit_panel(ui, &cx, commit, d, actions)
                 }
@@ -397,6 +420,9 @@ fn commit_panel(
         crate::views::github::checks_section(ui, d.id, cx.checks, now, actions);
     }
 
+    // Signatures, issue links, AI and other areas' additions.
+    hooks::commit_panel(ui, cx.hook, commit, actions);
+
     // Files.
     let (adds, dels) = d
         .files
@@ -473,6 +499,7 @@ fn commit_panel(
                         );
                         ui.close();
                     }
+                    hooks::commit_file_menu(ui, cx.hook, commit, &f.path, actions);
                 });
             }
         });
@@ -604,6 +631,7 @@ fn wip_panel(
     busy: bool,
     selected_file: Option<&DiffTarget>,
     exposure: Option<&Report>,
+    hook: &HookCx,
     actions: &mut Vec<Action>,
 ) {
     let st = &snap.status;
@@ -708,9 +736,12 @@ fn wip_panel(
                             },
                         );
                         if resp.clicked() {
-                            actions.push(Action::OpenFile(target));
+                            // The conflict editor (base / ours / theirs); the
+                            // raw diff stays one click away inside it.
+                            let _ = target;
+                            actions.push(crate::devops::conflict::Act::Open(e.path.clone()).into());
                         }
-                        conflict_menu(&resp, snap, e, actions);
+                        conflict_menu(&resp, snap, e, hook, actions);
                     }
                     ui.add_space(8.0);
                 }
@@ -780,7 +811,7 @@ fn wip_panel(
                     if resp.clicked() {
                         actions.push(Action::OpenFile(target));
                     }
-                    unstaged_menu(&resp, snap, e, actions);
+                    unstaged_menu(&resp, snap, e, hook, actions);
                 }
                 ui.add_space(8.0);
 
@@ -832,7 +863,7 @@ fn wip_panel(
                     if resp.clicked() {
                         actions.push(Action::OpenFile(target));
                     }
-                    staged_menu(&resp, snap, e, unborn, actions);
+                    staged_menu(&resp, snap, e, unborn, hook, actions);
                 }
                 ui.add_space(6.0);
             });
@@ -881,6 +912,8 @@ fn wip_panel(
         });
         ui.add_space(6.0);
     }
+    // AI message, issue keys and other areas' tools.
+    hooks::wip_message_tools(ui, hook, actions);
     let edit = ui.add(
         egui::TextEdit::multiline(message)
             .id_salt("commit_message")
@@ -1075,7 +1108,13 @@ fn common_file_items(ui: &mut Ui, snap: &Snapshot, path: &str, actions: &mut Vec
     }
 }
 
-fn unstaged_menu(resp: &egui::Response, snap: &Snapshot, e: &FileEntry, actions: &mut Vec<Action>) {
+fn unstaged_menu(
+    resp: &egui::Response,
+    snap: &Snapshot,
+    e: &FileEntry,
+    hook: &HookCx,
+    actions: &mut Vec<Action>,
+) {
     resp.context_menu(|ui| {
         ui.set_min_width(180.0);
         if ui.button("Stage").clicked() {
@@ -1094,6 +1133,7 @@ fn unstaged_menu(resp: &egui::Response, snap: &Snapshot, e: &FileEntry, actions:
             ui.close();
         }
         common_file_items(ui, snap, &e.path, actions);
+        hooks::wip_file_menu(ui, hook, &e.path, WipList::Unstaged, actions);
     });
 }
 
@@ -1102,6 +1142,7 @@ fn staged_menu(
     snap: &Snapshot,
     e: &FileEntry,
     unborn: bool,
+    hook: &HookCx,
     actions: &mut Vec<Action>,
 ) {
     resp.context_menu(|ui| {
@@ -1114,10 +1155,17 @@ fn staged_menu(
             ui.close();
         }
         common_file_items(ui, snap, &e.path, actions);
+        hooks::wip_file_menu(ui, hook, &e.path, WipList::Staged, actions);
     });
 }
 
-fn conflict_menu(resp: &egui::Response, snap: &Snapshot, e: &FileEntry, actions: &mut Vec<Action>) {
+fn conflict_menu(
+    resp: &egui::Response,
+    snap: &Snapshot,
+    e: &FileEntry,
+    hook: &HookCx,
+    actions: &mut Vec<Action>,
+) {
     resp.context_menu(|ui| {
         ui.set_min_width(200.0);
         if ui.button("Keep ours").clicked() {
@@ -1143,5 +1191,6 @@ fn conflict_menu(resp: &egui::Response, snap: &Snapshot, e: &FileEntry, actions:
             ui.close();
         }
         common_file_items(ui, snap, &e.path, actions);
+        hooks::wip_file_menu(ui, hook, &e.path, WipList::Conflicted, actions);
     });
 }

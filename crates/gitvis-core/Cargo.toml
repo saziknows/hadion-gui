@@ -13,3 +13,11 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_yaml = "0.9"
 similar = "3.2.1"
+# App-wide features (2026-10-27): OS keychain for API tokens, pseudo-terminals
+# and a VT100 screen for the terminal panel, desktop notifications, SHA-256
+# for update downloads.
+keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service"] }
+portable-pty = "0.9"
+vt100 = "0.15"
+notify-rust = "4"
+sha2 = "0.10"

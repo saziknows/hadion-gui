@@ -87,16 +87,26 @@ pub struct Ctx {
     /// `gh api` bound to the repository's GitHub remote, if it has one.
     pub gh: Option<Gh>,
     pub dark: bool,
+    /// The app-wide preferences (AI model and effort, integrations, …).
+    #[allow(dead_code)] // read by the areas as they are filled in
+    pub ext: super::ExtPrefs,
     effects: Vec<Effect>,
 }
 
 impl Ctx {
-    pub fn new(repo: Option<RepoId>, workdir: Option<PathBuf>, gh: Option<Gh>, dark: bool) -> Self {
+    pub fn new(
+        repo: Option<RepoId>,
+        workdir: Option<PathBuf>,
+        gh: Option<Gh>,
+        dark: bool,
+        ext: super::ExtPrefs,
+    ) -> Self {
         Self {
             repo,
             workdir,
             gh,
             dark,
+            ext,
             effects: Vec::new(),
         }
     }

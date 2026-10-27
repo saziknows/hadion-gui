@@ -64,6 +64,8 @@ pub fn visible_runs<'a>(data: &'a GitHubData, page: &GitHubPage) -> Vec<&'a Work
 }
 
 struct Cx<'a> {
+    /// For the log viewer's extension hook (`devops::hooks`).
+    log_hook: &'a crate::devops::hooks::LogHookCx<'a>,
     data: &'a GitHubData,
     snap: Option<&'a Snapshot>,
     now: i64,
@@ -163,6 +165,8 @@ pub fn show(
         .is_some_and(|c| Some(c.bad) == repo.gh_page.selected_run);
     {
         let RepoState {
+            id: repo_id,
+            workdir,
             github,
             github_remote,
             github_error,
@@ -205,14 +209,23 @@ pub fn show(
             });
             return;
         };
+        // The AI state and the CI state are disjoint fields.
+        let (ai_state, ci) = (&devops.ai, &mut devops.ci);
+        let log_hook = crate::devops::hooks::LogHookCx {
+            repo: *repo_id,
+            workdir: workdir.as_path(),
+            settings,
+            ai: ai_state,
+            github: github_remote.as_ref(),
+        };
         let cx = Cx {
+            log_hook: &log_hook,
             data,
             snap: snapshot.as_ref(),
             now,
             t,
             dark: settings.dark,
         };
-        let ci = &mut devops.ci;
         list_pane(ui, "gh_runs", |ui| runs_list(ui, &cx, gh_page, ci, actions));
         if !compare_open {
             actions_tab(ui, &cx, gh_page, ci, actions);
@@ -1649,6 +1662,14 @@ fn log_viewer(
                     {
                         copy_all = true;
                     }
+                    // "Explain this failure" and other areas' tools.
+                    crate::devops::hooks::log_viewer_tools(
+                        ui,
+                        cx.log_hook,
+                        run.id,
+                        job_id,
+                        actions,
+                    );
                     ui.add_space(4.0);
                     icons::divider(ui, 16.0);
                     ui.add_space(4.0);

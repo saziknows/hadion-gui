@@ -129,6 +129,33 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   `kubectl` always gets an explicit `--context`; never change the user's current context or kubeconfig.
 - Script commands: anything unknown goes to `devops::script` → each area's `script`. Built in: `page
   home|graph|review|actions|ship|exposure|insights|govern|tools`, `ship TAB`, `ship-tab TAB`.
+- Round 2 (2026-10-27, "add all"): more areas on the same framework.
+  - Repository areas (state in `RepoState::devops`): `conflict` (merge conflict editor; replaces the graph
+    while `conflict::is_open`, opened from a conflicted file in the WIP panel), `history` (Compare page
+    `Page::Compare`, graph multi-select in `RepoState::multi`, filters, file tree, inline blame, signature
+    verification), `gitplus` (Tools tabs Submodules / Git LFS / Patches / Hooks via `workbench::Tab::gitplus`,
+    stash selected files, split a commit, `gitvis hook pre-commit` through `gitplus::cli_main` in `main.rs`),
+    `ai` (Claude API buttons; config in `Settings::ext.ai`). `devops::on_snapshot` runs after every load.
+  - App-wide areas (`devops/global.rs`: state in `Globals`, prefs in `Settings::ext: ExtPrefs`; contract
+    `apply(cx, &mut State, &mut GlobalCx, act)`, `on_msg`, `tick` every frame, `script`; `GlobalView` for
+    views): `palette` (Ctrl+K overlay), `identity` (git config, identities, keys and signing, GitHub
+    account), `terminal` (bottom panel, Ctrl+`), `automation` (notifications, repository groups, Jira /
+    Linear links, release helpers), `packaging` (updates, crash reports; `install_crash_handler` in `main`).
+    `home` moved into `Globals` too.
+  - Settings page (`Page::Settings`, the rail's gear, Ctrl+,): `devops/settings_page.rs` owns the nav and
+    Appearance / Behaviour / Safety; other sections call the owning area's `settings_section`.
+  - Extension hooks (`devops/hooks.rs`, `HookCx::of(repo, settings)`): commit menu, commit panel, commit
+    file menu, WIP file menu, WIP message tools, multi-selection panel, job log viewer (`LogHookCx`, which
+    carries only the AI state because the CI state is borrowed), pull request conversation, new PR form,
+    status bar. Areas contribute through their `hook_*` functions instead of editing shared views.
+  - Safe mode (`Settings::safe_mode`, `gitvis_core::devops::safety`): refuses remote writes at the lowest
+    level (`cli::run_raw` / `run_program`, `proc::run_streaming` / `run_capture`, so also `api_request` and
+    `Gh::cli`), classified by `safety::remote_write(program, args, stdin)`. Task scripts are not covered.
+  - `gitvis_core::devops::keychain` keeps API keys and tokens in the OS keychain (service `gitvis`), never
+    in settings files or logs; call it from background tasks.
+  - ConPTY (Windows pseudo-terminal, `portable-pty`) sends `ESC[6n` first and blocks until the terminal
+    answers with the cursor position (`ESC[row;colR`): the terminal must answer it, or nothing appears.
+  - Dependencies added to `gitvis-core`: `keyring`, `portable-pty`, `vt100`, `notify-rust`, `sha2`.
 - Per area (core / app files):
   - `review`: core `model`, `graphql` (one list query with mergeability; on a timeout it retries without
     it, since brave-core takes ~7 s per 20 PRs), `rest` (request builders and a `Step` runner that

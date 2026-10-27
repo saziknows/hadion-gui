@@ -15,6 +15,8 @@ pub fn show(
     repo: Option<&RepoState>,
     settings: &Settings,
     last: Option<&ActivityEntry>,
+    globals: &crate::devops::global::Globals,
+    view: &crate::devops::global::GlobalView,
     actions: &mut Vec<Action>,
 ) {
     let p = *pal(ui);
@@ -111,6 +113,28 @@ pub fn show(
                 // Right side: what is running or what ran last.
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
+                    if settings.safe_mode {
+                        let resp = crate::views::kit::badge(
+                            ui,
+                            "Safe mode",
+                            crate::theme::Tone::Warning,
+                        )
+                        .interact(Sense::click())
+                        .on_hover_text(
+                            "Changes outside this machine are refused. Click to open the setting.",
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                        if resp.clicked() {
+                            actions.push(Action::DevOps(
+                                crate::devops::DevOpsAction::SetSettingsSection(
+                                    crate::devops::settings_page::Section::Safety,
+                                ),
+                            ));
+                            actions.push(Action::ShowPage(crate::state::Page::Settings));
+                        }
+                        ui.add_space(6.0);
+                    }
+                    crate::devops::hooks::status_items(ui, globals, view, actions);
                     if let Some(label) = r.busy.as_deref() {
                         ui.add(egui::Spinner::new().size(11.0).color(p.accent));
                         ui.label(text(format!("{label}…")).color(p.text));
@@ -163,7 +187,6 @@ pub fn show(
                             format::duration(rate.reset - now)
                         ));
                     }
-                    let _ = settings;
                 });
             });
         });

@@ -24,15 +24,26 @@
 //! - Writes are built by pure functions (method, endpoint, body) so they can
 //!   be unit tested without touching GitHub.
 
+pub mod ai;
+pub mod automation;
 pub mod ci;
+pub mod conflict;
 pub mod forge;
 pub mod gh;
+pub mod gitplus;
 pub mod govern;
+pub mod history;
 pub mod home;
+pub mod identity;
+pub mod keychain;
+pub mod packaging;
+pub mod palette;
 pub mod proc;
 pub mod review;
 pub mod runtime;
+pub mod safety;
 pub mod ship;
+pub mod terminal;
 pub mod tools;
 pub mod workbench;
 

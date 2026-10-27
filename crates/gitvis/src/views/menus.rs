@@ -17,6 +17,8 @@ pub struct MenuCtx<'a> {
     pub snap: &'a Snapshot,
     pub filter: &'a GraphFilter,
     pub github: Option<&'a gitvis_core::github::GitHubData>,
+    /// For the extension hooks (commit menu items of other areas).
+    pub hook: Option<&'a crate::devops::hooks::HookCx<'a>>,
 }
 
 impl MenuCtx<'_> {
@@ -634,6 +636,9 @@ pub fn commit(ui: &mut Ui, cx: &MenuCtx, c: &Commit, actions: &mut Vec<Action>) 
                 Action::ShowPage(crate::state::Page::GitHub),
             );
         }
+    }
+    if let Some(h) = cx.hook {
+        crate::devops::hooks::commit_menu(ui, h, c, actions);
     }
 }
 

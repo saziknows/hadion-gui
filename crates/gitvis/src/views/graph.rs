@@ -59,12 +59,23 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
         }
 
         let show_author = settings.show_author && ui.available_width() > 760.0;
+        let hook = crate::devops::hooks::HookCx {
+            repo: repo.id,
+            workdir: repo.workdir.as_path(),
+            snap,
+            devops: &repo.devops,
+            settings,
+            github: repo.github_remote.as_ref(),
+            github_data: repo.github.as_ref(),
+            busy: repo.busy.is_some(),
+        };
         let mut cx = RowCtx {
             snap,
             filter_cx: MenuCtx {
                 snap,
                 filter: &repo.filter,
                 github: repo.github.as_ref(),
+                hook: Some(&hook),
             },
             ci: &repo.ci,
             t: ui.input(|i| i.time),

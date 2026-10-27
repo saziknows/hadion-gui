@@ -40,13 +40,41 @@ pub enum Tab {
     Bisect,
     History,
     Worktrees,
+    /// Drawn by `devops::gitplus`.
+    Submodules,
+    /// Drawn by `devops::gitplus`.
+    Lfs,
+    /// Drawn by `devops::gitplus`.
+    Patches,
+    /// Drawn by `devops::gitplus`.
+    Hooks,
 }
 
 const NAV: [(&str, &[Tab]); 3] = [
     ("Run", &[Tab::Tasks, Tab::Console]),
-    ("History", &[Tab::Rebase, Tab::Bisect, Tab::History]),
-    ("Repository", &[Tab::Worktrees]),
+    (
+        "History",
+        &[Tab::Rebase, Tab::Bisect, Tab::History, Tab::Patches],
+    ),
+    (
+        "Repository",
+        &[Tab::Worktrees, Tab::Submodules, Tab::Lfs, Tab::Hooks],
+    ),
 ];
+
+impl Tab {
+    /// The git-extras tab this is, when `devops::gitplus` draws it.
+    pub fn gitplus(self) -> Option<crate::devops::gitplus::Tab> {
+        use crate::devops::gitplus::Tab as G;
+        Some(match self {
+            Tab::Submodules => G::Submodules,
+            Tab::Lfs => G::Lfs,
+            Tab::Patches => G::Patches,
+            Tab::Hooks => G::Hooks,
+            _ => return None,
+        })
+    }
+}
 
 impl Tab {
     pub fn label(self) -> &'static str {
@@ -57,6 +85,10 @@ impl Tab {
             Tab::Bisect => "Bisect",
             Tab::History => "File history",
             Tab::Worktrees => "Worktrees",
+            Tab::Submodules => "Submodules",
+            Tab::Lfs => "Git LFS",
+            Tab::Patches => "Patches",
+            Tab::Hooks => "Hooks",
         }
     }
 
@@ -78,6 +110,12 @@ impl Tab {
             Tab::Worktrees => {
                 "Checkouts of this repository in other folders: state, add, lock, move, remove, prune"
             }
+            Tab::Submodules => "Submodules: status, init, update, sync, open as a tab",
+            Tab::Lfs => "Large files tracked by Git LFS: patterns, files, locks",
+            Tab::Patches => "Create patch files from commits, apply patches and mailboxes",
+            Tab::Hooks => {
+                "Git hooks: list, enable, edit; the gitvis secret check as a pre-commit hook; pre-commit and semgrep"
+            }
         }
     }
 
@@ -89,6 +127,10 @@ impl Tab {
             "bisect" => Tab::Bisect,
             "history" | "file-history" => Tab::History,
             "worktrees" | "worktree" => Tab::Worktrees,
+            "submodules" | "submodule" => Tab::Submodules,
+            "lfs" => Tab::Lfs,
+            "patches" | "patch" => Tab::Patches,
+            "hooks" | "hook" => Tab::Hooks,
             _ => return None,
         })
     }
@@ -418,6 +460,11 @@ fn tab_shown(cx: &mut Ctx, repo: &mut RepoState) {
         Tab::Bisect => bisect::shown(cx, repo),
         Tab::History => history::shown(cx, repo),
         Tab::Worktrees => worktrees::shown(cx, repo),
+        t => {
+            if let Some(g) = t.gitplus() {
+                crate::devops::gitplus::on_tab_shown(cx, repo, g);
+            }
+        }
     }
 }
 
@@ -570,6 +617,11 @@ pub fn show(
             Tab::Bisect => bisect::show(ui, repo, console, actions),
             Tab::History => history::show(ui, repo, actions),
             Tab::Worktrees => worktrees::show(ui, repo, actions),
+            t => {
+                if let Some(g) = t.gitplus() {
+                    crate::devops::gitplus::show_tab(ui, repo, console, settings, g, actions);
+                }
+            }
         },
     );
     if let Some(t) = clicked {
@@ -698,6 +750,10 @@ mod tests {
             Tab::Bisect,
             Tab::History,
             Tab::Worktrees,
+            Tab::Submodules,
+            Tab::Lfs,
+            Tab::Patches,
+            Tab::Hooks,
         ] {
             let name = match t {
                 Tab::Tasks => "tasks",
@@ -706,6 +762,10 @@ mod tests {
                 Tab::Bisect => "bisect",
                 Tab::History => "history",
                 Tab::Worktrees => "worktrees",
+                Tab::Submodules => "submodules",
+                Tab::Lfs => "lfs",
+                Tab::Patches => "patches",
+                Tab::Hooks => "hooks",
             };
             assert_eq!(Tab::from_name(name), Some(t));
             assert!(!t.hint().is_empty());

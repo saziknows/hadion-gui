@@ -47,6 +47,7 @@ pub fn run_program<S: AsRef<str>>(
     args: &[S],
     stdin: Option<&[u8]>,
 ) -> Result<Output> {
+    safe_mode_check(program, args, stdin)?;
     let mut cmd = command(program, dir);
     cmd.args(args.iter().map(AsRef::as_ref));
     if stdin.is_some() {
@@ -88,6 +89,12 @@ pub fn run_program<S: AsRef<str>>(
     Err(Error::new(message))
 }
 
+/// Refuse remote writes while safe mode is on ([`crate::devops::safety`]).
+fn safe_mode_check<S: AsRef<str>>(program: &str, args: &[S], stdin: Option<&[u8]>) -> Result<()> {
+    let args: Vec<&str> = args.iter().map(AsRef::as_ref).collect();
+    crate::devops::safety::check(program, &args, stdin).map_err(Error::new)
+}
+
 /// What a program printed and how it exited, whatever the exit code.
 pub struct RawOutput {
     pub success: bool,
@@ -108,6 +115,7 @@ pub fn run_raw<S: AsRef<str>>(
     stdin: Option<&[u8]>,
     env: &[(&str, &str)],
 ) -> Result<RawOutput> {
+    safe_mode_check(program, args, stdin)?;
     let mut cmd = command(program, dir);
     cmd.args(args.iter().map(AsRef::as_ref));
     for (k, v) in env {

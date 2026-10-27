@@ -210,6 +210,9 @@ pub fn resolve(program: &str) -> Option<PathBuf> {
 }
 
 fn command(spec: &ProcSpec) -> Result<Command> {
+    // Safe mode: refuse remote writes before anything starts.
+    let args: Vec<&str> = spec.args.iter().map(String::as_str).collect();
+    super::safety::check(&spec.program, &args, spec.stdin.as_deref()).map_err(Error::new)?;
     let program = resolve(&spec.program).ok_or_else(|| {
         Error::new(format!(
             "{} is not installed (not found on PATH)",

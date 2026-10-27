@@ -172,6 +172,12 @@ pub enum Page {
     Govern,
     /// Tasks, interactive rebase, bisect, worktrees, file history, console.
     Workbench,
+    /// Compare two commits, branches or tags (commits and file diff).
+    Compare,
+    /// Settings: appearance, behaviour, safety, git config, identities,
+    /// keys and signing, accounts, AI, terminal, notifications,
+    /// integrations, updates.
+    Settings,
     /// Secrets, sensitive files and leaky configuration.
     Security,
     /// Health, hotspots, ownership, branches, commits, releases, timeline,
@@ -788,6 +794,9 @@ pub struct RepoState {
     pub loaded_at: Option<Instant>,
     pub filter: GraphFilter,
     pub selection: Selection,
+    /// More commits picked in the graph (ctrl / shift click), in the order
+    /// they were picked; the primary selection is `selection`.
+    pub multi: Vec<Oid>,
     pub details: HashMap<Oid, CommitDetails>,
     pub details_loading: Option<Oid>,
     /// Branches containing a commit (`None` while loading).
@@ -858,6 +867,7 @@ impl RepoState {
             loaded_at: None,
             filter: GraphFilter::default(),
             selection: Selection::None,
+            multi: Vec::new(),
             details: HashMap::new(),
             details_loading: None,
             contains: HashMap::new(),
@@ -1056,6 +1066,14 @@ pub struct Settings {
     pub scan_on_open: bool,
     /// Home page (inbox) preferences.
     pub home: crate::devops::home::Prefs,
+    /// Refuse every remote write (GitHub, GitLab, Azure DevOps, git push,
+    /// kubectl, helm, terraform apply, docker push).
+    pub safe_mode: bool,
+    /// The terminal panel is open.
+    pub show_terminal: bool,
+    /// Preferences of the app-wide features (AI, terminal, palette,
+    /// identities, notifications, integrations, updates).
+    pub ext: crate::devops::ExtPrefs,
 }
 
 impl Default for Settings {
@@ -1077,6 +1095,9 @@ impl Default for Settings {
             show_status_bar: true,
             scan_on_open: true,
             home: Default::default(),
+            safe_mode: false,
+            show_terminal: false,
+            ext: Default::default(),
         }
     }
 }
@@ -1244,8 +1265,14 @@ pub enum Action {
     /// Escape in the diff view: clear the line selection, else close the file.
     DiffEscape,
     ShowPage(Page),
-    /// Review, CI, Ship, Govern, Workbench, forge and home actions.
+    /// Review, CI, Ship, Govern, Workbench, forge and home actions, and the
+    /// app-wide features (palette, settings, terminal, AI, …).
     DevOps(DevOpsAction),
+    /// Open or close the command palette (Ctrl+K).
+    TogglePalette,
+    /// Open or close the terminal panel (Ctrl+`).
+    ToggleTerminal,
+    SetSafeMode(bool),
     /// Stop, re-run, copy or remove a console run.
     Console(ConsoleAction),
     /// Show a run on the GitHub page, loading its jobs; optionally focus a job.

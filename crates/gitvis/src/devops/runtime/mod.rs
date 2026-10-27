@@ -1852,7 +1852,13 @@ mod tests {
     }
 
     fn cx() -> Ctx {
-        Ctx::new(Some(1), Some(PathBuf::from(".")), None, true)
+        Ctx::new(
+            Some(1),
+            Some(PathBuf::from(".")),
+            None,
+            true,
+            Default::default(),
+        )
     }
 
     fn installed(name: &str) -> Installed {
