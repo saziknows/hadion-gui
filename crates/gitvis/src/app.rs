@@ -3744,6 +3744,19 @@ impl GitVis {
             }
             Action::DevOps(a) if has_repo => self.devops_apply(ctx, i, a),
             Action::TogglePalette => devops::palette::toggle(&mut self.globals.palette),
+            Action::AddToCommitMessage { text, at_start } if has_repo => {
+                let m = &mut self.repos[i].commit_message;
+                if !m.contains(text.trim()) {
+                    if at_start {
+                        m.insert_str(0, &text);
+                    } else {
+                        if !m.is_empty() && !m.ends_with('\n') {
+                            m.push('\n');
+                        }
+                        m.push_str(&text);
+                    }
+                }
+            }
             Action::ToggleTerminal => self.settings.show_terminal = !self.settings.show_terminal,
             Action::SetSafeMode(on) => {
                 self.settings.safe_mode = on;

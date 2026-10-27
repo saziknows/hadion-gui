@@ -156,6 +156,8 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   - ConPTY (Windows pseudo-terminal, `portable-pty`) sends `ESC[6n` first and blocks until the terminal
     answers with the cursor position (`ESC[row;colR`): the terminal must answer it, or nothing appears.
   - Dependencies added to `gitvis-core`: `keyring`, `portable-pty`, `vt100`, `notify-rust`, `sha2`.
+  - `Action::AddToCommitMessage { text, at_start }` edits the active repository's commit message for
+    app-wide areas (which only read repositories); the Tools page has a Stashes tab drawn by `gitplus`.
 - Per area (core / app files):
   - `review`: core `model`, `graphql` (one list query with mergeability; on a timeout it retries without
     it, since brave-core takes ~7 s per 20 PRs), `rest` (request builders and a `Step` runner that

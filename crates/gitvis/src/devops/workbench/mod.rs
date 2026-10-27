@@ -48,6 +48,8 @@ pub enum Tab {
     Patches,
     /// Drawn by `devops::gitplus`.
     Hooks,
+    /// Drawn by `devops::gitplus`.
+    Stashes,
 }
 
 const NAV: [(&str, &[Tab]); 3] = [
@@ -58,7 +60,13 @@ const NAV: [(&str, &[Tab]); 3] = [
     ),
     (
         "Repository",
-        &[Tab::Worktrees, Tab::Submodules, Tab::Lfs, Tab::Hooks],
+        &[
+            Tab::Worktrees,
+            Tab::Stashes,
+            Tab::Submodules,
+            Tab::Lfs,
+            Tab::Hooks,
+        ],
     ),
 ];
 
@@ -71,6 +79,7 @@ impl Tab {
             Tab::Lfs => G::Lfs,
             Tab::Patches => G::Patches,
             Tab::Hooks => G::Hooks,
+            Tab::Stashes => G::Stashes,
             _ => return None,
         })
     }
@@ -89,6 +98,7 @@ impl Tab {
             Tab::Lfs => "Git LFS",
             Tab::Patches => "Patches",
             Tab::Hooks => "Hooks",
+            Tab::Stashes => "Stashes",
         }
     }
 
@@ -116,6 +126,9 @@ impl Tab {
             Tab::Hooks => {
                 "Git hooks: list, enable, edit; the gitvis secret check as a pre-commit hook; pre-commit and semgrep"
             }
+            Tab::Stashes => {
+                "Stashes with their changes: apply, pop, drop, branch; stash selected files"
+            }
         }
     }
 
@@ -131,6 +144,7 @@ impl Tab {
             "lfs" => Tab::Lfs,
             "patches" | "patch" => Tab::Patches,
             "hooks" | "hook" => Tab::Hooks,
+            "stashes" | "stash" => Tab::Stashes,
             _ => return None,
         })
     }
@@ -754,6 +768,7 @@ mod tests {
             Tab::Lfs,
             Tab::Patches,
             Tab::Hooks,
+            Tab::Stashes,
         ] {
             let name = match t {
                 Tab::Tasks => "tasks",
@@ -766,6 +781,7 @@ mod tests {
                 Tab::Lfs => "lfs",
                 Tab::Patches => "patches",
                 Tab::Hooks => "hooks",
+                Tab::Stashes => "stashes",
             };
             assert_eq!(Tab::from_name(name), Some(t));
             assert!(!t.hint().is_empty());

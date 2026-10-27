@@ -20,6 +20,7 @@ pub enum Tab {
     Lfs,
     Patches,
     Hooks,
+    Stashes,
 }
 
 #[derive(Default)]

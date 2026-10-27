@@ -139,8 +139,11 @@ pub fn remote_write(program: &str, args: &[&str], stdin: Option<&[u8]>) -> Optio
         .collect();
     let words = |n: usize| sub.iter().take(n).copied().collect::<Vec<_>>().join(" ");
     match name.as_str() {
-        "git" => match sub.first().copied() {
-            Some("push") => Some(format!("git {}", args.join(" "))),
+        "git" => match (sub.first().copied(), sub.get(1).copied()) {
+            (Some("push"), _) => Some(format!("git {}", args.join(" "))),
+            (Some("lfs"), Some("push" | "lock" | "unlock")) => {
+                Some(format!("git {}", args.join(" ")))
+            }
             _ => None,
         },
         "gh" | "gh_guard" => match sub.first().copied() {
@@ -312,6 +315,8 @@ mod tests {
         // git
         assert!(w("git", "push origin main").is_some());
         assert!(w("git", "fetch --all --prune").is_none());
+        assert!(w("git", "lfs lock big.psd").is_some());
+        assert!(w("git", "lfs ls-files -l").is_none());
         // gh api
         assert!(w("gh", "api -i repos/o/r/pulls").is_none());
         assert!(w("gh", "api -i --method POST --input - repos/o/r/pulls").is_some());
