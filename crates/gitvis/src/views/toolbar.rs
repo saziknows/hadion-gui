@@ -194,6 +194,7 @@ fn toolbar_row(
         loading,
         page,
         github_remote,
+        devops,
         ..
     } = repo;
     let busy = busy_label.is_some();
@@ -391,6 +392,7 @@ fn toolbar_row(
                     focus_search,
                     actions,
                 );
+                crate::devops::history::toolbar_button(ui, &devops.history, actions);
             }
             if let Some(label) = busy_label.as_deref() {
                 ui.label(RichText::new(label).size(size::SMALL).color(p.text_2));

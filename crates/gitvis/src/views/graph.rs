@@ -8,6 +8,7 @@ use egui::{
 
 use gitvis_core::{Commit, Oid, RefKind, RefLabel, Snapshot};
 
+use crate::devops::history;
 use crate::format;
 use crate::state::{Action, Dialog, DragBranch, DropTarget, RepoState, Selection, Settings};
 use crate::theme;
@@ -29,6 +30,15 @@ pub fn background(dark: bool) -> Color32 {
 }
 
 pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mut Vec<Action>) {
+    // Author / path / date / message filter (dims the other rows).
+    history::filter_bar(ui, repo, actions);
+    // Escape clears the commits picked with Ctrl / Shift+click.
+    if repo.devops.history.has_picks()
+        && ui.memory(|m| m.focused().is_none())
+        && ui.input(|i| i.key_pressed(egui::Key::Escape))
+    {
+        actions.push(history::Act::ClearPicks.into());
+    }
     let scroll_to = repo.scroll_to_row.take();
     let selection = repo.selection;
     let mut visible = repo.visible_rows.clone();
@@ -89,6 +99,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
             selection,
             hits: &hits,
             cursor_row,
+            hist: &repo.devops.history,
         };
 
         let avail_h = ui.available_height();
@@ -114,6 +125,10 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
                 draw_row(ui, &cx, row, actions);
             }
         });
+    }
+    // Signatures follow the visible rows (verified lazily, in batches).
+    if *repo.devops.history.verified_rows() != visible {
+        actions.push(history::Act::VisibleRows(visible.clone()).into());
     }
     repo.visible_rows = visible;
     repo.search_hits = hits;
@@ -156,6 +171,8 @@ struct RowCtx<'a> {
     ci: &'a std::collections::HashMap<Oid, crate::state::CiInfo>,
     /// Animation clock for running CI dots.
     t: f64,
+    /// Picked commits, the filter and signatures.
+    hist: &'a history::State,
 }
 
 impl RowCtx<'_> {
@@ -179,15 +196,21 @@ fn draw_row(ui: &mut Ui, cx: &RowCtx, row: usize, actions: &mut Vec<Action>) {
         _ => false,
     };
     let is_hit = !cx.hits.is_empty() && cx.hits.binary_search(&row).is_ok();
+    let is_picked = commit.is_some_and(|c| cx.hist.is_picked(&c.id));
+    let dimmed = commit_idx.is_some_and(|i| cx.hist.dimmed(i));
     let visuals = ui.visuals().clone();
     let pl = *theme::palette(cx.dark);
     let painter = ui.painter().clone();
 
     // Background
-    if is_selected {
+    if is_selected || is_picked {
         painter.rect_filled(rect, 0, pl.selection);
     } else if resp.hovered() {
         painter.rect_filled(rect, 0, pl.hover.gamma_multiply(0.7));
+    }
+    if is_picked {
+        let bar = Rect::from_min_max(rect.min, pos2(rect.left() + 3.0, rect.bottom()));
+        painter.rect_filled(bar, 0, pl.accent);
     }
     if is_hit {
         let bar = Rect::from_min_max(rect.min, pos2(rect.left() + 3.0, rect.bottom()));
@@ -303,6 +326,19 @@ fn draw_row(ui: &mut Ui, cx: &RowCtx, row: usize, actions: &mut Vec<Action>) {
             painter.galley(pos2(x, mid - galley.size().y / 2.0), galley, pl.text_2);
         }
         Some(c) => {
+            // Signature badge at the right end of the summary column.
+            let mut text_right = text_right;
+            if let Some(sig) = cx.hist.signature(&c.id)
+                && let Some(hit) =
+                    history::paint_signature(&painter, &pl, pos2(text_right - 7.0, mid), sig)
+            {
+                text_right -= 22.0;
+                let r = ui.interact(hit, ui.make_persistent_id(("sig", row)), Sense::click());
+                if r.clicked() {
+                    actions.push(Action::Select(Selection::Commit(c.id)));
+                }
+                r.on_hover_text(history::signature_tip(sig));
+            }
             if let Some(labels) = snap.refs.get(&c.id) {
                 x = draw_labels(ui, cx, row, rect, x, text_right, labels, c, actions);
             }
@@ -390,12 +426,30 @@ fn draw_row(ui: &mut Ui, cx: &RowCtx, row: usize, actions: &mut Vec<Action>) {
         }
     }
 
-    // Interaction
-    if resp.clicked() || resp.secondary_clicked() {
-        actions.push(Action::Select(match commit {
-            None => Selection::Wip,
-            Some(c) => Selection::Commit(c.id),
-        }));
+    // Rows outside the filter are dimmed.
+    if dimmed {
+        painter.rect_filled(rect, 0, background(cx.dark).gamma_multiply(0.62));
+    }
+
+    // Interaction: Ctrl+click picks a commit, Shift+click a range.
+    let mods = ui.input(|i| i.modifiers);
+    match commit {
+        Some(c) if resp.clicked() && mods.command => {
+            actions.push(history::Act::Pick(history::PickEvent::Toggle(c.id)).into());
+        }
+        Some(c) if resp.clicked() && mods.shift => {
+            actions.push(history::Act::Pick(history::PickEvent::Range(c.id)).into());
+        }
+        _ if resp.clicked() || resp.secondary_clicked() => {
+            if resp.clicked() && cx.hist.has_picks() {
+                actions.push(history::Act::ClearPicks.into());
+            }
+            actions.push(Action::Select(match commit {
+                None => Selection::Wip,
+                Some(c) => Selection::Commit(c.id),
+            }));
+        }
+        _ => {}
     }
     if resp.double_clicked()
         && let Some(c) = commit

@@ -203,6 +203,13 @@ pub enum Act {
     // Interactive rebase
     /// From the graph: edit the commits from this one up to HEAD.
     RebaseFrom(String),
+    /// From the graph's multi-select (`devops::history`): load from `base`
+    /// with these commits' steps set (squash ones moved next to the
+    /// previous marked commit).
+    RebasePlan {
+        base: String,
+        marks: Vec<(String, Step)>,
+    },
     LoadRebase(String),
     RebaseStep(usize, Step),
     RebaseMove(usize, usize),
@@ -400,6 +407,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         | Act::ToggleFavourite(_) => tasks::apply(cx, repo, act),
         Act::SelectRun(id) => repo.devops.workbench.console_selected = Some(id),
         Act::RebaseFrom(_)
+        | Act::RebasePlan { .. }
         | Act::LoadRebase(_)
         | Act::RebaseStep(..)
         | Act::RebaseMove(..)
