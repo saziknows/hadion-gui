@@ -226,6 +226,10 @@ static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 impl TempBody {
     pub fn create(dir: &Path, body: &[u8]) -> std::io::Result<Self> {
+        sweep_stale(
+            dir,
+            std::time::Duration::from_secs(u64::from(request::MAX_TIME_SECS) + 60),
+        );
         let n = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
         let path = dir.join(format!(
             "gitvis-ai-{}-{}-{n}.json",
@@ -244,6 +248,32 @@ impl Drop for TempBody {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
     }
+}
+
+/// Remove request files older than `age`: left behind when gitvis quit
+/// while a request was running (no request lives longer than curl's
+/// `max-time`). Returns how many were removed.
+pub fn sweep_stale(dir: &Path, age: std::time::Duration) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !(name.starts_with("gitvis-ai-") && name.ends_with(".json")) {
+            continue;
+        }
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|el| el > age);
+        if old && std::fs::remove_file(e.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
 }
 
 /// A finished request.
@@ -448,6 +478,21 @@ mod tests {
         );
         drop(t);
         assert!(!p.exists());
+    }
+
+    #[test]
+    fn stale_request_files_are_swept() {
+        let dir = std::env::temp_dir().join(format!("gitvis-ai-sweep-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("gitvis-ai-1-2-3.json"), "{}").unwrap();
+        std::fs::write(dir.join("other.json"), "{}").unwrap();
+        // Nothing is old enough yet.
+        assert_eq!(sweep_stale(&dir, std::time::Duration::from_secs(3600)), 0);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        assert_eq!(sweep_stale(&dir, std::time::Duration::from_millis(1)), 1);
+        assert!(!dir.join("gitvis-ai-1-2-3.json").exists());
+        assert!(dir.join("other.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
