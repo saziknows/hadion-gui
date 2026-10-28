@@ -104,8 +104,12 @@ impl GitVis {
         };
         app.globals.home.apply_prefs(&app.settings.home);
         gitvis_core::devops::safety::set_safe_mode(app.settings.safe_mode);
-        for path in app.settings.open_repos.clone() {
-            app.open_repo(path, false);
+        // `GITVIS_NO_RESTORE=1` (screenshots, demos): only the repositories
+        // given on the command line, not the saved session's tabs.
+        if std::env::var_os("GITVIS_NO_RESTORE").is_none() {
+            for path in app.settings.open_repos.clone() {
+                app.open_repo(path, false);
+            }
         }
         app.active = app.settings.active.min(app.repos.len().saturating_sub(1));
         for path in open {

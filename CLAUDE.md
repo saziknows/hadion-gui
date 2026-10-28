@@ -8,8 +8,11 @@ Native Git client (Rust + egui 0.37) focused on branch visualisation; see README
 - `cargo test` — unit tests plus `crates/gitvis-core/tests/fixture_repo.rs`, which builds throwaway repos with the real `git` binary.
 - `cargo run --release -p gitvis-core --example bench -- <repo>` — loader timings (`GITVIS_TIMING=1` prints phases).
 - `cargo build --release` — the shippable binary at `target/release/gitvis.exe`.
+- `cargo run -p gitvis-core --example notices -- --out FILE` — third-party licence notices (every crate compiled in, with
+  its licence files; `scripts/package.ps1` ships them as `licenses/THIRD-PARTY-LICENSES.txt`).
 
-Toolchain on this machine: `stable-x86_64-pc-windows-gnu` with WinLibs gcc; libgit2 is vendored and compiles from C.
+Developed on Windows with the `stable-x86_64-pc-windows-gnu` toolchain and WinLibs gcc (CI also builds with MSVC and on
+Linux); libgit2 is vendored and compiles from C.
 
 ## Layout
 
@@ -64,7 +67,7 @@ Toolchain on this machine: `stable-x86_64-pc-windows-gnu` with WinLibs gcc; libg
   shared `list`/`dot_row`/`tiles`/`hbar`/`bars` widgets and re-exports the osint `split`/`column`
   helpers). The analysis starts on the first visit; weight, debt dating, blame, search and recovery run
   on demand (`GitOp::StashStore` restores a dropped stash).
-- Design system (2026-10-26 redesign; the owner found the old UI hard to digest): `theme.rs` holds the
+- Design system (2026-10-26 redesign, because the old UI was hard to digest): `theme.rs` holds the
   tokens (`pal(ui)` palette with surfaces chrome/panel/canvas/raised/hover/overlay, text/text_2/text_3/
   text_strong, status colours; `Tone`; `size::` type scale with nothing under 11 pt; `space::`, `radius::`)
   and loads Inter (one variable font pinned at 400/500/600 via `FontTweak.coords`) and JetBrains Mono from
@@ -124,12 +127,12 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   never in argv, logs, toasts or errors; masked inputs cleared after sending. Network calls only on an
   explicit action or when the user opens the page / tab that needs them. Writes are pure request
   builders with unit tests. Never run a write against a real remote, registry or cluster while
-  testing (brave-core, the owner's GitHub repositories, the local kube contexts are read-only test
+  testing (brave-core, your own GitHub repositories and local kube contexts are read-only test
   beds); test writes through their request builders and stop UI flows at the confirmation dialog.
   `kubectl` always gets an explicit `--context`; never change the user's current context or kubeconfig.
 - Script commands: anything unknown goes to `devops::script` → each area's `script`. Built in: `page
   home|graph|review|actions|ship|exposure|insights|govern|tools`, `ship TAB`, `ship-tab TAB`.
-- Round 2 (2026-10-27, "add all"): more areas on the same framework.
+- Round 2 (2026-10-27): more areas on the same framework.
   - Repository areas (state in `RepoState::devops`): `conflict` (merge conflict editor; replaces the graph
     while `conflict::is_open`, opened from a conflicted file in the WIP panel), `history` (Compare page
     `Page::Compare`, graph multi-select in `RepoState::multi`, filters, file tree, inline blame, signature
@@ -235,7 +238,7 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   - `identity`: core config listing with file:line, includeIf rules and a git-compatible wildmatch,
     ssh-keygen / ssh-add / `ssh -T` / gpg colon / `gh auth status` parsers, signing plans; four
     Settings sections. `GITVIS_GPG`, `GITVIS_SSH_KNOWN_HOSTS` (Windows ssh ignores HOME, and
-    `ssh -T github.com` would write the owner's known_hosts); test edits with `GIT_CONFIG_GLOBAL`
+    `ssh -T github.com` would write your real known_hosts); test edits with `GIT_CONFIG_GLOBAL`
     and a scratch `GNUPGHOME` (a plain `gpg` against the real home creates `~/.gnupg/trustdb.gpg`).
     `--test identity_apply`.
   - `terminal`: core `session` (spawn returns at once; threads for PTY, reader, waiter, input),
@@ -341,7 +344,7 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
 drives the app from inside and saves PNGs rendered by egui (works whatever is on screen).
 Commands: `wait S`, `shot PATH`, `tab N`, `head`, `wip`, `open PATH`, `open-wip PATH`, `split`,
 `unified`, `select HUNK FROM TO`, `activity`, `reflog`, `collapse KEY`, `stage PATH`, `undo`,
-(scripted runs never save settings, window geometry or egui memory, so they cannot change the owner's
+(scripted runs never save settings, window geometry or egui memory, so they cannot change your own
 session; run a copy of the exe under another name, e.g. `gitvis-test.exe`, so the build is never locked),
 `theme`, `github` / `graph` (centre page), `filter TEXT` and `status failed|running|passed|all`
 (run list), `run N` (open the N-th listed run), `job N` (show the N-th job's log), `verbose`,
@@ -360,9 +363,11 @@ leftovers. The same script also plants Insights material (reserved/colliding nam
 `update-index --cacheinfo`, CRLF, a script without +x, tags + unreleased commits, a conflicting
 branch, a cherry-picked duplicate, a `tmp-old` branch, TODO/FIXME, a leaky workflow, MIT LICENSE vs
 `"license": "ISC"`, a foreign copyright header, a dropped stash): `insights; wait 4; shot x.png`
-then `ins-tab ci; ins-item 0`. The user usually has their own gitvis instance open on the same
-desktop and may click in the scripted test window, so a screenshot can show a different tab than
-the script set.
+then `ins-tab ci; ins-item 0`. A scripted window is a real window: clicks in it (for example
+while you work in your own gitvis instance on the same desktop) can change what it shows, so a
+screenshot may show a different tab than the script set. Scripted runs also restore the tabs
+saved by your own gitvis session; `GITVIS_NO_RESTORE=1` opens only the repository on the command
+line (README screenshots are taken that way).
 
 ## UI testing without a human
 

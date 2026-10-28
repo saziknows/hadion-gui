@@ -1,7 +1,9 @@
 # gitvis
 
-A fast, native Git client focused on **branch visualisation and management** —
-an in-house alternative to GitKraken, written in Rust with [egui](https://github.com/emilk/egui).
+A fast, native Git client focused on **branch visualisation and management**, with the
+work around a repository (reviews, CI, releases, deployments, security) in the same window.
+Written in Rust with [egui](https://github.com/emilk/egui); an open-source alternative to
+GitKraken.
 
 - Reads repositories through **libgit2** (in-process, no shelling out for the graph).
 - Runs every mutation through the **real `git` binary**, so hooks, signing,
@@ -9,6 +11,65 @@ an in-house alternative to GitKraken, written in Rust with [egui](https://github
 - Handles large histories: 50 000 commits are laid out in well under a second;
   rows are virtualised, so scrolling a 100k-commit repository stays smooth.
 - Refreshes automatically when the working tree or `.git` changes.
+
+![The History page: the commit graph with branches and tags, the refs sidebar and the selected commit's details](docs/screenshots/history.png)
+
+![The merge conflict editor: ours, the result and theirs side by side, resolved conflict by conflict](docs/screenshots/conflict.png)
+
+## Install
+
+**Windows** (x86-64): download the installer or the zip from
+[Releases](https://github.com/saziknows/hadion-gui/releases). The installer is per-user and
+needs no administrator rights; installed that way, gitvis can update itself (Settings →
+Updates). Each release lists SHA-256 checksums in `SHA256SUMS`.
+
+gitvis needs `git` on `PATH`. Everything else is optional and only used by the features that
+need it: [`gh`](https://cli.github.com/) for GitHub (gitvis uses your `gh auth` and stores no
+GitHub token), `glab` / `az` for GitLab and Azure DevOps, `kubectl`, `terraform` / `tofu`,
+`act`, `trivy` / `grype`, `pre-commit`, `semgrep`, and `curl` for osv.dev and AI assist. A
+missing tool is reported where it is needed, with how to install it.
+
+**Platforms.** gitvis is developed and used every day on Windows 11. Linux builds and passes
+the test suite (CI runs it on every push), but its UI has seen little use there. macOS has
+not been tried yet.
+
+## Build and run
+
+Requirements: a current stable Rust toolchain (edition 2024; developed with 1.97), a C
+compiler for libgit2 (MSVC or MinGW on Windows, gcc or clang elsewhere), and `git` on `PATH`
+at runtime. On Linux the keychain support also needs `pkg-config` and `libdbus-1-dev`.
+
+```sh
+cargo run --release -p gitvis -- path/to/repo
+```
+
+Run without arguments inside a repository to open it, or open one from the
+welcome screen (`Ctrl+O`).
+
+Tests:
+
+```sh
+cargo test
+```
+
+Packaging (Windows): `./scripts/package.ps1` builds the release exe, a zip, `SHA256SUMS` and,
+when Inno Setup is installed (`winget install JRSoftware.InnoSetup`), a per-user installer
+(`packaging/windows/gitvis.iss`, no admin rights). Pushing a tag `vX.Y.Z` that matches
+`Cargo.toml` runs `.github/workflows/release.yml`, which builds and uploads the same files;
+`.github/workflows/ci.yml` checks format, clippy and tests on pushes and pull requests.
+In-app updates need a per-user install (`%LOCALAPPDATA%\Programs\gitvis`).
+
+The integration tests build throwaway repositories with the real `git` binary.
+`GITVIS_TIMING=1` prints loader phase timings to stderr;
+`cargo run --release -p gitvis-core --example bench -- path/to/repo` times a load;
+`--example scan -- path/to/repo [--history N]` prints the exposure report,
+`--example osint -- path/to/repo [--unreachable]` the OSINT report and
+`--example insights -- path/to/repo [--commits N] [--weight] [--lost] [--date-debt] [--pickaxe TEXT]`
+the insights report.
+
+Third-party licences: `cargo run -p gitvis-core --example notices` writes the licence texts of
+every crate compiled into gitvis; `scripts/package.ps1` puts them in
+`licenses/THIRD-PARTY-LICENSES.txt` of every release.
 
 ## Features
 
@@ -415,39 +476,6 @@ the multi-selection panel, or the palette's `>compare`)
   absolute dates.
 - Settings and per-repository preferences persist between runs.
 
-## Build and run
-
-Requirements: Rust 1.85+ (edition 2024), a C compiler for libgit2 (MSVC or MinGW on
-Windows), and `git` on `PATH` at runtime.
-
-```sh
-cargo run --release -p gitvis -- path/to/repo
-```
-
-Run without arguments inside a repository to open it, or open one from the
-welcome screen (`Ctrl+O`).
-
-Tests:
-
-```sh
-cargo test
-```
-
-Packaging (Windows): `./scripts/package.ps1` builds the release exe, a zip, `SHA256SUMS` and,
-when Inno Setup is installed (`winget install JRSoftware.InnoSetup`), a per-user installer
-(`packaging/windows/gitvis.iss`, no admin rights). Pushing a tag `vX.Y.Z` that matches
-`Cargo.toml` runs `.github/workflows/release.yml`, which builds and uploads the same files;
-`.github/workflows/ci.yml` checks format, clippy and tests on pushes and pull requests.
-In-app updates need a per-user install (`%LOCALAPPDATA%\Programs\gitvis`).
-
-The integration tests build throwaway repositories with the real `git` binary.
-`GITVIS_TIMING=1` prints loader phase timings to stderr;
-`cargo run --release -p gitvis-core --example bench -- path/to/repo` times a load;
-`--example scan -- path/to/repo [--history N]` prints the exposure report,
-`--example osint -- path/to/repo [--unreachable]` the OSINT report and
-`--example insights -- path/to/repo [--commits N] [--weight] [--lost] [--date-debt] [--pickaxe TEXT]`
-the insights report.
-
 ## Keyboard
 
 | Keys | Action |
@@ -523,12 +551,34 @@ a `Ctx`, and their replies come back as messages routed to the same area.
 
 ## Status
 
-Early but usable. Not yet implemented: custom secret rules (the rule set is built in),
-comments on a whole file or editing existing review comments, Azure DevOps pull request
-comments, Bitbucket, a Linux or macOS package.
+Early but usable: version 0.1. Not yet implemented: custom secret rules (the rule set is
+built in), comments on a whole file or editing existing review comments, Azure DevOps pull
+request comments, Bitbucket, Linux and macOS packages.
 GitHub, GitLab and Azure DevOps writes are covered by request-builder tests and were
 exercised up to their confirmation dialogs; they have not yet been run against a sandbox
 repository. The same goes for LFS locks, uploading a key to GitHub and `gh release
 download` during an update. AI assist was tested against a fake `curl`, not the real API;
-`pre-commit` and `semgrep` were not installed while it was built; the release workflow has
-not run yet. The repository has no LICENSE file yet.
+`pre-commit` and `semgrep` were not installed while it was built.
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Please report security problems privately, as described in [SECURITY.md](SECURITY.md).
+[CHANGELOG.md](CHANGELOG.md) lists what changed in each release.
+
+## License
+
+gitvis is licensed under either of
+
+- [Apache License, Version 2.0](LICENSE-APACHE)
+- [MIT license](LICENSE-MIT)
+
+at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for
+inclusion in gitvis by you, as defined in the Apache-2.0 license, shall be dual licensed as
+above, without any additional terms or conditions.
+
+The bundled Inter and JetBrains Mono fonts are under the SIL Open Font License 1.1 (their
+licences are in `crates/gitvis/assets/fonts`); the crates gitvis is built from keep their own
+licences, collected in each release's `licenses/THIRD-PARTY-LICENSES.txt`.
