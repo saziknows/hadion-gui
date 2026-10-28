@@ -28,20 +28,22 @@ pub fn show(
     state: &mut State,
     repos: &[RepoState],
     active: usize,
-    _settings: &Settings,
+    settings: &Settings,
     actions: &mut Vec<Action>,
 ) {
     let now = format::now_secs();
     let failed = failed_runs(repos, state.login(), now);
     let still = failed.iter().filter(|f| !f.failure.superseded).count();
     let mut clicked: Option<Tab> = None;
-    let nav_data = NavData::of(state, repos.len(), still);
+    let mut nav_data = NavData::of(state, repos.len(), still);
+    nav_data.groups = settings.ext.automation.groups.len();
     kit::page_with_nav(
         ui,
         "home_nav",
         |ui| clicked = nav(ui, &nav_data, now),
         |ui| match state.tab {
             Tab::Overview => overview(ui, state, repos, active, &failed, now, actions),
+            Tab::Groups => crate::devops::automation::groups_page(ui, repos, settings, actions),
             Tab::Notifications => inbox::notifications(ui, state, repos, now, actions),
             Tab::Failed => inbox::failed(ui, state, repos, &failed, now, actions),
             t => inbox::search(ui, state, repos, t, now, actions),
@@ -60,6 +62,7 @@ pub fn show(
 struct NavData {
     tab: Tab,
     repos: usize,
+    groups: usize,
     unread: usize,
     buckets: [usize; 4],
     still_failing: usize,
@@ -79,6 +82,7 @@ impl NavData {
         Self {
             tab: state.tab,
             repos,
+            groups: 0,
             unread: state.unread(),
             buckets: [
                 b(Tab::Reviews),
@@ -113,6 +117,9 @@ fn nav(ui: &mut Ui, state: &NavData, now: i64) -> Option<Tab> {
                 NavItem::new(Tab::Overview.label())
                     .count(state.repos, Tone::Neutral)
                     .hint(Tab::Overview.hint()),
+                NavItem::new(Tab::Groups.label())
+                    .count(state.groups, Tone::Neutral)
+                    .hint(Tab::Groups.hint()),
             ],
         },
         NavGroup {
