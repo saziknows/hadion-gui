@@ -308,7 +308,11 @@ pub fn load(dir: &Path, gpg_program: Option<&str>, cmds: &mut Vec<String>) -> Re
             return r;
         }
     }
-    r.home_exists = r.home.as_deref().is_none_or(|h| Path::new(h).is_dir());
+    // An msys-only path (`/tmp/...`, `/home/...`) cannot be checked from here:
+    // let gpg decide.
+    r.home_exists = r.home.as_deref().is_none_or(|h| {
+        Path::new(h).is_dir() || (h.starts_with('/') && !Path::new(h).is_absolute())
+    });
     if !r.home_exists {
         return r;
     }

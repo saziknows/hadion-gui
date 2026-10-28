@@ -164,3 +164,51 @@ pub fn label(ui: &mut Ui, text: &str) {
             .color(c),
     );
 }
+
+/// `kit::scroll_page` with an optional one-shot scroll offset (the
+/// `id-scroll` script command, so long sections can be screenshotted).
+pub fn page(ui: &mut Ui, id: &str, scroll: &mut Option<f32>, add: impl FnOnce(&mut Ui)) {
+    let p = *pal(ui);
+    egui::CentralPanel::default()
+        .frame(egui::Frame::NONE.fill(p.canvas))
+        .show(ui, |ui| {
+            let mut area = egui::ScrollArea::vertical()
+                .id_salt(id)
+                .auto_shrink([false, false]);
+            if let Some(y) = scroll.take() {
+                area = area.vertical_scroll_offset(y);
+            }
+            area.show(ui, |ui| {
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin {
+                        left: 28,
+                        right: 28,
+                        top: 20,
+                        bottom: 32,
+                    })
+                    .show(ui, |ui| {
+                        ui.set_max_width(kit::DETAIL_MAX + 120.0);
+                        ui.spacing_mut().item_spacing.y = 8.0;
+                        add(ui)
+                    });
+            });
+        });
+}
+
+/// `.gitconfig:7`: the file name and line of an entry (the full path is
+/// on the Git config page).
+pub fn short_place(e: &gitvis_core::devops::identity::config::Entry) -> String {
+    match (&e.file, e.line) {
+        (Some(f), l) => {
+            let name = f
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| f.to_string_lossy().into_owned());
+            match l {
+                Some(l) => format!("{name}:{l}"),
+                None => name,
+            }
+        }
+        (None, _) => e.origin.label(),
+    }
+}

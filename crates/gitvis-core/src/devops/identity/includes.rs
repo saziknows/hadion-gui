@@ -443,8 +443,8 @@ pub fn applied(
         path: path.to_path_buf(),
         ..Default::default()
     };
-    if !path.is_dir() {
-        a.error = Some(format!("{} is not a folder", slash(path)));
+    if path.is_file() {
+        a.error = Some(format!("{} is a file, not a folder", slash(path)));
         return a;
     }
     let gitdir = git_raw(path, &["rev-parse", "--absolute-git-dir"], cmds)

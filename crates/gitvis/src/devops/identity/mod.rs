@@ -253,6 +253,8 @@ pub struct State {
     pub upload: Option<UploadForm>,
     /// A change is running.
     pub busy: bool,
+    /// Scroll the shown section to this offset once (scripts).
+    pub scroll: Option<f32>,
     /// Open repositories when the section was shown: `(name, folder)`.
     pub repos: Vec<(String, PathBuf)>,
 }
@@ -339,6 +341,8 @@ pub enum Act {
         login: String,
     },
     SetupGit,
+    /// Scroll the shown section (scripts).
+    Scroll(f32),
 }
 
 pub enum Msg {
@@ -716,6 +720,7 @@ fn confirm_plan(cx: &mut Ctx, c: Confirm) {
 
 pub fn apply(cx: &mut Ctx, st: &mut State, g: &mut GlobalCx, act: Act) {
     match act {
+        Act::Scroll(y) => st.scroll = Some(y),
         Act::Refresh(section) => {
             remember_repos(st, g);
             reload_section(cx, st, section);
@@ -1327,9 +1332,20 @@ fn submit_signing(cx: &mut Ctx, st: &mut State, g: &mut GlobalCx) {
     };
     st.sign.error.clear();
     let body = format!(
-        "Every new commit{} made with {} is signed with {}. {}",
+        "From now on every new commit{} {} is signed with {}. {}",
         if form.tags { " and tag" } else { "" },
-        place(form.scope, g),
+        match form.scope {
+            Scope::Local => format!(
+                "in {} (its own .git/config)",
+                g.active_repo()
+                    .map(|r| r.name.as_str())
+                    .unwrap_or("this repository")
+            ),
+            _ => format!(
+                "in every repository of yours (set in {})",
+                place(form.scope, g)
+            ),
+        },
         setup.key,
         match form.format {
             Format::Ssh => {
@@ -1382,11 +1398,14 @@ fn submit_upload(cx: &mut Ctx, st: &mut State, g: &GlobalCx) {
         UploadTarget::Ssh(file) => (
             vec![Step::Gh(ssh::upload_args(file, form.key_use, &form.title))],
             format!(
-                "{} as an {} key",
+                "{} as {} key",
                 file.file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default(),
-                form.key_use.arg()
+                match form.key_use {
+                    KeyUse::Signing => "a signing",
+                    KeyUse::Authentication => "an authentication",
+                }
             ),
             form.key_use.scope(),
         ),
@@ -1416,12 +1435,12 @@ fn submit_upload(cx: &mut Ctx, st: &mut State, g: &GlobalCx) {
         Confirm {
             title: "Add the key to your GitHub account?",
             body: format!(
-                "Uploads {what} to {} with the title \"{}\". gh needs the {scope} scope for this.{safe}",
+                "Uploads {what}, titled \"{}\", to {}. gh needs the {scope} scope for this.{safe}",
+                form.title.trim(),
                 match &login {
                     Some(l) => format!("the GitHub account {l}"),
-                    None => "the GitHub account gh is signed in with".to_owned(),
+                    None => "your GitHub account (the one gh is signed in with)".to_owned(),
                 },
-                form.title.trim()
             ),
             button: "Add to GitHub",
             danger: false,
@@ -1668,6 +1687,7 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
             v
         }
         "gh-setup-git" => vec![Act::SetupGit.into()],
+        "id-scroll" => vec![Act::Scroll(arg.parse().ok()?).into()],
         _ => return None,
     })
 }

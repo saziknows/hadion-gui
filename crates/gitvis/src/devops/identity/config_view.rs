@@ -33,6 +33,7 @@ pub fn show(
         raw,
         filter,
         busy,
+        scroll,
         ..
     } = st;
     let mut new_tab = None;
@@ -61,7 +62,8 @@ pub fn show(
     }
     let repo_name = repo.map(|r| r.name.clone()).unwrap_or_default();
     let busy = *busy;
-    kit::scroll_page(ui, "identity_config", |ui| match &loaded.data {
+    let page_id = format!("identity_config_{}", tab.name());
+    w::page(ui, &page_id, scroll, |ui| match &loaded.data {
         None => kit::loading(ui, "Reading git config --list --show-origin --show-scope"),
         Some(Err(e)) => {
             if w::error_card(ui, "Could not read the git config", e, "Try again") {
@@ -161,6 +163,7 @@ fn common_row(
             vec2(avail - right_w - 16.0, 0.0),
             Layout::top_down(Align::Min),
             |ui| {
+                ui.set_width(avail - right_w - 16.0);
                 ui.spacing_mut().item_spacing.y = 3.0;
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
@@ -186,7 +189,14 @@ fn common_row(
                 if values.len() > 1 {
                     let list: Vec<String> = values
                         .iter()
-                        .map(|e| format!("{} {}", e.scope.label(), show_value(e.value_text())))
+                        .map(|e| {
+                            format!(
+                                "{} ({} · {})",
+                                show_value(e.value_text()),
+                                e.scope.label(),
+                                w::short_place(e)
+                            )
+                        })
                         .collect();
                     kit::muted(
                         ui,
@@ -197,10 +207,9 @@ fn common_row(
                             )
                         } else {
                             format!(
-                                "Set {} times: {}. The {} value wins.",
+                                "Set {} times: {}. git uses the last one read.",
                                 values.len(),
                                 list.join(", "),
-                                eff.map(|e| e.scope.label()).unwrap_or("last")
                             )
                         },
                     );
@@ -326,7 +335,7 @@ fn editor(
             let local = if repo_name.is_empty() {
                 "This repository only".to_owned()
             } else {
-                format!("Only {repo_name}")
+                format!("Only this repository ({repo_name})")
             };
             if form::radio(ui, f.scope == Scope::Local, &local) {
                 f.scope = Scope::Local;
@@ -408,7 +417,9 @@ fn editor(
             }
             Err(e) => form::error(ui, e),
         }
-        let changed = now.as_deref() != Some(f.value.as_str()) || config::is_multi(&f.key);
+        // An empty value clears a list (credential.helper); elsewhere it is a slip.
+        let changed = (now.as_deref() != Some(f.value.as_str()) && !f.value.is_empty())
+            || config::is_multi(&f.key);
         form::actions_row(ui, |ui| {
             if form::primary(ui, "Set…", args.is_ok() && changed && !busy).clicked() {
                 actions.push(
@@ -459,11 +470,28 @@ fn group_header(ui: &mut Ui, title: &str, count: usize, scopes: &[Scope], collap
         12.0,
         p.text_2,
     );
-    let g = painter.layout_no_wrap(
-        title.to_owned(),
+    // Badges first (right), then the title cut to the room left of them.
+    let mut right = rect.right() - 8.0;
+    for s in scopes.iter().rev() {
+        right = kit::paint_badge(painter, &p, dark, right, cy, s.title(), w::scope_tone(*s)) - 4.0;
+    }
+    let count_text = format::count(count);
+    let count_w = painter
+        .layout_no_wrap(
+            count_text.clone(),
+            FontId::new(size::SMALL, medium()),
+            p.text_3,
+        )
+        .size()
+        .x;
+    let g = crate::views::truncated(
+        painter,
+        title,
         FontId::monospace(size::MONO + 0.5),
         p.text_strong,
+        (right - rect.left() - 26.0 - count_w - 20.0).max(60.0),
     );
+    let cut = g.elided;
     let tw = g.size().x;
     painter.galley(
         pos2(rect.left() + 26.0, cy - g.size().y / 2.0),
@@ -473,14 +501,181 @@ fn group_header(ui: &mut Ui, title: &str, count: usize, scopes: &[Scope], collap
     painter.text(
         pos2(rect.left() + 34.0 + tw, cy),
         Align2::LEFT_CENTER,
-        format::count(count),
+        count_text,
         FontId::new(size::SMALL, medium()),
         p.text_3,
     );
-    let mut right = rect.right() - 8.0;
-    for s in scopes.iter().rev() {
-        right = kit::paint_badge(painter, &p, dark, right, cy, s.title(), w::scope_tone(*s)) - 4.0;
+    let resp = if cut {
+        resp.on_hover_text_at_pointer(title)
+    } else {
+        resp
+    };
+    resp.clicked()
+}
+
+/// Column widths of the entries table, the same for every group so the
+/// columns line up down the page.
+struct Widths {
+    key: f32,
+    value: f32,
+    scope: f32,
+    place: f32,
+    total: f32,
+}
+
+const GAP: f32 = 16.0;
+
+impl Widths {
+    fn of(total: f32) -> Widths {
+        let scope = 92.0;
+        let note = 150.0;
+        let rest = (total - scope - note - 4.0 * GAP - 12.0).max(300.0);
+        let key = (rest * 0.24).clamp(110.0, 240.0);
+        let value = (rest * 0.42).max(120.0);
+        let place = (rest - key - value).max(100.0);
+        Widths {
+            key,
+            value,
+            scope,
+            place,
+            total,
+        }
     }
+
+    /// Left edge of each column.
+    fn xs(&self, left: f32) -> [f32; 5] {
+        let k = left + 8.0;
+        let v = k + self.key + GAP;
+        let s = v + self.value + GAP;
+        let p = s + self.scope + GAP;
+        [k, v, s, p, p + self.place + GAP]
+    }
+}
+
+fn table_head(ui: &mut Ui, w: &Widths) {
+    let p = *pal(ui);
+    let (rect, _) = ui.allocate_exact_size(vec2(w.total, 22.0), Sense::hover());
+    let xs = w.xs(rect.left());
+    for (x, t) in xs.iter().zip(["Key", "Value", "Scope", "Where", "Note"]) {
+        ui.painter().text(
+            pos2(*x, rect.center().y),
+            Align2::LEFT_CENTER,
+            t.to_uppercase(),
+            FontId::new(size::CAPTION, medium()),
+            p.text_3,
+        );
+    }
+}
+
+/// `text` cut from the left (`…/agents/gitconfig:7`) to fit `max` points:
+/// the file name and line are what matter in a path.
+fn tail_fit(painter: &egui::Painter, text: &str, font: &FontId, max: f32) -> (String, bool) {
+    let width = |s: &str| {
+        painter
+            .layout_no_wrap(s.to_owned(), font.clone(), egui::Color32::WHITE)
+            .size()
+            .x
+    };
+    if width(text) <= max {
+        return (text.to_owned(), false);
+    }
+    let chars: Vec<char> = text.chars().collect();
+    for start in 1..chars.len() {
+        let s: String = std::iter::once('…')
+            .chain(chars[start..].iter().copied())
+            .collect();
+        if width(&s) <= max {
+            return (s, true);
+        }
+    }
+    ("…".to_owned(), true)
+}
+
+/// One entry of the table; returns true when clicked.
+fn entry_row(
+    ui: &mut Ui,
+    w: &Widths,
+    e: &config::Entry,
+    place: &str,
+    note: Option<(String, Tone)>,
+    editing: bool,
+) -> bool {
+    let p = *pal(ui);
+    let dark = ui.visuals().dark_mode;
+    let (rect, resp) = ui.allocate_exact_size(vec2(w.total, 28.0), Sense::click());
+    if !ui.is_rect_visible(rect) {
+        return resp.clicked();
+    }
+    let painter = ui.painter();
+    if editing {
+        painter.rect_filled(rect, CornerRadius::same(radius::M), p.selection);
+    } else if resp.hovered() {
+        painter.rect_filled(rect, CornerRadius::same(radius::M), p.hover);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let xs = w.xs(rect.left());
+    let cy = rect.center().y;
+    let mono = FontId::monospace(size::MONO);
+    let key = crate::views::truncated(painter, e.name(), mono.clone(), p.text, w.key);
+    painter.galley(pos2(xs[0], cy - key.size().y / 2.0), key, p.text);
+    let empty = e.value_text().is_empty();
+    let value = crate::views::truncated(
+        painter,
+        if empty { "(empty)" } else { e.value_text() },
+        mono,
+        if empty { p.text_3 } else { p.text_strong },
+        w.value,
+    );
+    let value_cut = value.elided;
+    painter.galley(
+        pos2(xs[1], cy - value.size().y / 2.0),
+        value,
+        if empty { p.text_3 } else { p.text_strong },
+    );
+    let bw = kit::badge_width(painter, e.scope.title());
+    kit::paint_badge(
+        painter,
+        &p,
+        dark,
+        xs[2] + bw,
+        cy,
+        e.scope.title(),
+        w::scope_tone(e.scope),
+    );
+    let small = FontId::proportional(size::SMALL);
+    let (place_text, place_cut) = tail_fit(painter, place, &small, w.place);
+    painter.text(
+        pos2(xs[3], cy),
+        Align2::LEFT_CENTER,
+        place_text,
+        small,
+        p.text_2,
+    );
+    if let Some((t, tone)) = &note {
+        let nw = kit::badge_width(painter, t);
+        kit::paint_badge(painter, &p, dark, xs[4] + nw, cy, t, *tone);
+    }
+    painter.hline(
+        rect.x_range(),
+        rect.bottom(),
+        egui::Stroke::new(1.0, p.border),
+    );
+    // Off-screen information only: the whole value or path when cut.
+    let resp = if value_cut || place_cut {
+        let mut tip = String::new();
+        if value_cut {
+            tip.push_str(e.value_text());
+        }
+        if place_cut {
+            if !tip.is_empty() {
+                tip.push('\n');
+            }
+            tip.push_str(place);
+        }
+        resp.on_hover_text_at_pointer(tip)
+    } else {
+        resp
+    };
     resp.clicked()
 }
 
@@ -549,14 +744,12 @@ fn all(
             ),
         );
     }
-    let cols = [
-        Col::text("Key"),
-        Col::text("Value"),
-        Col::text("Scope"),
-        Col::text("Where"),
-        Col::text("Note"),
-    ];
     let edit_key = edit.as_ref().map(|f| config::norm_key(&f.key));
+    let widths = Widths::of(ui.available_width());
+    if !groups.is_empty() {
+        ui.add_space(4.0);
+        table_head(ui, &widths);
+    }
     for g in &groups {
         let filtered = !filter.trim().is_empty();
         let collapsed = !filtered && prefs.collapsed.contains(&g.id);
@@ -577,47 +770,27 @@ fn all(
         if collapsed {
             continue;
         }
-        let rows: Vec<Vec<Cell>> = g
-            .items
-            .iter()
-            .map(|&i| {
-                let e = &snap.entries[i];
-                let note = match config::overridden_by(&snap.entries, i) {
-                    Some(o) => Cell::Badges(vec![(
-                        format!("Overridden by {}", o.scope.label()),
-                        Tone::Neutral,
-                    )]),
-                    None if config::is_multi(&e.key) => {
-                        Cell::Badges(vec![("List entry".to_owned(), Tone::Neutral)])
-                    }
-                    None => Cell::Muted(String::new()),
-                };
-                vec![
-                    Cell::Mono(e.name().to_owned()),
-                    if e.value_text().is_empty() {
-                        Cell::Muted("(empty)".to_owned())
-                    } else {
-                        Cell::Mono(e.value_text().to_owned())
-                    },
-                    Cell::Badges(vec![(e.scope.title().to_owned(), w::scope_tone(e.scope))]),
-                    Cell::Sec(e.location(home.as_deref())),
-                    note,
-                ]
-            })
-            .collect();
         let mut clicked = None;
-        insights::grid(
-            ui,
-            &format!("identity_cfg_{}", g.id),
-            &cols,
-            &rows,
-            true,
-            |r, resp| {
-                if resp.clicked() {
-                    clicked = Some(g.items[r]);
-                }
-            },
-        );
+        for &i in &g.items {
+            let e = &snap.entries[i];
+            let note = match config::overridden_by(&snap.entries, i) {
+                Some(o) => Some((format!("Overridden by {}", o.scope.label()), Tone::Neutral)),
+                None if config::is_multi(&e.key) => Some(("List entry".to_owned(), Tone::Neutral)),
+                None => None,
+            };
+            let editing = edit_key.as_deref() == Some(e.key.as_str())
+                && edit.as_ref().is_some_and(|f| f.scope == e.scope);
+            if entry_row(
+                ui,
+                &widths,
+                e,
+                &place(e, snap, home.as_deref()),
+                note,
+                editing,
+            ) {
+                clicked = Some(i);
+            }
+        }
         if let Some(i) = clicked {
             let e = &snap.entries[i];
             *edit = Some(EditForm {
@@ -676,7 +849,7 @@ fn all(
             let local = if repo_name.is_empty() {
                 "This repository".to_owned()
             } else {
-                format!("Only {repo_name}")
+                format!("Only this repository ({repo_name})")
             };
             if form::radio(ui, scope == Scope::Local, &local) {
                 scope = Scope::Local;
@@ -778,7 +951,29 @@ fn files(ui: &mut Ui, snap: &Snapshot, actions: &mut Vec<Action>) {
             "{} entries in {} ms, run in {}. Line numbers come from reading each file, since git does not print them.",
             format::count(snap.entries.len()),
             snap.elapsed_ms,
-            slash(&snap.dir)
+            slash(&snap.dir).trim_end_matches('/')
         ),
     );
+}
+
+/// Where an entry is, short: `.git/config:3` for the repository's own
+/// files, `~/.gitconfig:7` otherwise.
+fn place(e: &config::Entry, snap: &Snapshot, home: Option<&std::path::Path>) -> String {
+    if let Some(f) = &e.file {
+        let dir = slash(&snap.dir).trim_end_matches('/').to_owned();
+        let file = slash(f);
+        let (fl, dl) = if cfg!(windows) {
+            (file.to_lowercase(), dir.to_lowercase())
+        } else {
+            (file.clone(), dir.clone())
+        };
+        if fl.starts_with(&format!("{dl}/")) {
+            let rel = &file[dir.len() + 1..];
+            return match e.line {
+                Some(l) => format!("{rel}:{l}"),
+                None => rel.to_owned(),
+            };
+        }
+    }
+    e.location(home)
 }

@@ -214,6 +214,12 @@ fn identity_signing_and_config_edits_apply() {
     assert!(!c.repo);
     assert_eq!(c.matched, vec![0]);
     assert_eq!(c.email.unwrap().value_text(), "me@corp.example");
+    // A folder that does not exist yet is evaluated the same way.
+    let ghost = work.join("not-created-yet");
+    let d = includes::applied(&ghost, &rules, &snap.entries, Some(&home), &mut cmds);
+    assert!(!d.repo && d.error.is_none());
+    assert_eq!(d.matched, vec![0]);
+    assert!(!ghost.exists(), "nothing is created");
 
     // Edit: another address, case-sensitive matching.
     let mut edit = new.clone();

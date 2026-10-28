@@ -26,6 +26,7 @@ pub fn show(ui: &mut Ui, st: &mut State, settings: &mut Settings, actions: &mut 
         account,
         config,
         busy,
+        scroll,
         ..
     } = st;
     let busy = *busy;
@@ -39,7 +40,7 @@ pub fn show(ui: &mut Ui, st: &mut State, settings: &mut Settings, actions: &mut 
     ) {
         actions.push(Act::Refresh(Section::GitHubAccount).into());
     }
-    kit::scroll_page(ui, "identity_account", |ui| {
+    w::page(ui, "identity_account", scroll, |ui| {
         match &account.data {
             None => kit::loading(ui, "gh auth status --json hosts"),
             Some(Err(e)) => {
@@ -288,8 +289,20 @@ fn rate_limits(ui: &mut Ui, buckets: &[account::Bucket]) {
         .map(|(v, l, t)| Stat::new(l, v.clone()).tone(*t))
         .collect();
     insights::stats(ui, &stats);
+    let main = |b: &&account::Bucket| {
+        matches!(
+            b.name.as_str(),
+            "core" | "graphql" | "search" | "code_search"
+        ) || b.used > 0
+    };
+    let quiet: Vec<&str> = buckets
+        .iter()
+        .filter(|b| !main(b))
+        .map(|b| b.name.as_str())
+        .collect();
     let rows: Vec<Vec<Cell>> = buckets
         .iter()
+        .filter(main)
         .map(|b| {
             vec![
                 Cell::Mono(b.name.clone()),
@@ -314,6 +327,16 @@ fn rate_limits(ui: &mut Ui, buckets: &[account::Bucket]) {
         false,
         |_, _| {},
     );
+    if !quiet.is_empty() {
+        kit::muted(
+            ui,
+            &format!(
+                "{} more buckets are untouched: {}.",
+                quiet.len(),
+                quiet.join(", ")
+            ),
+        );
+    }
     kit::muted(ui, "gh api rate_limit does not count against the limits.");
 }
 

@@ -316,11 +316,11 @@ impl Step {
                 format!("append to {}:\n    {line}", slash(path))
             }
             Step::RemoveFile(p) => format!("delete {}", slash(p)),
-            Step::Run { program, args } => cmd_line(program, args),
+            Step::Run { program, args } => cmd_line(&program_name(program), args),
             Step::Gh(a) => cmd_line("gh", a),
             Step::GpgUpload { gpg, key, title } => format!(
                 "{} | gh gpg-key add - --title {}",
-                cmd_line(gpg, &["--armor", "--export", key.as_str()]),
+                cmd_line(&program_name(gpg), &["--armor", "--export", key.as_str()]),
                 proc::render_args(&[title.as_str()])
             ),
         }
@@ -330,6 +330,20 @@ impl Step {
     pub fn remote(&self) -> bool {
         matches!(self, Step::Gh(_) | Step::GpgUpload { .. })
     }
+}
+
+/// The name a program is typed as (`ssh-keygen` for
+/// `C:/Program Files/Git/usr/bin/ssh-keygen.exe`): steps run the resolved
+/// path, confirmations show what the user would type.
+pub fn program_name(program: &str) -> String {
+    let base = Path::new(program)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(program);
+    base.strip_suffix(".exe")
+        .or_else(|| base.strip_suffix(".EXE"))
+        .unwrap_or(base)
+        .to_owned()
 }
 
 /// Every step's display, for a confirmation.
@@ -525,6 +539,11 @@ mod tests {
         );
         assert!(u.remote());
         assert_eq!(cmd_line::<&str>("ssh-add", &[]), "ssh-add");
+        assert_eq!(
+            program_name("C:/Program Files/Git/usr/bin/ssh-keygen.exe"),
+            "ssh-keygen"
+        );
+        assert_eq!(program_name("gpg"), "gpg");
     }
 
     #[test]

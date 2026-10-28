@@ -45,6 +45,7 @@ pub fn show(
         upload,
         account,
         busy,
+        scroll,
         ..
     } = st;
     let busy = *busy;
@@ -59,7 +60,7 @@ pub fn show(
         actions.push(Act::Refresh(Section::Keys).into());
     }
     let repo_name = repo.map(|r| r.name.clone()).unwrap_or_default();
-    kit::scroll_page(ui, "identity_keys", |ui| {
+    w::page(ui, "identity_keys", scroll, |ui| {
         kit::callout(
             ui,
             Tone::Accent,
@@ -87,7 +88,7 @@ pub fn show(
         let mut up = up;
         ssh_keys(ui, keys, &mut up, config.ok(), actions);
         if let Some(k) = keys.ok() {
-            agent(ui, k, config.ok());
+            agent(ui, k, config.ok(), actions);
             github_test(ui, k, ssh_test, actions);
             generate(ui, gen_form, k, busy, actions);
         }
@@ -379,7 +380,7 @@ fn setup_form(
             let local = if repo_name.is_empty() {
                 "This repository only".to_owned()
             } else {
-                format!("Only {repo_name}")
+                format!("Only this repository ({repo_name})")
             };
             if form::radio(ui, f.scope == Scope::Local, &local) {
                 f.scope = Scope::Local;
@@ -498,7 +499,7 @@ fn ssh_keys(
                         .as_deref()
                         .is_some_and(|s| key.is(s, home.as_deref()))
                 {
-                    kit::badge(ui, "Signs your commits", Tone::Accent);
+                    kit::badge(ui, "user.signingkey", Tone::Accent);
                 }
             });
             ui.add_space(2.0);
@@ -563,7 +564,7 @@ fn ssh_keys(
     }
 }
 
-fn agent(ui: &mut Ui, k: &KeysReport, cfg: Option<&Snapshot>) {
+fn agent(ui: &mut Ui, k: &KeysReport, cfg: Option<&Snapshot>, actions: &mut Vec<Action>) {
     kit::section(ui, "SSH agent", None);
     let home = ssh_home();
     match &k.agent {
@@ -611,11 +612,33 @@ fn agent(ui: &mut Ui, k: &KeysReport, cfg: Option<&Snapshot>) {
             );
         }
         Some(Agent::NotRunning(out)) => {
-            kit::callout(
+            kit::callout_with(
                 ui,
                 Tone::Neutral,
                 "No ssh-agent is running",
-                "Common on Windows, and usually fine: a key without a passphrase works without an agent. With a passphrase, ssh asks for it on every connection, and gitvis (which has no terminal) cannot answer. Windows' own agent is a service that is off by default; in an administrator PowerShell: Get-Service ssh-agent | Set-Service -StartupType Automatic; Start-Service ssh-agent, then ssh-add. Git for Windows' bundled ssh does not talk to that service unless git uses Windows' ssh: git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe.",
+                "Common on Windows, and usually fine: a key without a passphrase works without an agent. With a passphrase, ssh asks for it on every connection, and gitvis, which has no terminal, cannot answer.",
+                |ui| {
+                    ui.add_space(4.0);
+                    w::label(
+                        ui,
+                        "Start Windows' agent (a service, off by default) in an administrator PowerShell",
+                    );
+                    kit::code_block(
+                        ui,
+                        "Get-Service ssh-agent | Set-Service -StartupType Automatic\nStart-Service ssh-agent\nssh-add $env:USERPROFILE\\.ssh\\id_ed25519",
+                        actions,
+                    );
+                    ui.add_space(2.0);
+                    w::label(
+                        ui,
+                        "Git for Windows' own ssh does not use that agent; to make git use Windows' ssh",
+                    );
+                    kit::code_block(
+                        ui,
+                        "git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe",
+                        actions,
+                    );
+                },
             );
             ui.add_space(2.0);
             kit::muted(
@@ -904,7 +927,7 @@ fn gpg_keys(
                                 || s.eq_ignore_ascii_case(&k.fingerprint)
                         })
                     {
-                        kit::badge(ui, "Signs your commits", Tone::Accent);
+                        kit::badge(ui, "user.signingkey", Tone::Accent);
                     }
                 });
                 ui.add_space(2.0);

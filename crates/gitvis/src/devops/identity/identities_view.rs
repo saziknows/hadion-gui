@@ -33,6 +33,7 @@ pub fn show(
         check_path,
         config,
         busy,
+        scroll,
         ..
     } = st;
     let busy = *busy;
@@ -71,7 +72,7 @@ pub fn show(
                 .filter(|e| e.scope <= gitvis_core::devops::identity::Scope::Global)
         })
         .map(|e| e.value_text().to_owned());
-    kit::scroll_page(ui, "identity_identities", |ui| {
+    w::page(ui, "identity_identities", scroll, |ui| {
         if let Some(f) = id_form.as_mut() {
             identity_form(
                 ui,
@@ -224,6 +225,7 @@ fn rule_card(
                     .size(size::BODY)
                     .color(p.text_strong),
                 );
+                kit::badge(ui, &format!("Rule {}", i + 1), Tone::Neutral);
                 kit::badge(ui, r.condition.kind(), Tone::Neutral);
                 w::scope_badge(ui, r.scope);
                 if !r.exists {
@@ -331,19 +333,19 @@ fn rule_card(
 
 /// `identity rule C:/work/` or `global ~/.gitconfig:3`.
 fn source(e: Option<&Entry>, matched: &[usize], rep: &IdentityReport) -> String {
-    let home = rep.home.as_deref();
     let Some(e) = e else {
         return "not set".to_owned();
     };
     if let Some(f) = &e.file
-        && let Some(r) = matched
-            .iter()
-            .filter_map(|&i| rep.rules.get(i))
-            .find(|r| gitvis_core::devops::identity::same_path(&r.target, f))
+        && let Some(n) = matched.iter().find(|&&i| {
+            rep.rules
+                .get(i)
+                .is_some_and(|r| gitvis_core::devops::identity::same_path(&r.target, f))
+        })
     {
-        return format!("rule {} · {}", r.condition.pattern(), e.location(home));
+        return format!("{} · rule {}", w::short_place(e), n + 1);
     }
-    format!("{} · {}", e.scope.label(), e.location(home))
+    format!("{} · {}", e.scope.label(), w::short_place(e))
 }
 
 fn applies(ui: &mut Ui, rep: &IdentityReport, _actions: &mut Vec<Action>) {
@@ -458,7 +460,11 @@ fn check_folder(
                 if a.repo {
                     "Yes: git answered".to_owned()
                 } else {
-                    "No: gitvis evaluated the folder rules for a repository created here".to_owned()
+                    if a.path.is_dir() {
+                        "No: gitvis evaluated the folder rules for a repository created here".to_owned()
+                    } else {
+                        "The folder does not exist yet: gitvis evaluated the folder rules for a repository created there".to_owned()
+                    }
                 },
             );
             match v(&a.name) {
