@@ -342,7 +342,7 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
 
 `GITVIS_SCRIPT="wait 10; tab 1; head; open path/in/commit; wait 2; shot out.png; split; shot out2.png; quit"`
 drives the app from inside and saves PNGs rendered by egui (works whatever is on screen).
-Commands: `wait S`, `shot PATH`, `tab N`, `head`, `wip`, `open PATH`, `open-wip PATH`, `split`,
+Commands: `wait S`, `shot PATH`, `window W H` (inner size in points; 900 × 560 is the minimum), `tab N`, `head`, `wip`, `open PATH`, `open-wip PATH`, `split`,
 `unified`, `select HUNK FROM TO`, `activity`, `reflog`, `collapse KEY`, `stage PATH`, `undo`,
 (scripted runs never save settings, window geometry or egui memory, so they cannot change your own
 session; run a copy of the exe under another name, e.g. `gitvis-test.exe`, so the build is never locked),

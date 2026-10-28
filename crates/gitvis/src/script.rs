@@ -103,6 +103,9 @@ pub enum Cmd {
     /// A command of a DevOps area (`devops::script`), e.g. `review`,
     /// `pr N`, `ship releases`, `govern`, `tasks`.
     Ext(String, String),
+    /// Resize the window to this inner size in points (`window 900 560`,
+    /// the smallest the window allows).
+    Window(f32, f32),
     Quit,
 }
 
@@ -170,6 +173,10 @@ fn parse(s: &str) -> Option<Cmd> {
         "activity" => Cmd::Activity,
         "reflog" => Cmd::Reflog,
         "theme" => Cmd::Theme,
+        "window" => {
+            let mut n = arg.split_whitespace().map(|x| x.parse::<f32>().ok());
+            Cmd::Window(n.next()??, n.next()??)
+        }
         "collapse" => Cmd::Collapse(arg.to_owned()),
         "stage" => Cmd::Stage(arg.to_owned()),
         "undo" => Cmd::Undo,

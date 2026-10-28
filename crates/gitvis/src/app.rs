@@ -2845,6 +2845,9 @@ impl GitVis {
                     self.activity_tab = ActivityTab::Reflog;
                 }
                 Cmd::Theme => self.apply(ctx, Action::ToggleTheme),
+                Cmd::Window(w, h) => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)))
+                }
                 Cmd::Collapse(key) => {
                     if let Some(r) = self.repos.get_mut(i)
                         && !r.collapsed.remove(&key)
