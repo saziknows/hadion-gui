@@ -178,6 +178,8 @@ pub enum GitOp {
     Continue(Pending),
     Abort(Pending),
     SkipRebaseStep,
+    /// `git am --skip`: drop the patch `git am` stopped on.
+    SkipMailboxPatch,
     TakeOurs {
         path: String,
     },
@@ -374,6 +376,7 @@ impl GitOp {
                 Pending::Bisect => v(["bisect", "reset"]),
             }),
             SkipRebaseStep => one(v(["rebase", "--skip"])),
+            SkipMailboxPatch => one(v(["am", "--skip"])),
             TakeOurs { path } => vec![
                 v(["checkout", "--ours", "--", path]),
                 v(["add", "--", path]),
@@ -524,6 +527,7 @@ impl GitOp {
             Continue(p) => format!("Continue {}", p.label().to_lowercase()),
             Abort(p) => format!("Abort {}", p.label().to_lowercase()),
             SkipRebaseStep => "Skip commit".into(),
+            SkipMailboxPatch => "Skip patch".into(),
             TakeOurs { path } | TakeTheirs { path } => format!("Resolve {path}"),
             MarkResolved { paths } => format!("Mark {} resolved", files(paths)),
         }

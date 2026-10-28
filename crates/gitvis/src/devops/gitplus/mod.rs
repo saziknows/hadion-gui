@@ -553,7 +553,6 @@ pub fn show_tab(
 /// A count for the Tools page navigation (`workbench::nav_counts` can show
 /// it): stashes, submodules that need attention, LFS files, a stopped
 /// `git am`, enabled hooks.
-#[allow(dead_code)] // for the workbench navigation (shared-file request)
 pub fn nav_count(repo: &RepoState, tab: Tab) -> Option<(usize, Tone)> {
     use gitvis_core::devops::gitplus::submodules::SubState;
     let g = &repo.devops.gitplus;

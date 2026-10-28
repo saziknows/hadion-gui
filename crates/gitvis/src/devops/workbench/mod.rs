@@ -11,7 +11,7 @@ mod console_tab;
 mod history;
 mod rebase;
 mod tasks;
-mod ui;
+pub(crate) mod ui;
 mod worktrees;
 
 use std::path::PathBuf;
@@ -674,6 +674,19 @@ fn nav_counts(repo: &RepoState, console: &Console) -> Vec<(Tab, usize, Tone)> {
     }
     if let Some(Ok(h)) = &wb.history.result {
         out.push((Tab::History, h.commits.len(), Tone::Neutral));
+    }
+    for t in [
+        Tab::Stashes,
+        Tab::Submodules,
+        Tab::Lfs,
+        Tab::Patches,
+        Tab::Hooks,
+    ] {
+        if let Some(g) = t.gitplus()
+            && let Some((n, tone)) = crate::devops::gitplus::nav_count(repo, g)
+        {
+            out.push((t, n, tone));
+        }
     }
     out
 }

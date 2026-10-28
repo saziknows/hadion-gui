@@ -671,6 +671,15 @@ fn pending_banner(ui: &mut Ui, repo: &RepoState, actions: &mut Vec<Action>) {
                     {
                         actions.push(Action::Run(GitOp::SkipRebaseStep));
                     }
+                    if pending == Pending::ApplyMailbox
+                        && IconButton::text("Skip patch")
+                            .enabled(!busy)
+                            .show(ui)
+                            .on_hover_text("am --skip")
+                            .clicked()
+                    {
+                        actions.push(Action::Run(GitOp::SkipMailboxPatch));
+                    }
                     let cont = IconButton::new(Icon::Check, "Continue")
                         .primary(true)
                         .enabled(!busy && conflicts == 0)

@@ -213,6 +213,16 @@ fn line_fill(p: &Palette, kind: LineKind, dark: bool) -> Color32 {
 /// A read-only unified diff: hunk headers, both line numbers, markers,
 /// change tints and syntax colours.
 pub fn diff_view(ui: &mut Ui, id: &str, doc: &DiffDoc) {
+    diff_view_or(
+        ui,
+        id,
+        doc,
+        "No text changes in this commit (a rename, a mode change or a merge).",
+    );
+}
+
+/// [`diff_view`] with its own line for a diff without text changes.
+pub fn diff_view_or(ui: &mut Ui, id: &str, doc: &DiffDoc, no_text: &str) {
     let p = *pal(ui);
     let dark = ui.visuals().dark_mode;
     let d = &doc.diff;
@@ -225,10 +235,7 @@ pub fn diff_view(ui: &mut Ui, id: &str, doc: &DiffDoc) {
         return;
     }
     if d.hunks.is_empty() {
-        kit::muted(
-            ui,
-            "No text changes in this commit (a rename, a mode change or a merge).",
-        );
+        kit::muted(ui, no_text);
         return;
     }
     let font = FontId::monospace(size::MONO);
