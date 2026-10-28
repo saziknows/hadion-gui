@@ -76,7 +76,7 @@ pub struct Prepared {
 /// An answer, ready to show.
 #[derive(Clone, Debug)]
 pub struct Reply {
-    pub done: Done,
+    pub done: Box<Done>,
     pub cost: f64,
 }
 
@@ -207,7 +207,7 @@ pub enum Msg {
         target: Target,
         id: u64,
         feature: Feature,
-        result: Result<Done, Failure>,
+        result: Result<Box<Done>, Failure>,
     },
     Key {
         op: KeyOp,

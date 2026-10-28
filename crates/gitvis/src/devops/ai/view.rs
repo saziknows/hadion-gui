@@ -172,12 +172,11 @@ fn progress_row(ui: &mut Ui, a: &Ask, short: bool, actions: &mut Vec<Action>) ->
                     }
                 }
                 Phase::Running { .. } => {
-                    if IconButton::new(Icon::Stop, "Stop")
+                    let stop = IconButton::new(Icon::Stop, "Stop")
                         .compact()
                         .show(ui)
-                        .on_hover_text("Stop the request; nothing is filled in")
-                        .clicked()
-                    {
+                        .on_hover_text("Stop the request; nothing is filled in");
+                    if stop.clicked() {
                         actions.push(Act::Cancel(a.target.clone()).into());
                     }
                 }
@@ -253,7 +252,7 @@ fn failure(ui: &mut Ui, a: &Ask, f: &Failure, compact: bool, actions: &mut Vec<A
     if let Failure::Api(e) = f
         && !e.hint().is_empty()
     {
-        body.push_str("\n");
+        body.push('\n');
         body.push_str(e.hint());
     }
     let wait = control::retry_wait(a);
@@ -1095,7 +1094,7 @@ pub fn commit_panel(ui: &mut Ui, h: &HookCx, c: &Commit, actions: &mut Vec<Actio
                 if IconButton::new(Icon::Comment, "Explain this commit")
                     .compact()
                     .show(ui)
-                    .on_hover_text(&format!(
+                    .on_hover_text(format!(
                         "What the commit does and what could break ({})",
                         caption(prefs, Feature::ExplainCommit)
                     ))
@@ -1155,7 +1154,7 @@ pub fn log_tools(ui: &mut Ui, h: &LogHookCx, run: u64, job: u64, actions: &mut V
         .compact()
         .enabled(!busy)
         .show(ui)
-        .on_hover_text(&format!(
+        .on_hover_text(format!(
             "Why this job failed, with the evidence from the log, a fix and whether it looks flaky ({})",
             caption(&h.settings.ext.ai, Feature::ExplainFailure)
         ))

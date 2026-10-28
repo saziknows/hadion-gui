@@ -1028,7 +1028,7 @@ fn send(cx: &mut Ctx, repo: &mut RepoState, target: &Target, id: u64) {
     let label = format!("Claude: {}", feature.action().to_lowercase());
     let started = cx.read(label, move |dir, log| {
         log.command(request::curl_display());
-        let result = runner::send(dir, model, effort, &prompt, &stop, &live);
+        let result = runner::send(dir, model, effort, &prompt, &stop, &live).map(Box::new);
         Msg::Finished {
             target: t,
             id,
