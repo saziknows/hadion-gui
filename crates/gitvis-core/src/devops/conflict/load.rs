@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn attributes() {
-        let out = b"a.rst\0conflict-marker-size\012\0a.rst\0merge\0unspecified\0a.rst\0binary\0unspecified\0";
+        let out = b"a.rst\x00conflict-marker-size\x0012\x00a.rst\x00merge\x00unspecified\x00a.rst\x00binary\x00unspecified\x00";
         let a = parse_check_attr(out);
         assert_eq!(a.marker_size, 12);
         assert!(!a.no_text_merge);
