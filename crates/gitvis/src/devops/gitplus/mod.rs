@@ -684,10 +684,9 @@ pub fn hook_commit_menu(ui: &mut egui::Ui, h: &HookCx, c: &Commit, actions: &mut
     } else {
         "Split this commit…"
     };
-    if ui.add_enabled(!h.busy, egui::Button::new(label)).clicked() {
-        actions.push(Act::Split(c.id.to_string()).into());
-        ui.close();
-    }
+    // While an operation runs the item stays: picking it explains why it
+    // has to wait.
+    crate::views::menus::action(ui, label, actions, Act::Split(c.id.to_string()).into());
 }
 
 pub fn hook_wip_file_menu(
@@ -851,6 +850,21 @@ mod tests {
         assert!(text.contains("deploy.yml:1"), "{text}");
         assert!(!text.contains(&token));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn short_paths() {
+        assert_eq!(
+            ui::short_path(
+                Path::new("C:/Work/Repo/.git/hooks"),
+                Path::new(r"c:\work\repo")
+            ),
+            ".git/hooks"
+        );
+        assert_eq!(
+            ui::short_path(Path::new("/srv/hooks"), Path::new("/home/me/repo")),
+            ui::native_path(Path::new("/srv/hooks"))
+        );
     }
 
     #[test]

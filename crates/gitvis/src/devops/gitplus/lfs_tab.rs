@@ -328,7 +328,11 @@ const MAX_FILES: usize = 300;
 pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mut Vec<Action>) {
     let busy = repo.is_busy() || repo.devops.gitplus.lfs.busy;
     let s = &mut repo.devops.gitplus.lfs;
-    let installed = s.overview.as_ref().is_some_and(|o| o.installed());
+    // Pull and fetch only where LFS is in use.
+    let installed = s
+        .overview
+        .as_ref()
+        .is_some_and(|o| o.installed() && !o.unused());
     kit::page_header(
         ui,
         "Git LFS",
@@ -402,6 +406,14 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
             }
             return;
         }
+        if o.unused() {
+            kit::callout(
+                ui,
+                Tone::Neutral,
+                "This repository does not use Git LFS",
+                "Git LFS keeps large files (images, videos, datasets, builds) out of the repository: git stores a small pointer and the content lives on the LFS server. To start, track a pattern below and commit .gitattributes; Set up LFS adds the hooks that upload the content on push.",
+            );
+        }
         setup(ui, &o, busy, actions);
         kit::stats(
             ui,
@@ -442,6 +454,11 @@ fn setup(ui: &mut Ui, o: &Overview, busy: bool, actions: &mut Vec<Action>) {
         kv.row("Hooks here", |ui| {
             if o.hooks_installed {
                 ui.label(RichText::new("Installed (pre-push uploads LFS content)").color(p.text));
+            } else if o.unused() {
+                ui.label(
+                    RichText::new("Not installed (needed once you track a pattern)")
+                        .color(p.text_2),
+                );
             } else {
                 ui.label(
                     RichText::new("Missing: a push would not upload LFS content").color(p.warning),

@@ -270,14 +270,18 @@ pub fn report(scan: &StagedScan, dismissed: &HashSet<String>) -> (String, i32) {
     }
     s.push('\n');
     if blocking {
-        s.push_str(
-            "The commit was stopped: a high or critical secret is staged.\n\
-  - Remove it from the file and stage the file again (git add FILE),\n\
-    or unstage the file: git restore --staged FILE\n\
-  - If the secret was real, rotate it: it may be in other places already.\n\
-  - A false positive? Dismiss it on gitvis's Exposure page, then update the\n\
-    hook on Tools > Hooks, or skip the check once: git commit --no-verify\n",
-        );
+        // One line per push: a `\` continuation would eat the indentation.
+        for line in [
+            "The commit was stopped: a high or critical secret is staged.",
+            "  - Remove it from the file and stage the file again (git add FILE),",
+            "    or unstage the file: git restore --staged FILE",
+            "  - If the secret was real, rotate it: it may be in other places already.",
+            "  - A false positive? Dismiss it on gitvis's Exposure page, then update the",
+            "    hook on Tools > Hooks, or skip the check once: git commit --no-verify",
+        ] {
+            s.push_str(line);
+            s.push('\n');
+        }
         (s, 1)
     } else {
         s.push_str("Nothing high or critical: the commit goes ahead.\n");
@@ -337,6 +341,7 @@ mod tests {
         assert!(text.contains("config/.env:3"));
         assert!(text.contains("ghp_••••Ba4"));
         assert!(text.contains("git commit --no-verify"));
+        assert!(text.contains("\n  - Remove it"), "indented steps: {text}");
         // Dismissing the critical one lets the commit through.
         let dismissed: HashSet<String> = ["a".to_owned()].into();
         let (text, code) = report(&scan, &dismissed);

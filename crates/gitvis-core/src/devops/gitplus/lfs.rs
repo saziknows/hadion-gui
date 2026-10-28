@@ -136,8 +136,9 @@ pub struct LfsFile {
 
 #[derive(Deserialize)]
 struct LsJson {
+    /// `null` when there are no LFS files.
     #[serde(default)]
-    files: Vec<LsJsonFile>,
+    files: Option<Vec<LsJsonFile>>,
 }
 
 #[derive(Deserialize)]
@@ -161,6 +162,7 @@ pub fn parse_ls_files_json(bytes: &[u8]) -> Result<Vec<LfsFile>, String> {
     let v: LsJson =
         serde_json::from_slice(bytes).map_err(|e| format!("Unreadable git lfs output: {e}"))?;
     Ok(v.files
+        .unwrap_or_default()
         .into_iter()
         .map(|f| LfsFile {
             path: f.name,
@@ -330,6 +332,11 @@ impl Overview {
 
     pub fn total_size(&self) -> u64 {
         self.files.iter().filter_map(|f| f.size).sum()
+    }
+
+    /// No pattern and no file: the repository does not use LFS.
+    pub fn unused(&self) -> bool {
+        self.patterns.is_empty() && self.files.is_empty()
     }
 
     pub fn pointers_only(&self) -> usize {
@@ -529,6 +536,11 @@ mod tests {
         assert!(!v[1].checkout);
         assert!(parse_ls_files_json(b"\n").unwrap().is_empty());
         assert!(parse_ls_files_json(b"nope").is_err());
+        assert!(
+            parse_ls_files_json(br#"{"files":null}"#)
+                .unwrap()
+                .is_empty()
+        );
         let text = "6fb6d3835a3563bf834b561a53b234839f9c9449ab9b3cf01c531ef30198dcbe * assets/a b.png (4 B)\nb936 - big.bin (3.0 KB)\n";
         let t = parse_ls_files(text);
         assert_eq!(t[0].path, "assets/a b.png");

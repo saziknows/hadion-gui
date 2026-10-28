@@ -205,9 +205,25 @@ impl Submodule {
     }
 
     pub fn url_out_of_sync(&self) -> bool {
-        self.configured_url
-            .as_deref()
-            .is_some_and(|c| !self.url.is_empty() && c != self.url)
+        let Some(c) = self.configured_url.as_deref() else {
+            return false;
+        };
+        if self.url.is_empty() {
+            return false;
+        }
+        if self.url.starts_with("./") || self.url.starts_with("../") {
+            // Init resolves a relative URL against the superproject's
+            // remote (or folder): only the last part can be compared.
+            let last = |s: &str| {
+                s.trim_end_matches(['/', '\\'])
+                    .rsplit(['/', '\\', ':'])
+                    .next()
+                    .unwrap_or("")
+                    .to_owned()
+            };
+            return last(c) != last(&self.url);
+        }
+        c != self.url
     }
 }
 
@@ -648,6 +664,39 @@ mod tests {
         assert_eq!(parent_of("ab", &lines), None);
         assert_eq!(parse_left_right("3\t1\n"), Some((3, 1)));
         assert_eq!(parse_left_right(""), None);
+    }
+
+    #[test]
+    fn url_sync_with_relative_urls() {
+        let mut m = Submodule {
+            name: "lib".into(),
+            path: "lib".into(),
+            url: "../lib.git".into(),
+            configured_url: Some("C:/work/lib.git".into()),
+            branch: None,
+            update: None,
+            state: SubState::Current,
+            nested: false,
+            recorded: None,
+            checked_out: None,
+            describe: None,
+            head_subject: None,
+            head_branch: None,
+            dirty: Vec::new(),
+            status_error: None,
+            tracking: None,
+            ahead_behind: None,
+        };
+        assert!(!m.url_out_of_sync());
+        m.configured_url = Some("https://github.com/o/other.git".into());
+        assert!(m.url_out_of_sync());
+        m.url = "https://github.com/o/lib.git".into();
+        m.configured_url = Some("https://github.com/o/lib.git".into());
+        assert!(!m.url_out_of_sync());
+        m.configured_url = Some("git@github.com:o/lib.git".into());
+        assert!(m.url_out_of_sync());
+        m.configured_url = None;
+        assert!(!m.url_out_of_sync());
     }
 
     #[test]

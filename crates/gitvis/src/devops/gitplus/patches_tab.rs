@@ -653,7 +653,8 @@ fn create(ui: &mut Ui, p: &mut Patches, branch: &str, busy: bool, actions: &mut 
                         ui,
                         "gp_patch_out",
                         &mut p.out_dir,
-                        InputOpts::new("Choose a folder").width(440.0),
+                        InputOpts::new("Choose a folder")
+                            .width((ui.available_width() - 110.0).max(240.0)),
                     );
                     if form::button(ui, "Choose…", true).clicked() {
                         actions.push(Act::PickPatchFolder.into());

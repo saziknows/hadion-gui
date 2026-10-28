@@ -180,6 +180,28 @@ pub fn copyable(ui: &mut Ui, text: &str, actions: &mut Vec<Action>) {
     }
 }
 
+/// A path with the platform's separators (git prints forward slashes).
+pub fn native_path(p: &std::path::Path) -> String {
+    let s = p.to_string_lossy().into_owned();
+    if cfg!(windows) {
+        s.replace('/', "\\")
+    } else {
+        s
+    }
+}
+
+/// A path relative to `base` when it is inside it, else the native path.
+pub fn short_path(p: &std::path::Path, base: &std::path::Path) -> String {
+    let norm = |x: &std::path::Path| x.to_string_lossy().replace('\\', "/").to_lowercase();
+    let (ps, bs) = (norm(p), norm(base));
+    let bs = bs.trim_end_matches('/');
+    if ps.starts_with(&format!("{bs}/")) {
+        let full = p.to_string_lossy().replace('\\', "/");
+        return full.get(bs.len() + 1..).unwrap_or(&full).to_owned();
+    }
+    native_path(p)
+}
+
 /// `when` as "2026-10-27 14:03 · 3 hours ago".
 pub fn when(secs: i64, now: i64) -> String {
     format!(

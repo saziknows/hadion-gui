@@ -90,6 +90,8 @@ pub struct Hooks {
     pub busy: bool,
     pub tools: Option<ToolCheck>,
     pub tools_loading: bool,
+    /// Install was asked for before the listing arrived (scripts).
+    pub pending_install: bool,
     pub semgrep: Option<SemgrepRun>,
     pub precommit_run: Option<PreCommitRun>,
 }
@@ -466,6 +468,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         }
         Act::InstallSecretHook => {
             let Some(l) = repo.devops.gitplus.hooks.listing() else {
+                repo.devops.gitplus.hooks.pending_install = true;
+                load(cx, repo);
                 return;
             };
             let Some(exe) = current_exe() else {
@@ -779,6 +783,9 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                 h.content_for = None;
             }
             h.listing = Some(r);
+            if std::mem::take(&mut h.pending_install) {
+                apply(cx, repo, Act::InstallSecretHook);
+            }
             if let Some(name) = pending {
                 apply(cx, repo, Act::SelectHookName(name));
             } else if let Some(sel) = repo.devops.gitplus.hooks.selected.clone()
@@ -853,6 +860,15 @@ pub fn on_console_done(cx: &mut Ctx, repo: &mut RepoState, run: &ConsoleRun) {
 // View
 // ---------------------------------------------------------------------------
 
+/// The hook's dismissed fingerprints are the Exposure page's (no file
+/// counts as none).
+fn dismissed_match(l: &Listing, dismissed: &HashSet<String>) -> bool {
+    match &l.dismissed_in_file {
+        Some(s) => s == dismissed,
+        None => dismissed.is_empty(),
+    }
+}
+
 fn badges(f: &HookFile) -> Vec<(String, Tone)> {
     let mut b = Vec::new();
     if f.gitvis {
@@ -876,6 +892,7 @@ fn badges(f: &HookFile) -> Vec<(String, Tone)> {
 pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut Vec<Action>) {
     let p = *pal(ui);
     let busy = repo.is_busy() || repo.devops.gitplus.hooks.busy;
+    let workdir = repo.workdir.clone();
     let dismissed = repo.dismissed.clone();
     let staged = repo
         .snapshot
@@ -936,7 +953,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
         ui.horizontal_wrapped(|ui| {
             ui.add_space(4.0);
             ui.label(
-                RichText::new(l.dir.to_string_lossy())
+                RichText::new(gui::short_path(&l.dir, &workdir))
                     .size(size::SMALL)
                     .color(p.text_2),
             );
@@ -1007,7 +1024,7 @@ fn detail(ui: &mut Ui, h: &mut Hooks, f: &HookFile, busy: bool, actions: &mut Ve
     ui.add_space(4.0);
     kit::kv(ui, 120.0, |kv| {
         kv.row("File", |ui| {
-            gui::copyable(ui, &f.path.to_string_lossy(), actions)
+            gui::copyable(ui, &gui::native_path(&f.path), actions)
         });
         match core::describe(&f.hook) {
             Some(d) => kv.text("Runs on", d),
@@ -1191,7 +1208,7 @@ fn secret_check(
                             (None, _) => kv.muted("Runs", "unknown (edited script)"),
                         }
                         let known = l.dismissed_in_file.as_ref().map(|s| s.len()).unwrap_or(0);
-                        let same = l.dismissed_in_file.as_ref().is_some_and(|s| s == dismissed);
+                        let same = dismissed_match(l, dismissed);
                         kv.text(
                             "Dismissed findings",
                             if same {
@@ -1219,7 +1236,7 @@ fn secret_check(
                         {
                             actions.push(Act::InstallSecretHook.into());
                         }
-                        let same = l.dismissed_in_file.as_ref().is_some_and(|s| s == dismissed);
+                        let same = dismissed_match(l, dismissed);
                         if !same
                             && IconButton::text("Update dismissed findings…")
                                 .enabled(!busy)
