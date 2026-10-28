@@ -12,6 +12,8 @@ use crate::devops::history;
 use crate::format;
 use crate::state::{Action, Dialog, DragBranch, DropTarget, RepoState, Selection, Settings};
 use crate::theme;
+use crate::views::icons::{Icon, IconButton};
+use crate::views::kit;
 use crate::views::menus::{self, MenuCtx};
 use crate::views::{pill, pill_width, truncated};
 
@@ -47,28 +49,51 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
 
     {
         let Some(snap) = repo.snapshot.as_ref() else {
-            centered(
-                ui,
-                if repo.loading {
-                    "Loading repository…"
-                } else {
-                    repo.load_error.as_deref().unwrap_or("")
-                },
-            );
+            if repo.loading {
+                ui.add_space(ui.available_height() * 0.4);
+                ui.vertical_centered(|ui| kit::loading(ui, "Reading the repository…"));
+            } else if let Some(e) = repo.load_error.as_deref() {
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin::same(24))
+                    .show(ui, |ui| {
+                        kit::callout_with(
+                            ui,
+                            kit::Tone::Danger,
+                            "Could not read the repository",
+                            e,
+                            |ui| {
+                                ui.add_space(4.0);
+                                if IconButton::new(Icon::Rerun, "Try again")
+                                    .compact()
+                                    .show(ui)
+                                    .clicked()
+                                {
+                                    actions.push(Action::Reload(true));
+                                }
+                            },
+                        );
+                    });
+            }
             repo.search_hits = hits;
             return;
         };
         let n = snap.row_count();
         if n == 0 {
-            centered(
+            kit::empty_state(
                 ui,
-                "No commits yet.\nStage files and make the first commit from the panel on the right.",
+                Icon::Graph,
+                "No commits yet",
+                "Stage files in the panel on the right and make the first commit.",
+                None,
             );
             repo.search_hits = hits;
             return;
         }
 
         let show_author = settings.show_author && ui.available_width() > 760.0;
+        // The short SHA is also in the details panel: a narrow graph gives
+        // its room to the summary.
+        let show_sha = ui.available_width() > 520.0;
         let hook = crate::devops::hooks::HookCx {
             snap,
             devops: &repo.devops,
@@ -93,6 +118,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
             relative_dates: settings.relative_dates,
             graph_w: 0.0,
             show_author,
+            show_sha,
             head: snap.head.target(),
             head_branch: snap.current_branch().map(|b| b.name.clone()),
             selection,
@@ -147,13 +173,6 @@ fn widest_lane(snap: &Snapshot, rows: std::ops::Range<usize>) -> u16 {
     max
 }
 
-fn centered(ui: &mut Ui, text: &str) {
-    ui.vertical_centered(|ui| {
-        ui.add_space(ui.available_height() * 0.4);
-        ui.label(egui::RichText::new(text).weak().size(14.0));
-    });
-}
-
 struct RowCtx<'a> {
     snap: &'a Snapshot,
     filter_cx: MenuCtx<'a>,
@@ -162,6 +181,7 @@ struct RowCtx<'a> {
     relative_dates: bool,
     graph_w: f32,
     show_author: bool,
+    show_sha: bool,
     head: Option<Oid>,
     head_branch: Option<String>,
     selection: Selection,
@@ -286,7 +306,7 @@ fn draw_row(ui: &mut Ui, cx: &RowCtx, row: usize, actions: &mut Vec<Action>) {
 
     // Columns on the right
     let mut right = rect.right() - 10.0;
-    let sha_x = right - SHA_W;
+    let sha_x = if cx.show_sha { right - SHA_W } else { right };
     right = sha_x - 8.0;
     let date_x = right - DATE_W;
     right = date_x - 8.0;
@@ -415,13 +435,15 @@ fn draw_row(ui: &mut Ui, cx: &RowCtx, row: usize, actions: &mut Vec<Action>) {
                 ));
             }
             // SHA
-            painter.text(
-                pos2(sha_x, mid),
-                Align2::LEFT_CENTER,
-                &c.short,
-                FontId::monospace(theme::size::MONO - 0.5),
-                pl.text_3,
-            );
+            if cx.show_sha {
+                painter.text(
+                    pos2(sha_x, mid),
+                    Align2::LEFT_CENTER,
+                    &c.short,
+                    FontId::monospace(theme::size::MONO - 0.5),
+                    pl.text_3,
+                );
+            }
         }
     }
 

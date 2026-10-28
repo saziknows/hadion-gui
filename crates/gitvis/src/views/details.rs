@@ -19,6 +19,7 @@ use crate::state::{Action, Dialog, Page, RepoState, Selection, Settings};
 use crate::theme::{self, Tone, pal, size};
 use crate::views::icons::{self, Icon, IconButton};
 use crate::views::kit;
+use crate::views::menus;
 use crate::views::truncated;
 
 const FILE_ROW_H: f32 = 28.0;
@@ -77,8 +78,13 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
     let selected_file = file.as_ref();
     match *selection {
         Selection::None => {
-            ui.add_space(20.0);
-            ui.vertical_centered(|ui| ui.label(RichText::new("Select a commit").weak()));
+            kit::empty_state(
+                ui,
+                Icon::Graph,
+                "Select a commit",
+                "Its message, details and changed files show here. Select Uncommitted changes at the top of the graph to stage and commit.",
+                None,
+            );
         }
         Selection::Wip => {
             wip_panel(
@@ -119,14 +125,10 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
                     commit_panel(ui, &cx, commit, d, actions)
                 }
                 None => {
+                    let _ = details_loading;
                     header(ui, &commit.summary);
                     ui.add_space(8.0);
-                    if details_loading.is_some() || true {
-                        ui.horizontal(|ui| {
-                            ui.add(egui::Spinner::new().size(14.0));
-                            ui.label(RichText::new("Loading details…").weak());
-                        });
-                    }
+                    kit::loading(ui, "Loading details…");
                 }
             }
         }
@@ -203,9 +205,51 @@ fn commit_panel(
     d: &CommitDetails,
     actions: &mut Vec<Action>,
 ) {
+    // The message and metadata scroll in a box of their own, capped so the
+    // file list always keeps a share of a short panel (it used to be pushed
+    // out of view entirely).
+    let avail = ui.available_height();
+    if avail < SHORT_PANEL {
+        // Too short to split (a small window with the activity log open):
+        // one scroll for everything, the files listed in full up to a cap.
+        egui::ScrollArea::vertical()
+            .id_salt(("commit_all", d.id))
+            .min_scrolled_height(0.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                commit_meta(ui, cx, commit, d, actions);
+                commit_files(ui, cx, commit, d, false, actions);
+            });
+        return;
+    }
+    let files_natural = 56.0 + d.files.len().max(1) as f32 * FILE_ROW_H;
+    let files_keep = files_natural.min((avail * 0.4).max(150.0));
+    let meta_max = avail - files_keep;
+    egui::ScrollArea::vertical()
+        .id_salt(("commit_meta", d.id))
+        .max_height(meta_max)
+        .min_scrolled_height(0.0)
+        .auto_shrink([false, true])
+        .show(ui, |ui| commit_meta(ui, cx, commit, d, actions));
+    commit_files(ui, cx, commit, d, true, actions);
+}
+
+/// Below this height the commit panel scrolls as a whole instead of
+/// splitting into a metadata box and a file list.
+const SHORT_PANEL: f32 = 280.0;
+/// Files listed when the commit panel scrolls as a whole.
+const FLAT_FILES_MAX: usize = 300;
+
+/// Title, author, refs, message, details, checks and the hook rows.
+fn commit_meta(
+    ui: &mut Ui,
+    cx: &CommitCx,
+    commit: &gitvis_core::Commit,
+    d: &CommitDetails,
+    actions: &mut Vec<Action>,
+) {
     let snap = cx.snap;
     let settings = cx.settings;
-    let selected_file = cx.selected_file;
     let p = *pal(ui);
     let now = format::now_secs();
     header(ui, &commit.summary);
@@ -421,8 +465,20 @@ fn commit_panel(
 
     // Signatures, issue links, AI and other areas' additions.
     hooks::commit_panel(ui, cx.hook, commit, actions);
+    ui.add_space(4.0);
+}
 
-    // Files.
+/// "Files changed": the commit's files, virtualised in a scroll of their
+/// own, or (`virtualised: false`) listed in full inside the caller's.
+fn commit_files(
+    ui: &mut Ui,
+    cx: &CommitCx,
+    commit: &gitvis_core::Commit,
+    d: &CommitDetails,
+    virtualised: bool,
+    actions: &mut Vec<Action>,
+) {
+    let p = *pal(ui);
     let (adds, dels) = d
         .files
         .iter()
@@ -452,56 +508,92 @@ fn commit_panel(
         }
     });
 
-    let parent = d.parents.first().copied();
-    egui::ScrollArea::vertical()
-        .id_salt("commit_files")
-        .auto_shrink([false, false])
-        .show_rows(ui, FILE_ROW_H, d.files.len(), |ui, range| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            for i in range {
-                let f = &d.files[i];
-                let target = DiffTarget::Commit {
-                    id: d.id,
-                    parent,
-                    path: f.path.clone(),
-                    old_path: f.old_path.clone(),
-                };
-                let selected = selected_file == Some(&target);
-                let resp = file_row(
-                    ui,
-                    f.kind,
-                    &f.path,
-                    f.old_path.as_deref(),
-                    Some((f.additions, f.deletions, f.binary)),
-                    selected,
-                    false,
-                    |_, _| {},
-                );
-                if resp.clicked() {
-                    actions.push(Action::OpenFile(target.clone()));
+    // Rows edge to edge: `show_rows` adds the caller's spacing to the row
+    // pitch, so it must be zero before the call, not just inside.
+    ui.spacing_mut().item_spacing.y = 0.0;
+    if virtualised {
+        egui::ScrollArea::vertical()
+            .id_salt("commit_files")
+            .min_scrolled_height(0.0)
+            .auto_shrink([false, false])
+            .show_rows(ui, FILE_ROW_H, d.files.len(), |ui, range| {
+                for i in range {
+                    commit_file_row(ui, cx, commit, d, i, actions);
                 }
-                let exists = snap.workdir.join(&f.path).is_file();
-                resp.context_menu(|ui| {
-                    ui.set_min_width(180.0);
-                    if exists && ui.button("Open file").clicked() {
-                        actions.push(Action::OpenPath(snap.workdir.join(&f.path)));
-                        ui.close();
-                    }
-                    if ui.button("Copy path").clicked() {
-                        actions.push(Action::Copy(f.path.clone()));
-                        ui.close();
-                    }
-                    if ui.button("File history").clicked() {
-                        actions.push(Action::ShowPage(crate::state::Page::Workbench));
-                        actions.push(
-                            crate::devops::workbench::Act::FileHistory(f.path.clone()).into(),
-                        );
-                        ui.close();
-                    }
-                    hooks::commit_file_menu(ui, cx.hook, commit, &f.path, actions);
-                });
-            }
-        });
+            });
+    } else {
+        for i in 0..d.files.len().min(FLAT_FILES_MAX) {
+            commit_file_row(ui, cx, commit, d, i, actions);
+        }
+        if d.files.len() > FLAT_FILES_MAX {
+            ui.add_space(6.0);
+            kit::muted(
+                ui,
+                &format!(
+                    "and {} more: make the panel taller to list them all",
+                    format::count(d.files.len() - FLAT_FILES_MAX)
+                ),
+            );
+        }
+        ui.add_space(8.0);
+    }
+}
+
+/// One changed file of a commit, with its menu.
+fn commit_file_row(
+    ui: &mut Ui,
+    cx: &CommitCx,
+    commit: &gitvis_core::Commit,
+    d: &CommitDetails,
+    i: usize,
+    actions: &mut Vec<Action>,
+) {
+    let snap = cx.snap;
+    let f = &d.files[i];
+    let target = DiffTarget::Commit {
+        id: d.id,
+        parent: d.parents.first().copied(),
+        path: f.path.clone(),
+        old_path: f.old_path.clone(),
+    };
+    let selected = cx.selected_file == Some(&target);
+    let resp = file_row(
+        ui,
+        f.kind,
+        &f.path,
+        f.old_path.as_deref(),
+        Some((f.additions, f.deletions, f.binary)),
+        selected,
+        false,
+        |_, _| {},
+    );
+    if resp.clicked() {
+        actions.push(Action::OpenFile(target.clone()));
+    }
+    let exists = snap.workdir.join(&f.path).is_file();
+    resp.context_menu(|ui| {
+        menus::begin(ui, 200.0);
+        if exists {
+            menus::action(
+                ui,
+                "Open file",
+                actions,
+                Action::OpenPath(snap.workdir.join(&f.path)),
+            );
+        }
+        menus::action(ui, "Copy path", actions, Action::Copy(f.path.clone()));
+        file_history_entry(ui, &f.path, actions);
+        hooks::commit_file_menu(ui, cx.hook, commit, &f.path, actions);
+    });
+}
+
+/// "File history": the Tools page's history of `path`.
+fn file_history_entry(ui: &mut Ui, path: &str, actions: &mut Vec<Action>) {
+    if menus::entry(ui, "File history", false).clicked() {
+        actions.push(Action::ShowPage(crate::state::Page::Workbench));
+        actions.push(crate::devops::workbench::Act::FileHistory(path.to_owned()).into());
+        ui.close();
+    }
 }
 
 /// One file row with a kind badge, dimmed directory, file name and
@@ -634,7 +726,6 @@ fn wip_panel(
     actions: &mut Vec<Action>,
 ) {
     let st = &snap.status;
-    let unborn = snap.head.target().is_none();
 
     // Secrets and sensitive files in the uncommitted changes, per path, and
     // the ones that would go into the next commit.
@@ -686,194 +777,279 @@ fn wip_panel(
     });
     ui.add_space(4.0);
 
-    // Commit box goes at the bottom; lists take the rest. Its height is
-    // last frame's (the secrets callout and hook rows make it grow).
-    let box_h_id = egui::Id::unique("wip_commit_box_h");
-    let commit_h = ui
-        .data(|d| d.get_temp::<f32>(box_h_id))
-        .unwrap_or(150.0)
-        .max(150.0);
-    let lists_h = (ui.available_height() - commit_h).max(80.0);
-    let (lists_rect, _) =
-        ui.allocate_exact_size(vec2(ui.available_width(), lists_h), Sense::hover());
-    ui.scope_builder(egui::UiBuilder::new().max_rect(lists_rect), |ui| {
+    // The commit box sits at the bottom and is always shown in full; the
+    // file lists take what is left and scroll. Its parts are measured on
+    // the previous frame (the secrets callout, the hook rows and the
+    // message decide its height). The message box grows with its text up
+    // to `msg_max`, then scrolls, leaving the lists at least `LISTS_MIN`.
+    let box_id = egui::Id::unique("wip_commit_box");
+    let (others_h, msg_natural) = ui
+        .data(|d| d.get_temp::<(f32, f32)>(box_id))
+        .unwrap_or((110.0, MSG_MIN_H));
+    let avail = ui.available_height();
+    let msg_max = (avail - others_h - LISTS_MIN).clamp(MSG_MIN_H, MSG_MAX_H);
+    let commit_h = others_h + msg_natural.clamp(MSG_MIN_H, msg_max);
+    let measured = if avail >= commit_h {
+        // Lists above, commit box below.
+        let lists_h = avail - commit_h;
+        let (lists_rect, _) =
+            ui.allocate_exact_size(vec2(ui.available_width(), lists_h), Sense::hover());
+        ui.scope_builder(egui::UiBuilder::new().max_rect(lists_rect), |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("wip_lists")
+                .min_scrolled_height(0.0)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    wip_lists(ui, snap, busy, selected_file, &flagged, hook, actions)
+                });
+        });
+        commit_box(
+            ui,
+            snap,
+            message,
+            amend,
+            busy,
+            &staged_secrets,
+            hook,
+            msg_max,
+            actions,
+        )
+    } else {
+        // Not even the commit box fits (a short window with the activity
+        // log or the terminal open): the whole panel scrolls, the lists at
+        // their full height and the commit box under them.
         egui::ScrollArea::vertical()
-            .id_salt("wip_lists")
+            .id_salt("wip_all")
+            .min_scrolled_height(0.0)
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                if !st.conflicted.is_empty() {
-                    list_header(ui, "Conflicted", st.conflicted.len(), |_| {});
-                    for e in &st.conflicted {
-                        let target = DiffTarget::Conflicted {
-                            path: e.path.clone(),
-                        };
-                        let path = e.path.clone();
-                        let resp = file_row(
-                            ui,
-                            e.kind,
-                            &e.path,
-                            None,
-                            None,
-                            selected_file == Some(&target),
-                            true,
-                            |ui, _| {
-                                if IconButton::text("Ours")
-                                    .compact()
-                                    .show(ui)
-                                    .on_hover_text("Keep our version")
-                                    .clicked()
-                                {
-                                    actions
-                                        .push(Action::Run(GitOp::TakeOurs { path: path.clone() }));
-                                }
-                                if IconButton::text("Theirs")
-                                    .compact()
-                                    .show(ui)
-                                    .on_hover_text("Take their version")
-                                    .clicked()
-                                {
-                                    actions.push(Action::Run(GitOp::TakeTheirs {
-                                        path: path.clone(),
-                                    }));
-                                }
-                            },
-                        );
-                        if resp.clicked() {
-                            // The conflict editor (base / ours / theirs); the
-                            // raw diff stays one click away inside it.
-                            let _ = target;
-                            actions.push(crate::devops::conflict::Act::Open(e.path.clone()).into());
-                        }
-                        conflict_menu(&resp, snap, e, hook, actions);
-                    }
-                    ui.add_space(8.0);
-                }
+                wip_lists(ui, snap, busy, selected_file, &flagged, hook, actions);
+                commit_box(
+                    ui,
+                    snap,
+                    message,
+                    amend,
+                    busy,
+                    &staged_secrets,
+                    hook,
+                    MSG_MIN_H,
+                    actions,
+                )
+            })
+            .inner
+    };
+    if (measured.0 - others_h).abs() > 0.5 || (measured.1 - msg_natural).abs() > 0.5 {
+        ui.data_mut(|d| d.insert_temp(box_id, measured));
+        ui.ctx().request_repaint();
+    }
+}
 
-                list_header(ui, "Unstaged", st.unstaged.len(), |ui| {
-                    if !st.unstaged.is_empty()
-                        && IconButton::text("Stage all")
-                            .compact()
-                            .enabled(!busy)
-                            .show(ui)
-                            .clicked()
-                    {
-                        actions.push(Action::Run(GitOp::StageAll));
-                    }
-                });
-                if st.unstaged.is_empty() {
-                    empty(ui, "No unstaged changes");
-                }
-                for e in &st.unstaged {
-                    let target = if e.kind == ChangeKind::Untracked {
-                        DiffTarget::Untracked {
-                            path: e.path.clone(),
-                        }
-                    } else {
-                        DiffTarget::Unstaged {
-                            path: e.path.clone(),
-                        }
-                    };
-                    let path = e.path.clone();
-                    let kind = e.kind;
-                    let resp = file_row(
-                        ui,
-                        e.kind,
-                        &e.path,
-                        None,
-                        None,
-                        selected_file == Some(&target),
-                        true,
-                        |ui, _| {
-                            if IconButton::icon(Icon::Plus)
-                                .compact()
-                                .show(ui)
-                                .on_hover_text("Stage")
-                                .clicked()
-                            {
-                                actions.push(Action::Run(GitOp::Stage {
-                                    paths: vec![path.clone()],
-                                }));
-                            }
-                            if IconButton::icon(Icon::Undo)
-                                .compact()
-                                .show(ui)
-                                .on_hover_text(if kind == ChangeKind::Untracked {
-                                    "Delete file"
-                                } else {
-                                    "Discard changes"
-                                })
-                                .clicked()
-                            {
-                                actions.push(Action::Dialog(discard_dialog(&path, kind)));
-                            }
-                        },
-                    );
-                    if let Some(&n) = flagged.get(e.path.as_str()) {
-                        flag_row(ui, &resp, n);
-                    }
-                    if resp.clicked() {
-                        actions.push(Action::OpenFile(target));
-                    }
-                    unstaged_menu(&resp, snap, e, hook, actions);
-                }
-                ui.add_space(8.0);
+/// Smallest and largest height of the commit message box (frame included):
+/// two and twelve lines.
+const MSG_MIN_H: f32 = 2.0 * 18.0 + 14.0;
+const MSG_MAX_H: f32 = 12.0 * 18.0 + 14.0;
+/// What the file lists keep before the message box stops growing.
+const LISTS_MIN: f32 = 120.0;
 
-                list_header(ui, "Staged", st.staged.len(), |ui| {
-                    if !st.staged.is_empty()
-                        && IconButton::text("Unstage all")
-                            .compact()
-                            .enabled(!busy)
-                            .show(ui)
-                            .clicked()
+/// The conflicted, unstaged and staged lists of the WIP panel.
+#[allow(clippy::too_many_arguments)]
+fn wip_lists(
+    ui: &mut Ui,
+    snap: &Snapshot,
+    busy: bool,
+    selected_file: Option<&DiffTarget>,
+    flagged: &HashMap<&str, usize>,
+    hook: &HookCx,
+    actions: &mut Vec<Action>,
+) {
+    let st = &snap.status;
+    let unborn = snap.head.target().is_none();
+    ui.spacing_mut().item_spacing.y = 0.0;
+    if !st.conflicted.is_empty() {
+        list_header(ui, "Conflicted", st.conflicted.len(), |_| {});
+        for e in &st.conflicted {
+            let target = DiffTarget::Conflicted {
+                path: e.path.clone(),
+            };
+            let path = e.path.clone();
+            let resp = file_row(
+                ui,
+                e.kind,
+                &e.path,
+                None,
+                None,
+                selected_file == Some(&target),
+                true,
+                |ui, _| {
+                    if IconButton::text("Ours")
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Keep our version")
+                        .clicked()
                     {
-                        actions.push(Action::Run(GitOp::UnstageAll { unborn }));
+                        actions.push(Action::Run(GitOp::TakeOurs { path: path.clone() }));
                     }
-                });
-                if st.staged.is_empty() {
-                    empty(ui, "Nothing staged");
-                }
-                for e in &st.staged {
-                    let target = DiffTarget::Staged {
-                        path: e.path.clone(),
-                        old_path: e.old_path.clone(),
-                    };
-                    let path = e.path.clone();
-                    let resp = file_row(
-                        ui,
-                        e.kind,
-                        &e.path,
-                        e.old_path.as_deref(),
-                        None,
-                        selected_file == Some(&target),
-                        true,
-                        |ui, _| {
-                            if IconButton::icon(Icon::Minus)
-                                .compact()
-                                .show(ui)
-                                .on_hover_text("Unstage")
-                                .clicked()
-                            {
-                                actions.push(Action::Run(GitOp::Unstage {
-                                    paths: vec![path.clone()],
-                                    unborn,
-                                }));
-                            }
-                        },
-                    );
-                    if let Some(&n) = flagged.get(e.path.as_str()) {
-                        flag_row(ui, &resp, n);
+                    if IconButton::text("Theirs")
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Take their version")
+                        .clicked()
+                    {
+                        actions.push(Action::Run(GitOp::TakeTheirs { path: path.clone() }));
                     }
-                    if resp.clicked() {
-                        actions.push(Action::OpenFile(target));
-                    }
-                    staged_menu(&resp, snap, e, unborn, hook, actions);
-                }
-                ui.add_space(6.0);
-            });
+                },
+            );
+            if resp.clicked() {
+                // The conflict editor (base / ours / theirs); the
+                // raw diff stays one click away inside it.
+                let _ = target;
+                actions.push(crate::devops::conflict::Act::Open(e.path.clone()).into());
+            }
+            conflict_menu(&resp, snap, e, hook, actions);
+        }
+        ui.add_space(8.0);
+    }
+
+    list_header(ui, "Unstaged", st.unstaged.len(), |ui| {
+        if !st.unstaged.is_empty()
+            && IconButton::text("Stage all")
+                .compact()
+                .enabled(!busy)
+                .show(ui)
+                .clicked()
+        {
+            actions.push(Action::Run(GitOp::StageAll));
+        }
     });
+    if st.unstaged.is_empty() {
+        empty(ui, "No unstaged changes");
+    }
+    for e in &st.unstaged {
+        let target = if e.kind == ChangeKind::Untracked {
+            DiffTarget::Untracked {
+                path: e.path.clone(),
+            }
+        } else {
+            DiffTarget::Unstaged {
+                path: e.path.clone(),
+            }
+        };
+        let path = e.path.clone();
+        let kind = e.kind;
+        let resp = file_row(
+            ui,
+            e.kind,
+            &e.path,
+            None,
+            None,
+            selected_file == Some(&target),
+            true,
+            |ui, _| {
+                if IconButton::icon(Icon::Plus)
+                    .compact()
+                    .show(ui)
+                    .on_hover_text("Stage")
+                    .clicked()
+                {
+                    actions.push(Action::Run(GitOp::Stage {
+                        paths: vec![path.clone()],
+                    }));
+                }
+                if IconButton::icon(Icon::Undo)
+                    .compact()
+                    .show(ui)
+                    .on_hover_text(if kind == ChangeKind::Untracked {
+                        "Delete file"
+                    } else {
+                        "Discard changes"
+                    })
+                    .clicked()
+                {
+                    actions.push(Action::Dialog(discard_dialog(&path, kind)));
+                }
+            },
+        );
+        if let Some(&n) = flagged.get(e.path.as_str()) {
+            flag_row(ui, &resp, n);
+        }
+        if resp.clicked() {
+            actions.push(Action::OpenFile(target));
+        }
+        unstaged_menu(&resp, snap, e, hook, actions);
+    }
+    ui.add_space(8.0);
 
-    // Commit box
+    list_header(ui, "Staged", st.staged.len(), |ui| {
+        if !st.staged.is_empty()
+            && IconButton::text("Unstage all")
+                .compact()
+                .enabled(!busy)
+                .show(ui)
+                .clicked()
+        {
+            actions.push(Action::Run(GitOp::UnstageAll { unborn }));
+        }
+    });
+    if st.staged.is_empty() {
+        empty(ui, "Nothing staged");
+    }
+    for e in &st.staged {
+        let target = DiffTarget::Staged {
+            path: e.path.clone(),
+            old_path: e.old_path.clone(),
+        };
+        let path = e.path.clone();
+        let resp = file_row(
+            ui,
+            e.kind,
+            &e.path,
+            e.old_path.as_deref(),
+            None,
+            selected_file == Some(&target),
+            true,
+            |ui, _| {
+                if IconButton::icon(Icon::Minus)
+                    .compact()
+                    .show(ui)
+                    .on_hover_text("Unstage")
+                    .clicked()
+                {
+                    actions.push(Action::Run(GitOp::Unstage {
+                        paths: vec![path.clone()],
+                        unborn,
+                    }));
+                }
+            },
+        );
+        if let Some(&n) = flagged.get(e.path.as_str()) {
+            flag_row(ui, &resp, n);
+        }
+        if resp.clicked() {
+            actions.push(Action::OpenFile(target));
+        }
+        staged_menu(&resp, snap, e, unborn, hook, actions);
+    }
+    ui.add_space(6.0);
+}
+
+/// The commit box: secrets warning, the hook rows (AI message, issue keys),
+/// the message box and the Amend / Commit row. Returns its height without
+/// the message box, and the message box's natural height (what it would
+/// take without scrolling), for the next frame's layout.
+#[allow(clippy::too_many_arguments)]
+fn commit_box(
+    ui: &mut Ui,
+    snap: &Snapshot,
+    message: &mut String,
+    amend: &mut bool,
+    busy: bool,
+    staged_secrets: &[String],
+    hook: &HookCx,
+    msg_max: f32,
+    actions: &mut Vec<Action>,
+) -> (f32, f32) {
+    let st = &snap.status;
+    let unborn = snap.head.target().is_none();
     let box_top = ui.cursor().top();
     ui.separator();
     let pending = snap.pending;
@@ -881,7 +1057,14 @@ fn wip_panel(
         && (!st.staged.is_empty() || *amend || pending == Pending::Merge)
         && st.conflicted.is_empty();
     let has_message = !message.trim().is_empty();
-    let ctrl_enter = ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
+    let msg_id = egui::Id::unique("wip_commit_message");
+    // Only while the message box has the focus: elsewhere Ctrl+Enter
+    // belongs to whatever has it.
+    let ctrl_enter = ui.memory(|m| m.has_focus(msg_id))
+        && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
+    if hook.devops.history.focus_commit.replace(false) {
+        ui.memory_mut(|m| m.request_focus(msg_id));
+    }
 
     let hint = match pending {
         Pending::Merge => "Merge commit message (leave empty to keep git's)",
@@ -919,20 +1102,17 @@ fn wip_panel(
     }
     // AI message, issue keys and other areas' tools.
     hooks::wip_message_tools(ui, hook, actions);
-    let edit = ui.add(
-        egui::TextEdit::multiline(message)
-            .id_salt("commit_message")
-            .hint_text(hint)
-            .desired_rows(3)
-            .desired_width(f32::INFINITY),
-    );
-    ui.add_space(4.0);
+    let (_, msg_h, msg_natural) = message_box(ui, msg_id, message, hint, msg_max);
+    ui.add_space(6.0);
     ui.horizontal(|ui| {
         let head_exists = !unborn;
-        if ui
-            .add_enabled(head_exists && !busy, egui::Checkbox::new(amend, "Amend"))
-            .on_hover_text("Replace the last commit")
-            .changed()
+        let amend_resp = ui
+            .add_enabled_ui(head_exists && !busy, |ui| {
+                crate::views::form::checkbox(ui, amend, "Amend")
+            })
+            .inner
+            .on_hover_text("Replace the last commit");
+        if amend_resp.changed()
             && *amend
             && message.is_empty()
             && let Some(head) = snap
@@ -966,7 +1146,7 @@ fn wip_panel(
                 } else {
                     "Write a commit message"
                 });
-            let fire = btn.clicked() || (ctrl_enter && edit.has_focus() && allowed);
+            let fire = btn.clicked() || (ctrl_enter && allowed);
             if fire {
                 let op = if pending == Pending::Merge && !has_message {
                     GitOp::Continue(Pending::Merge)
@@ -1020,11 +1200,62 @@ fn wip_panel(
             }
         });
     });
-    let box_h = (ui.cursor().top() - box_top + 8.0).max(150.0);
-    if (box_h - commit_h).abs() > 1.0 {
-        ui.data_mut(|d| d.insert_temp(box_h_id, box_h));
-        ui.ctx().request_repaint();
-    }
+    ui.add_space(4.0);
+    let box_h = ui.cursor().top() - box_top;
+    (box_h - msg_h, msg_natural)
+}
+
+/// The commit message: an input in the form style (sunken fill, hairline
+/// border that turns accent while focused) that grows with its text up to
+/// `max_h` and then scrolls. Returns the response, the shown height and the
+/// natural height.
+fn message_box(
+    ui: &mut Ui,
+    id: egui::Id,
+    message: &mut String,
+    hint: &str,
+    max_h: f32,
+) -> (egui::Response, f32, f32) {
+    let p = *pal(ui);
+    let focused = ui.memory(|m| m.has_focus(id));
+    // Frame margins (6 + 6) and the border (1 + 1).
+    let chrome_h = 14.0;
+    let mut natural = 0.0;
+    let out = egui::Frame::NONE
+        .fill(if ui.visuals().dark_mode {
+            p.chrome
+        } else {
+            p.canvas
+        })
+        .stroke(egui::Stroke::new(
+            1.0,
+            if focused { p.accent } else { p.border_strong },
+        ))
+        .corner_radius(CornerRadius::same(theme::radius::M))
+        .inner_margin(egui::Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            let area = egui::ScrollArea::vertical()
+                .id_salt("wip_commit_message_scroll")
+                .min_scrolled_height(0.0)
+                .max_height((max_h - chrome_h).max(18.0))
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(message)
+                            .id(id)
+                            .frame(egui::Frame::NONE)
+                            .margin(egui::Margin::ZERO)
+                            .font(FontId::proportional(size::BODY))
+                            .text_color(p.text)
+                            .hint_text(RichText::new(hint).color(p.text_3))
+                            .desired_rows(2)
+                            .desired_width(f32::INFINITY),
+                    )
+                });
+            natural = area.content_size.y + chrome_h;
+            area.inner
+        });
+    (out.inner, out.response.rect.height(), natural)
 }
 
 /// Red shield on a working-tree row whose file holds a possible secret.
@@ -1101,20 +1332,15 @@ fn discard_dialog(path: &str, kind: ChangeKind) -> Dialog {
 }
 
 fn common_file_items(ui: &mut Ui, snap: &Snapshot, path: &str, actions: &mut Vec<Action>) {
-    ui.separator();
-    if ui.button("Open file").clicked() {
-        actions.push(Action::OpenPath(snap.workdir.join(path)));
-        ui.close();
-    }
-    if ui.button("Copy path").clicked() {
-        actions.push(Action::Copy(path.to_owned()));
-        ui.close();
-    }
-    if ui.button("File history").clicked() {
-        actions.push(Action::ShowPage(crate::state::Page::Workbench));
-        actions.push(crate::devops::workbench::Act::FileHistory(path.to_owned()).into());
-        ui.close();
-    }
+    menus::separator(ui);
+    menus::action(
+        ui,
+        "Open file",
+        actions,
+        Action::OpenPath(snap.workdir.join(path)),
+    );
+    menus::action(ui, "Copy path", actions, Action::Copy(path.to_owned()));
+    file_history_entry(ui, path, actions);
 }
 
 fn unstaged_menu(
@@ -1125,22 +1351,26 @@ fn unstaged_menu(
     actions: &mut Vec<Action>,
 ) {
     resp.context_menu(|ui| {
-        ui.set_min_width(180.0);
-        if ui.button("Stage").clicked() {
-            actions.push(Action::Run(GitOp::Stage {
+        menus::begin(ui, 200.0);
+        menus::action(
+            ui,
+            "Stage",
+            actions,
+            Action::Run(GitOp::Stage {
                 paths: vec![e.path.clone()],
-            }));
-            ui.close();
-        }
+            }),
+        );
         let label = if e.kind == ChangeKind::Untracked {
             "Delete file…"
         } else {
             "Discard changes…"
         };
-        if ui.button(RichText::new(label).color(theme::RED)).clicked() {
-            actions.push(Action::Dialog(discard_dialog(&e.path, e.kind)));
-            ui.close();
-        }
+        menus::danger_action(
+            ui,
+            label,
+            actions,
+            Action::Dialog(discard_dialog(&e.path, e.kind)),
+        );
         common_file_items(ui, snap, &e.path, actions);
         hooks::wip_file_menu(ui, hook, &e.path, WipList::Unstaged, actions);
     });
@@ -1155,14 +1385,16 @@ fn staged_menu(
     actions: &mut Vec<Action>,
 ) {
     resp.context_menu(|ui| {
-        ui.set_min_width(180.0);
-        if ui.button("Unstage").clicked() {
-            actions.push(Action::Run(GitOp::Unstage {
+        menus::begin(ui, 200.0);
+        menus::action(
+            ui,
+            "Unstage",
+            actions,
+            Action::Run(GitOp::Unstage {
                 paths: vec![e.path.clone()],
                 unborn,
-            }));
-            ui.close();
-        }
+            }),
+        );
         common_file_items(ui, snap, &e.path, actions);
         hooks::wip_file_menu(ui, hook, &e.path, WipList::Staged, actions);
     });
@@ -1176,23 +1408,33 @@ fn conflict_menu(
     actions: &mut Vec<Action>,
 ) {
     resp.context_menu(|ui| {
-        ui.set_min_width(200.0);
-        if ui.button("Keep ours").clicked() {
-            actions.push(Action::Run(GitOp::TakeOurs {
+        menus::begin(ui, 220.0);
+        menus::action(
+            ui,
+            "Open in the conflict editor",
+            actions,
+            crate::devops::conflict::Act::Open(e.path.clone()).into(),
+        );
+        menus::separator(ui);
+        menus::action(
+            ui,
+            "Keep ours",
+            actions,
+            Action::Run(GitOp::TakeOurs {
                 path: e.path.clone(),
-            }));
-            ui.close();
-        }
-        if ui.button("Take theirs").clicked() {
-            actions.push(Action::Run(GitOp::TakeTheirs {
+            }),
+        );
+        menus::action(
+            ui,
+            "Take theirs",
+            actions,
+            Action::Run(GitOp::TakeTheirs {
                 path: e.path.clone(),
-            }));
-            ui.close();
-        }
-        if ui
-            .button("Mark as resolved")
-            .on_hover_text("Stage the file as it is on disk")
-            .clicked()
+            }),
+        );
+        // "Stage the file as it is on disk" said in the label itself rather
+        // than in a tooltip.
+        if menus::entry_with_hint(ui, "Mark as resolved", "stage as on disk", None, false).clicked()
         {
             actions.push(Action::Run(GitOp::MarkResolved {
                 paths: vec![e.path.clone()],

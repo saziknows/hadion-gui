@@ -38,7 +38,7 @@ use gitvis_core::{Commit, Oid};
 
 use crate::devops::hooks::HookCx;
 
-pub use filter::{filter_bar, toolbar_button};
+pub use filter::{filter_bar, toolbar_button, toolbar_label};
 pub use picks::PickEvent;
 pub use sigs::{badge_tip as signature_tip, paint_badge as paint_signature};
 
@@ -79,6 +79,9 @@ pub struct State {
     pub filter: filter::Filter,
     pub picks: picks::Picks,
     pub sigs: sigs::Sigs,
+    /// Give the WIP panel's commit message the focus on its next frame
+    /// (`commit-focus`); the panel only borrows the state, hence the cell.
+    pub focus_commit: std::cell::Cell<bool>,
 }
 
 impl State {
@@ -146,6 +149,8 @@ pub enum Act {
     BrowseRev,
     BrowseSelect(String),
     BrowseToggle(String),
+    /// Bring a line (1-based) of the open file into view and mark it.
+    BrowseLine(u32),
     /// `git show REV:PATH` into a temporary file, opened with its program.
     OpenVersion {
         rev: String,
@@ -194,6 +199,8 @@ pub enum Act {
     VerifyVisible,
     /// Forget every result and verify again (after fixing the setup).
     RecheckSignatures,
+    /// Focus the WIP panel's commit message.
+    FocusCommitMessage,
 }
 
 pub enum Msg {
@@ -346,6 +353,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         | Act::BrowseRev
         | Act::BrowseSelect(_)
         | Act::BrowseToggle(_)
+        | Act::BrowseLine(_)
         | Act::OpenVersion { .. } => browse::apply(cx, repo, act),
         Act::Blame { .. }
         | Act::BlamePrevious(_)
@@ -371,6 +379,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         | Act::VerifyDetail(_)
         | Act::VerifyVisible
         | Act::RecheckSignatures => sigs::apply(cx, repo, act),
+        Act::FocusCommitMessage => repo.devops.history.focus_commit.set(true),
     }
 }
 
@@ -397,8 +406,12 @@ pub fn on_console_done(_cx: &mut Ctx, _repo: &mut RepoState, _run: &ConsoleRun) 
 /// their confirmation), `filter-author TEXT`, `filter-path PATH`,
 /// `filter-since YYYY-MM-DD`, `filter-until YYYY-MM-DD`, `filter-message
 /// TEXT`, `filter-clear`, `filter-bar`, `filter-next`, `filter-prev`,
-/// `browse SHA|head`, `browse-file PATH`, `blame-at SHA PATH [LINE]`,
-/// `blame-previous N` (line N's commit), `verify`, `verify-detail`.
+/// `browse SHA|head`, `browse-file PATH`, `browse-line N`, `blame-at SHA
+/// PATH [LINE]`, `blame-previous N` (line N's commit), `verify`,
+/// `verify-detail`. Testing aids for the History page and the shell:
+/// `commit-msg TEXT` (`\n` for a new line), `commit-focus`, `dialog
+/// stash|branch|branch-invalid|tag|rename|delete-branch|push|reset|confirm|
+/// confirm-action|clone`, `toast info|success|error TEXT`.
 pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
     let cmd = cmd.strip_prefix("hist-").unwrap_or(cmd);
     let arg = arg.trim();
@@ -480,8 +493,107 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         }
         "blame-previous" => one(Act::BlamePrevious(num?.saturating_sub(1))),
         "verify" => one(Act::VerifyVisible),
+        "browse-line" => one(Act::BrowseLine(arg.parse().ok()?)),
+        // Testing aids for the History page and the shell around it.
+        "commit-msg" => Some(vec![Action::AddToCommitMessage {
+            text: arg.replace("\\n", "\n"),
+            at_start: false,
+        }]),
+        "commit-focus" => one(Act::FocusCommitMessage),
+        "dialog" => Some(vec![test_dialog(arg)?]),
+        "toast" => {
+            let (kind, text) = arg.split_once(' ').unwrap_or((arg, ""));
+            let kind = match kind {
+                "error" => crate::state::ToastKind::Error,
+                "success" => crate::state::ToastKind::Success,
+                _ => crate::state::ToastKind::Info,
+            };
+            Some(vec![Action::Toast(kind, text.replace("\\n", "\n"))])
+        }
         _ => None,
     }
+}
+
+/// `dialog NAME` (scripts): open a dialog with sample values to look at it.
+/// Scripts never confirm a dialog; the operations are harmless anyway
+/// (`confirm` runs nothing).
+fn test_dialog(name: &str) -> Option<Action> {
+    use crate::state::Dialog;
+    use gitvis_core::ops::ResetMode;
+    let s = |v: &str| v.to_owned();
+    let d = match name.trim() {
+        "stash" => Dialog::Stash {
+            message: String::new(),
+            include_untracked: true,
+        },
+        "branch" => Dialog::CreateBranch {
+            name: String::new(),
+            start: s("HEAD"),
+            start_label: s("main"),
+            checkout: true,
+        },
+        "branch-invalid" => Dialog::CreateBranch {
+            name: s("bad name"),
+            start: s("HEAD"),
+            start_label: s("main"),
+            checkout: true,
+        },
+        "tag" => Dialog::CreateTag {
+            name: String::new(),
+            target: s("HEAD"),
+            target_label: s("8d2d4ba Speed up startup"),
+            message: String::new(),
+        },
+        "rename" => Dialog::RenameBranch {
+            from: s("feature/ui/details"),
+            to: s("feature/ui/details"),
+        },
+        "delete-branch" => Dialog::DeleteBranch {
+            name: s("feature/ui/details"),
+            force: false,
+            remote: Some((s("origin"), s("feature/ui/details"))),
+            delete_remote: false,
+        },
+        "push" => Dialog::Push {
+            branch: s("main"),
+            remotes: vec![s("origin"), s("upstream")],
+            remote: 0,
+            set_upstream: true,
+            force: true,
+        },
+        "reset" => Dialog::Reset {
+            branch: s("main"),
+            target: s("HEAD~1"),
+            target_label: s("3ba97ba Describe worker threads"),
+            mode: ResetMode::Hard,
+        },
+        "confirm" => Dialog::Confirm {
+            title: s("Commit possible secrets?"),
+            body: format!(
+                "The staged changes contain 9 possible secrets:\n\n{}\n… 1 more\n\nOnce committed they stay in history even after you delete them; once pushed, everyone who can read the repository has them. Unstage the files or move the values to environment variables first.",
+                (1..=8)
+                    .map(|i| format!("• AWS access key · config/settings-{i}.json:{} · AKIA…{i}XYZ", 10 * i))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ),
+            confirm: s("Commit anyway"),
+            danger: true,
+            ops: Vec::new(),
+        },
+        "confirm-action" => Dialog::ConfirmAction {
+            title: s("Create the release v1.4.0?"),
+            body: s("GitHub publishes the release and notifies everyone who watches the repository."),
+            confirm: s("Create release"),
+            danger: false,
+            details: (1..=30)
+                .map(|i| format!("POST /repos/owner/name/releases  {{\"tag_name\": \"v1.4.0\", \"line\": {i}, \"body\": \"a long request body that wraps across the dialog's width to check the scroll\"}}"))
+                .collect(),
+            action: Box::new(Action::Toast(crate::state::ToastKind::Info, s("confirmed"))),
+        },
+        "clone" => return Some(Action::CloneDialog),
+        _ => return None,
+    };
+    Some(Action::Dialog(d))
 }
 
 /// After every load: drop picks that are gone, re-match the filter,

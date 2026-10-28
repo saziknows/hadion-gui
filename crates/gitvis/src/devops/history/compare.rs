@@ -288,10 +288,11 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
     let tab = c.tab;
     let selected = c.selected;
     let commit_sel = c.commit;
+    let (list_min, list_max) = widgets::split_range(ui.available_width(), 280.0, 760.0, 380.0);
     egui::Panel::left("hist_cmp_list")
         .resizable(true)
-        .default_size(420.0)
-        .size_range(300.0..=760.0)
+        .default_size(420.0f32.clamp(list_min, list_max))
+        .size_range(list_min..=list_max)
         .frame(Frame::NONE.fill(p.panel).inner_margin(Margin {
             left: 8,
             right: 8,
@@ -622,31 +623,33 @@ fn file_list(
         return;
     }
     let two_lines = cmp.files.iter().any(|f| file_note(f).is_some());
-    kit::list(
-        ui,
-        "hist_cmp_files",
-        shown.len(),
-        if two_lines { 46.0 } else { 32.0 },
-        |k| selected == Some(shown[k]),
-        |ui, rect, resp, k| {
-            let f = &cmp.files[shown[k]];
-            let sub = file_note(f);
-            widgets::paint_file_row(
-                ui,
-                rect,
-                widgets::change_kind(f.change),
-                &f.path,
-                sub.as_deref(),
-                f.added,
-                f.deleted,
-                f.binary,
-                selected == Some(shown[k]),
-            );
-            if resp.clicked() {
-                actions.push(Act::SelectCompareFile(shown[k]).into());
-            }
-        },
-    );
+    widgets::rows_ui(ui, |ui| {
+        kit::list(
+            ui,
+            "hist_cmp_files",
+            shown.len(),
+            if two_lines { 46.0 } else { 32.0 },
+            |k| selected == Some(shown[k]),
+            |ui, rect, resp, k| {
+                let f = &cmp.files[shown[k]];
+                let sub = file_note(f);
+                widgets::paint_file_row(
+                    ui,
+                    rect,
+                    widgets::change_kind(f.change),
+                    &f.path,
+                    sub.as_deref(),
+                    f.added,
+                    f.deleted,
+                    f.binary,
+                    selected == Some(shown[k]),
+                );
+                if resp.clicked() {
+                    actions.push(Act::SelectCompareFile(shown[k]).into());
+                }
+            },
+        )
+    });
 }
 
 /// The second line of a file row: renames, copies, mode changes.
@@ -840,6 +843,8 @@ fn commit_lists(
         let h = ((total_h - 70.0 - empty_count * 40.0) / non_empty).max(120.0);
         let now = format::now_secs();
         ui.allocate_ui(vec2(ui.available_width(), h), |ui| {
+            // Rows edge to edge: see `widgets::rows_ui`.
+            ui.spacing_mut().item_spacing.y = 0.0;
             kit::list(
                 ui,
                 &format!("hist_cmp_commits_{side:?}"),

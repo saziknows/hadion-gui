@@ -43,6 +43,10 @@ pub struct Browse {
     pub content: Option<(String, Option<Result<ContentShow, String>>)>,
     /// Select this file once the tree is loaded.
     pub select_after: Option<String>,
+    /// The marked line of the open file (1-based) and a line to bring into
+    /// view on the next frame.
+    pub mark: Option<u32>,
+    pub scroll_to: Option<u32>,
     /// The flattened rows and what they were made from (tree, search,
     /// open folders), so a large tree is not walked every frame.
     rows_cache: Option<(u64, Rows)>,
@@ -131,6 +135,8 @@ fn select(cx: &mut Ctx, repo: &mut RepoState, path: String) {
     if matches!(&b.content, Some((p, _)) if *p == path) {
         return;
     }
+    b.mark = None;
+    b.scroll_to = None;
     b.content = Some((path.clone(), None));
     let sha = tree.sha.clone();
     let seq = b.seq;
@@ -196,6 +202,11 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             if !b.expanded.remove(&dir) {
                 b.expanded.insert(dir);
             }
+        }
+        Act::BrowseLine(line) => {
+            let b = &mut repo.devops.history.browse;
+            b.mark = Some(line);
+            b.scroll_to = Some(line);
         }
         Act::OpenVersion { rev, path } => {
             cx.read(
@@ -362,10 +373,13 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         Some(Ok(t)) => t,
     };
     let selected = b.selected.clone();
+    // The tree and the viewer share the width; neither is squeezed below a
+    // usable size, whatever width the tree was dragged to before.
+    let (tree_min, tree_max) = widgets::split_range(ui.available_width(), 240.0, 760.0, 380.0);
     egui::Panel::left("hist_browse_tree")
         .resizable(true)
-        .default_size(380.0)
-        .size_range(260.0..=760.0)
+        .default_size(380.0f32.clamp(tree_min, tree_max))
+        .size_range(tree_min..=tree_max)
         .frame(Frame::NONE.fill(p.panel).inner_margin(Margin {
             left: 8,
             right: 8,
@@ -390,6 +404,8 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                 return;
             }
             let searching = !b.query.trim().is_empty();
+            // Rows edge to edge: see `widgets::rows_ui`.
+            ui.spacing_mut().item_spacing.y = 0.0;
             kit::list(
                 ui,
                 "hist_browse_rows",
@@ -445,15 +461,22 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                             _ => format::bytes(node.size as usize),
                         }
                     };
+                    let name_x = x0 + 32.0;
+                    // The name comes first: the sizes give way when the
+                    // pane is narrow.
                     let mg =
                         painter.layout_no_wrap(meta, FontId::proportional(size::SMALL), p.text_3);
-                    let mw = mg.size().x;
-                    painter.galley(
-                        pos2(rect.right() - 12.0 - mw, mid - mg.size().y / 2.0),
-                        mg,
-                        p.text_3,
-                    );
-                    let name_x = x0 + 32.0;
+                    let mw = if rect.right() - 24.0 - mg.size().x - name_x >= 90.0 {
+                        let mw = mg.size().x;
+                        painter.galley(
+                            pos2(rect.right() - 12.0 - mw, mid - mg.size().y / 2.0),
+                            mg,
+                            p.text_3,
+                        );
+                        mw
+                    } else {
+                        -12.0
+                    };
                     let color = if node.dir {
                         p.text
                     } else {
@@ -492,6 +515,12 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         });
     let tree_sha = tree.sha.clone();
     let tree_rev = tree.rev.clone();
+    let mark = b.mark;
+    let loaded = matches!(
+        (&b.content, &selected),
+        (Some((p, Some(Ok(ContentShow::Text(_))))), Some(s)) if p == s
+    );
+    let scroll_to = if loaded { b.scroll_to.take() } else { None };
     let entry = selected
         .as_deref()
         .and_then(|s| tree.find(s))
@@ -568,7 +597,9 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                 Some((path, slot)) if *path == entry.path => match slot {
                     None => kit::loading(ui, "Reading the file…"),
                     Some(Err(e)) => kit::callout(ui, Tone::Danger, "Could not read the file", e),
-                    Some(Ok(ContentShow::Text(d))) => widgets::text_view(ui, &entry.path, d, None, None),
+                    Some(Ok(ContentShow::Text(d))) => {
+                        widgets::text_view(ui, &entry.path, d, mark, scroll_to)
+                    }
                     Some(Ok(ContentShow::Binary { size })) => kit::callout(
                         ui,
                         Tone::Neutral,

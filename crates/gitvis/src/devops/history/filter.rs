@@ -267,22 +267,37 @@ pub fn on_msg(_cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
 // View
 // ---------------------------------------------------------------------------
 
-/// The Filter button next to the commit search (toolbar, History page).
-pub fn toolbar_button(ui: &mut Ui, s: &super::State, actions: &mut Vec<Action>) {
+/// The Filter button next to the commit search (toolbar, History page);
+/// `labelled: false` draws the icon only (a narrow window), with the label
+/// in the tooltip.
+pub fn toolbar_button(ui: &mut Ui, s: &super::State, labelled: bool, actions: &mut Vec<Action>) {
     let f = &s.filter;
-    let n = f.spec.count();
-    let label = if n > 0 {
-        format!("Filter  {n}")
+    let label = toolbar_label(s);
+    let tip = "Filter the graph by author, path, date or message: matching commits stay bright, the rest are dimmed";
+    let button = if labelled {
+        IconButton::new(Icon::List, &label)
     } else {
-        "Filter".to_owned()
+        IconButton::icon(Icon::List)
     };
-    let resp = IconButton::new(Icon::List, &label)
+    let resp = button
         .compact()
-        .selected(f.open || n > 0)
+        .selected(f.open || f.spec.count() > 0)
         .show(ui)
-        .on_hover_text("Filter the graph by author, path, date or message: matching commits stay bright, the rest are dimmed");
+        .on_hover_text(if labelled {
+            tip.to_owned()
+        } else {
+            format!("{label}\n{tip}")
+        });
     if resp.clicked() {
         actions.push(Act::ToggleFilterBar.into());
+    }
+}
+
+/// The Filter button's label: "Filter", or "Filter  N" with N fields set.
+pub fn toolbar_label(s: &super::State) -> String {
+    match s.filter.spec.count() {
+        0 => "Filter".to_owned(),
+        n => format!("Filter  {n}"),
     }
 }
 

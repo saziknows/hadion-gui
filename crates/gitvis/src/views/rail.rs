@@ -10,8 +10,40 @@ use crate::theme::{self, Tone, pal, size};
 use crate::views::icons::{self, Icon};
 
 pub const WIDTH: f32 = 72.0;
-/// Height of one rail entry (icon pill and label).
-const ENTRY_H: f32 = 51.0;
+/// Gap between rail entries.
+const GAP: f32 = 2.0;
+
+/// How tall the rail's entries are: a short window first tightens them,
+/// then drops their labels (the tooltip then starts with the label), so
+/// the top and bottom groups never overlap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Density {
+    /// Icon pill and label (51 points).
+    Full,
+    /// Smaller pill and label (40 points).
+    Compact,
+    /// Icon pill only (34 points).
+    Icons,
+}
+
+impl Density {
+    fn entry_h(self) -> f32 {
+        match self {
+            Density::Full => 51.0,
+            Density::Compact => 40.0,
+            Density::Icons => 34.0,
+        }
+    }
+
+    /// The densest that still fits `entries` into `height` (with a gap of
+    /// at least 12 between the groups and 8 under the last one).
+    fn fitting(entries: usize, height: f32) -> Density {
+        [Density::Full, Density::Compact, Density::Icons]
+            .into_iter()
+            .find(|d| entries as f32 * (d.entry_h() + GAP) + 20.0 <= height)
+            .unwrap_or(Density::Icons)
+    }
+}
 
 /// What a rail entry signals.
 struct Item<'a> {
@@ -22,10 +54,18 @@ struct Item<'a> {
     tip: String,
 }
 
-fn entry(ui: &mut Ui, item: &Item) -> Response {
+fn entry(ui: &mut Ui, item: &Item, density: Density) -> Response {
     let p = *pal(ui);
-    let (rect, resp) = ui.allocate_exact_size(vec2(WIDTH, ENTRY_H), Sense::click());
-    let pill = Rect::from_center_size(pos2(rect.center().x, rect.top() + 18.0), vec2(44.0, 26.0));
+    let (rect, resp) = ui.allocate_exact_size(vec2(WIDTH, density.entry_h()), Sense::click());
+    let (pill_y, pill_h, label_y) = match density {
+        Density::Full => (18.0, 26.0, Some(40.0)),
+        Density::Compact => (13.0, 24.0, Some(31.5)),
+        Density::Icons => (17.0, 28.0, None),
+    };
+    let pill = Rect::from_center_size(
+        pos2(rect.center().x, rect.top() + pill_y),
+        vec2(44.0, pill_h),
+    );
     if item.selected {
         ui.painter()
             .rect_filled(pill, CornerRadius::same(theme::radius::L), p.selection);
@@ -41,26 +81,33 @@ fn entry(ui: &mut Ui, item: &Item) -> Response {
         p.text_2
     };
     icons::paint(ui.painter(), item.icon, pill.center(), 18.0, fg);
-    let font = if item.selected {
-        FontId::new(size::CAPTION, theme::semibold())
-    } else {
-        FontId::new(size::CAPTION, theme::medium())
-    };
-    ui.painter().text(
-        pos2(rect.center().x, rect.top() + 40.0),
-        Align2::CENTER_CENTER,
-        item.label,
-        font,
-        fg,
-    );
+    if let Some(y) = label_y {
+        let font = if item.selected {
+            FontId::new(size::CAPTION, theme::semibold())
+        } else {
+            FontId::new(size::CAPTION, theme::medium())
+        };
+        ui.painter().text(
+            pos2(rect.center().x, rect.top() + y),
+            Align2::CENTER_CENTER,
+            item.label,
+            font,
+            fg,
+        );
+    }
     if let Some(tone) = item.dot {
         let c = tone.color(&p);
         let at = pos2(pill.center().x + 11.0, pill.center().y - 9.0);
         ui.painter().circle_filled(at, 5.0, p.chrome);
         ui.painter().circle_filled(at, 3.5, c);
     }
-    resp.on_hover_text(&item.tip)
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
+    let resp = if label_y.is_some() {
+        resp.on_hover_text(&item.tip)
+    } else {
+        // The label is not drawn: the tooltip names the page first.
+        resp.on_hover_text(format!("{}\n{}", item.label, item.tip))
+    };
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 pub fn show(
@@ -72,7 +119,7 @@ pub fn show(
     actions: &mut Vec<Action>,
 ) {
     let p = *pal(ui);
-    ui.spacing_mut().item_spacing.y = 2.0;
+    ui.spacing_mut().item_spacing.y = GAP;
     // App mark, level with the repository tabs.
     let (top, _) = ui.allocate_exact_size(vec2(WIDTH, 36.0), Sense::hover());
     let mark = Rect::from_center_size(pos2(top.center().x, top.center().y + 3.0), vec2(26.0, 26.0));
@@ -86,6 +133,10 @@ pub fn show(
         Color32::WHITE,
     );
     ui.add_space(10.0);
+    // Three entries at the bottom; the top group's size depends on the
+    // repository (Review and Actions only with a remote).
+    const BOTTOM: usize = 3;
+    let mut density = Density::fitting(BOTTOM, ui.available_height());
     if let Some(r) = repo {
         let page = r.page;
         let has_remote = r.github_remote.is_some() || r.forge_remote.is_some();
@@ -300,26 +351,41 @@ pub fn show(
             Page::Workbench,
         ));
 
-        for (item, target) in &items {
-            if entry(ui, item).clicked() && page != *target {
-                actions.push(Action::ShowPage(*target));
-            }
-        }
+        density = Density::fitting(items.len() + BOTTOM, ui.available_height());
+        // Even icons alone do not fit (not at the smallest window, but a
+        // larger UI scale could): the top group scrolls above the bottom one.
+        let bottom_h = BOTTOM as f32 * (density.entry_h() + GAP) + 20.0;
+        let top_h = (ui.available_height() - bottom_h).max(density.entry_h());
+        ui.allocate_ui_with_layout(
+            vec2(WIDTH, top_h),
+            Layout::top_down(egui::Align::Center),
+            |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("rail_top")
+                    .max_height(top_h)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = GAP;
+                        for (item, target) in &items {
+                            if entry(ui, item, density).clicked() && page != *target {
+                                actions.push(Action::ShowPage(*target));
+                            }
+                        }
+                    });
+            },
+        );
     }
 
     // Bottom: settings, terminal and the activity log.
     ui.with_layout(Layout::bottom_up(egui::Align::Center), |ui| {
-        ui.spacing_mut().item_spacing.y = 2.0;
+        ui.spacing_mut().item_spacing.y = GAP;
         ui.add_space(8.0);
         let on_settings = repo.is_some_and(|r| r.page == Page::Settings);
         let mut tip =
             "Settings: appearance, safety, git config, keys, accounts, AI, updates (Ctrl+,)"
                 .to_owned();
         if settings.safe_mode {
-            tip.push_str(
-                "
-Safe mode is on",
-            );
+            tip.push_str("\nSafe mode is on");
         }
         let gear = entry(
             ui,
@@ -330,6 +396,7 @@ Safe mode is on",
                 dot: settings.safe_mode.then_some(Tone::Warning),
                 tip,
             },
+            density,
         );
         if gear.clicked() && repo.is_some() {
             actions.push(Action::ShowPage(if on_settings {
@@ -347,6 +414,7 @@ Safe mode is on",
                 dot: None,
                 tip: "Shells in the repository folder (Ctrl+`)".into(),
             },
+            density,
         )
         .clicked()
         {
@@ -361,6 +429,7 @@ Safe mode is on",
                 dot: None,
                 tip: "Every git command, scan and API call (Ctrl+L)".into(),
             },
+            density,
         )
         .clicked()
         {

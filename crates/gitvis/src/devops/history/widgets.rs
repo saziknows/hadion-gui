@@ -22,10 +22,48 @@ use crate::views::kit;
 use crate::views::truncated;
 
 pub const LINE_H: f32 = 19.0;
-/// Characters of a line that are laid out (the rest is cut).
+/// Characters of a line that are laid out (the rest is cut, with a note
+/// saying how much).
 const MAX_CHARS: usize = 1_500;
-/// Width of one monospace character, for the horizontal extent.
-const CHAR_W: f32 = 7.6;
+
+/// Width of one character of `font` (a monospace font), for the
+/// horizontal extent of a code view.
+pub fn char_width(ui: &Ui, font: &FontId) -> f32 {
+    let g = ui
+        .painter()
+        .layout_no_wrap("0".repeat(20), font.clone(), Color32::WHITE);
+    (g.size().x / 20.0).max(1.0)
+}
+
+/// Width of the longest line of a code view (`longest` characters, capped
+/// at [`MAX_CHARS`], plus room for the "more characters" note).
+pub fn code_extent(ui: &Ui, font: &FontId, longest: usize) -> f32 {
+    let note = if longest >= MAX_CHARS { 220.0 } else { 0.0 };
+    longest.min(MAX_CHARS) as f32 * char_width(ui, font) + note
+}
+
+/// The size range of a resizable side pane beside a content area that
+/// share `total`: the pane gets `min..=max`, but never so much that the
+/// content keeps less than `content_min` (a pane dragged wide on a big
+/// window would otherwise squeeze the content to nothing on a small one).
+pub fn split_range(total: f32, min: f32, max: f32, content_min: f32) -> (f32, f32) {
+    let hi = (total - content_min).min(max).max(min);
+    (min.min(hi), hi)
+}
+
+/// Run `add` with no vertical gap between widgets. `ScrollArea::show_rows`
+/// takes the row pitch as the row height plus the *caller's* item spacing,
+/// so a virtualised view whose rows sit edge to edge must be shown from a
+/// `Ui` with zero spacing; otherwise the rows it paints fall short of the
+/// rows it scrolls (an empty band at the bottom, and the end of a long
+/// file out of reach).
+pub fn rows_ui<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        add(ui)
+    })
+    .inner
+}
 
 // ---------------------------------------------------------------------------
 // Revision input
@@ -374,13 +412,15 @@ pub fn highlight_lines(lines: &[String], path: &str, dark: bool) -> Vec<Vec<Span
 // Drawing code
 // ---------------------------------------------------------------------------
 
-/// A line of code with syntax colours (cached by egui).
+/// A line of code with syntax colours (cached by egui). A line longer than
+/// [`MAX_CHARS`] ends with a note in `dim` saying how much was cut.
 pub fn code_galley(
     painter: &Painter,
     text: &str,
     spans: &[Span],
     font: &FontId,
     base: Color32,
+    dim: Color32,
     dark: bool,
 ) -> Arc<Galley> {
     let mut job = LayoutJob::default();
@@ -391,8 +431,28 @@ pub fn code_galley(
         color: c,
         ..Default::default()
     };
+    let cut = if chars.len() == MAX_CHARS {
+        text.chars().count() - MAX_CHARS
+    } else {
+        0
+    };
+    let note = |job: &mut LayoutJob| {
+        if cut > 0 {
+            job.append(
+                &format!("  \u{2026} {} more characters", format::count(cut)),
+                0.0,
+                TextFormat {
+                    font_id: FontId::proportional(size::SMALL),
+                    color: dim,
+                    valign: egui::Align::Center,
+                    ..Default::default()
+                },
+            );
+        }
+    };
     if spans.is_empty() {
         job.append(&chars.iter().collect::<String>(), 0.0, fmt(base));
+        note(&mut job);
         return painter.layout_job(job);
     }
     let mut pos = 0usize;
@@ -421,6 +481,7 @@ pub fn code_galley(
     if pos < chars.len() {
         job.append(&chars[pos..].iter().collect::<String>(), 0.0, fmt(base));
     }
+    note(&mut job);
     painter.layout_job(job)
 }
 
@@ -480,8 +541,9 @@ pub fn diff_view(ui: &mut Ui, id: &str, d: &DiffShow) {
     }
     let font = FontId::monospace(size::MONO);
     let num_font = FontId::monospace(size::CAPTION);
-    let width = (d.longest as f32 * CHAR_W + 120.0).max(ui.available_width() - 2.0);
+    let width = (code_extent(ui, &font, d.longest) + 120.0).max(ui.available_width() - 2.0);
     code_frame(ui).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
         egui::ScrollArea::both()
             .id_salt(("hist_diff", id))
             .auto_shrink([false, false])
@@ -546,7 +608,7 @@ pub fn diff_view(ui: &mut Ui, id: &str, d: &DiffShow) {
                     } else {
                         p.text
                     };
-                    let g = code_galley(&painter, &line.text, spans, &font, base, dark);
+                    let g = code_galley(&painter, &line.text, spans, &font, base, p.text_3, dark);
                     painter.galley(pos2(rect.left() + 104.0, mid - g.size().y / 2.0), g, base);
                 }
             });
@@ -566,9 +628,11 @@ pub fn text_view(ui: &mut Ui, id: &str, doc: &TextDoc, mark: Option<u32>, scroll
     let num_font = FontId::monospace(size::CAPTION);
     let digits = doc.lines.len().to_string().len() as f32;
     let gutter = 18.0 + digits * 7.0;
-    let width = (doc.longest as f32 * CHAR_W + gutter + 30.0).max(ui.available_width() - 2.0);
+    let width =
+        (code_extent(ui, &font, doc.longest) + gutter + 30.0).max(ui.available_width() - 2.0);
     let avail_h = ui.available_height();
     code_frame(ui).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
         let mut area = egui::ScrollArea::both()
             .id_salt(("hist_text", id))
             .auto_shrink([false, false]);
@@ -601,7 +665,15 @@ pub fn text_view(ui: &mut Ui, id: &str, doc: &TextDoc, mark: Option<u32>, scroll
                     .filter(|_| doc.dark == dark)
                     .map(Vec::as_slice)
                     .unwrap_or(&[]);
-                let g = code_galley(&painter, &doc.lines[i], spans, &font, p.text, dark);
+                let g = code_galley(
+                    &painter,
+                    &doc.lines[i],
+                    spans,
+                    &font,
+                    p.text,
+                    p.text_3,
+                    dark,
+                );
                 painter.galley(
                     pos2(rect.left() + gutter + 4.0, mid - g.size().y / 2.0),
                     g,
