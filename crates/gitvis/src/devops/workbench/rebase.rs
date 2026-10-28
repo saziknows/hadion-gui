@@ -38,6 +38,8 @@ pub struct Rebase {
     pub last: Option<Result<Outcome, String>>,
     /// Where the todo and messages go, fixed when the confirmation opens.
     pub work: Option<PathBuf>,
+    /// Steps to set once the plan loads (`Act::RebasePlan`).
+    pub pending_marks: Option<Vec<(String, Step)>>,
 }
 
 fn load(cx: &mut Ctx, repo: &mut RepoState, base: String) {
@@ -110,6 +112,14 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             repo.devops.workbench.tab = super::Tab::Rebase;
             // From the selected commit on: its parent is the base.
             load(cx, repo, format!("{sha}^"));
+            if repo.devops.workbench.rebase.suggestions.is_none() {
+                suggest(cx, repo, false);
+            }
+        }
+        Act::RebasePlan { base, marks } => {
+            repo.devops.workbench.tab = super::Tab::Rebase;
+            repo.devops.workbench.rebase.pending_marks = Some(marks);
+            load(cx, repo, base);
             if repo.devops.workbench.rebase.suggestions.is_none() {
                 suggest(cx, repo, false);
             }
@@ -246,6 +256,23 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                 r.plan = Plan::new(l.commits.clone());
                 r.focused = None;
                 r.dragging = None;
+                if let Some(marks) = r.pending_marks.take() {
+                    let missing =
+                        gitvis_core::devops::history::multi::apply_marks(&mut r.plan, &marks);
+                    if !missing.is_empty() {
+                        cx.toast(
+                            crate::state::ToastKind::Info,
+                            format!(
+                                "{} of the picked commits are not in this plan (merges, or outside {}..HEAD)",
+                                missing.len(),
+                                l.base
+                            ),
+                        );
+                    }
+                }
+            }
+            if res.is_err() {
+                r.pending_marks = None;
             }
             r.loaded = Some(res);
         }
