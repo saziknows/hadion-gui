@@ -291,7 +291,7 @@ pub fn show(
         );
         items.push((
             Item {
-                icon: Icon::Terminal,
+                icon: Icon::Wrench,
                 label: "Tools",
                 selected: page == Page::Workbench,
                 dot,
@@ -355,7 +355,7 @@ Safe mode is on",
         if entry(
             ui,
             &Item {
-                icon: Icon::List,
+                icon: Icon::Activity,
                 label: "Activity",
                 selected: settings.show_activity,
                 dot: None,

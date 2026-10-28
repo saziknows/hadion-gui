@@ -73,6 +73,7 @@ for f in LICENSE LICENSE.md LICENSE.txt LICENSE-MIT LICENSE-APACHE; do
 done
 [ "$found_licence" = 1 ] || echo "warning: the repository has no LICENSE file; only the font licences are packaged" >&2
 cp "$root"/crates/gitvis/assets/fonts/*-OFL.txt "$stage/licenses/"
+cp "$root"/crates/gitvis/assets/fonts/*-LICENSE.txt "$stage/licenses/"
 # Every crate compiled into gitvis, with its licence files.
 notice_args="run --quiet --locked -p gitvis-core --example notices"
 [ "$profile" = release ] && notice_args="$notice_args --release"

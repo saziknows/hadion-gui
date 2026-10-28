@@ -18,6 +18,7 @@ const MIT: &str = include_str!("../../../../../LICENSE-MIT");
 const APACHE: &str = include_str!("../../../../../LICENSE-APACHE");
 const INTER_OFL: &str = include_str!("../../../assets/fonts/Inter-OFL.txt");
 const JETBRAINS_OFL: &str = include_str!("../../../assets/fonts/JetBrainsMono-OFL.txt");
+const LUCIDE: &str = include_str!("../../../assets/fonts/Lucide-LICENSE.txt");
 
 /// `(crate, licence, what gitvis uses it for)`.
 const CRATES: &[(&str, &str, &str)] = &[
@@ -62,7 +63,7 @@ pub struct State {
     /// The update log's most recent attempt.
     last_update: Vec<String>,
     /// The licence shown in full (0 MIT, 1 Apache-2.0, 2 Inter, 3 JetBrains
-    /// Mono).
+    /// Mono, 4 Lucide).
     licence_open: Option<usize>,
 }
 
@@ -292,6 +293,13 @@ pub fn show(
                     "Bundled in the executable (variable font); the licence file ships beside gitvis in the installer and the zip.",
                     "https://www.jetbrains.com/lp/mono/",
                     JETBRAINS_OFL,
+                ),
+                (
+                    "Lucide icons",
+                    "ISC",
+                    "Every icon in gitvis (lucide-static 1.53.0, bundled in the executable); the licence file ships beside gitvis in the installer and the zip.",
+                    "https://lucide.dev/",
+                    LUCIDE,
                 ),
             ]
             .into_iter()

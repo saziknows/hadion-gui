@@ -190,11 +190,13 @@ pub fn semibold() -> FontFamily {
     FontFamily::Name(FAMILY_SEMIBOLD.into())
 }
 
-/// Load Inter (one variable font pinned at three weights) and JetBrains
-/// Mono, keeping egui's bundled fonts as fallbacks for glyphs they lack.
+/// Load Inter (one variable font pinned at three weights), JetBrains Mono
+/// and the Lucide icon font, keeping egui's bundled fonts as fallbacks for
+/// glyphs Inter and JetBrains Mono lack.
 pub fn install_fonts(ctx: &egui::Context) {
     static INTER: &[u8] = include_bytes!("../assets/fonts/InterVariable.ttf");
     static MONO: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-Variable.ttf");
+    static ICONS: &[u8] = include_bytes!("../assets/fonts/Lucide.ttf");
     let mut fonts = FontDefinitions::default();
     let weighted = |bytes: &'static [u8], weight: f32| {
         Arc::new(FontData::from_static(bytes).tweak(FontTweak {
@@ -238,6 +240,13 @@ pub fn install_fonts(ctx: &egui::Context) {
     let mut mono = vec!["jetbrains-mono".to_owned()];
     mono.extend(mono_fallbacks);
     fonts.families.insert(FontFamily::Monospace, mono);
+    fonts
+        .font_data
+        .insert("lucide".into(), Arc::new(FontData::from_static(ICONS)));
+    fonts.families.insert(
+        FontFamily::Name(crate::views::icons::FONT_FAMILY.into()),
+        vec!["lucide".to_owned()],
+    );
     ctx.set_fonts(fonts);
 }
 

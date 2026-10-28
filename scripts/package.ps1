@@ -90,6 +90,7 @@ if (-not $licences) {
     Write-Warning 'The repository has no LICENSE file: the package carries only the font licences.'
 }
 Copy-Item (Join-Path $root 'crates\gitvis\assets\fonts\*-OFL.txt') (Join-Path $stage 'licenses')
+Copy-Item (Join-Path $root 'crates\gitvis\assets\fonts\*-LICENSE.txt') (Join-Path $stage 'licenses')
 # Every crate compiled into gitvis, with its licence files (MIT, BSD, ISC
 # and Zlib ask for their notices to travel with binaries).
 $notices = Join-Path $stage 'licenses\THIRD-PARTY-LICENSES.txt'

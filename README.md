@@ -579,6 +579,6 @@ Unless you explicitly state otherwise, any contribution intentionally submitted 
 inclusion in gitvis by you, as defined in the Apache-2.0 license, shall be dual licensed as
 above, without any additional terms or conditions.
 
-The bundled Inter and JetBrains Mono fonts are under the SIL Open Font License 1.1 (their
-licences are in `crates/gitvis/assets/fonts`); the crates gitvis is built from keep their own
+The bundled Inter and JetBrains Mono fonts are under the SIL Open Font License 1.1 and the
+Lucide icons under the ISC licence (their licences are in `crates/gitvis/assets/fonts`); the crates gitvis is built from keep their own
 licences, collected in each release's `licenses/THIRD-PARTY-LICENSES.txt`.
