@@ -217,7 +217,7 @@ fn discover_windows() -> Discovery {
         looked.push(format!("next to {}", git.display()));
         git_bash_near(&git)
     });
-    let bash = from_git.map(|p| (p, "next to git on PATH")).or_else(|| {
+    let bash = from_git.map(|p| (p, "next to git")).or_else(|| {
         let mut roots = vec![program_files.join("Git")];
         if let Some(x86) = env_path("ProgramFiles(x86)") {
             roots.push(x86.join("Git"));
@@ -397,9 +397,31 @@ fn single_quoted_posix(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+/// A path as the user's OS writes it: `C:/Users/me/repo/` (how libgit2
+/// reports a working folder) becomes `C:\Users\me\repo`; trailing
+/// separators go (except at a root).
+pub fn native_path(path: &Path) -> String {
+    let s = path.display().to_string();
+    let b = s.as_bytes();
+    let drive = b.len() >= 2 && b[1] == b':' && b[0].is_ascii_alphabetic();
+    if drive || s.starts_with(r"\\") {
+        let s = s.replace('/', "\\");
+        let t = s.trim_end_matches('\\');
+        if t.len() <= 2 {
+            format!("{t}\\")
+        } else {
+            t.to_owned()
+        }
+    } else if s.len() > 1 {
+        s.trim_end_matches('/').to_owned()
+    } else {
+        s
+    }
+}
+
 /// The command (without Enter) that moves `kind` to `dir`.
 pub fn cd_command(kind: ShellKind, dir: &Path) -> String {
-    let d = dir.display().to_string();
+    let d = native_path(dir);
     match kind {
         ShellKind::Pwsh | ShellKind::WindowsPowerShell => {
             format!("Set-Location -LiteralPath '{}'", d.replace('\'', "''"))
@@ -451,6 +473,23 @@ mod tests {
 
     #[test]
     fn paths() {
+        assert_eq!(
+            native_path(Path::new("C:/Users/me/repo/")),
+            r"C:\Users\me\repo"
+        );
+        assert_eq!(native_path(Path::new(r"C:\a\b")), r"C:\a\b");
+        assert_eq!(native_path(Path::new("C:/")), r"C:\");
+        assert_eq!(native_path(Path::new("/home/me/repo/")), "/home/me/repo");
+        assert_eq!(native_path(Path::new("/")), "/");
+        // libgit2's form works for every shell.
+        assert_eq!(
+            cd_command(ShellKind::Cmd, Path::new("C:/x y/")),
+            r#"cd /d "C:\x y""#
+        );
+        assert_eq!(
+            cd_command(ShellKind::GitBash, Path::new("C:/x y/")),
+            "cd '/c/x y'"
+        );
         assert_eq!(msys_path(r"D:\src\x"), "/d/src/x");
         assert_eq!(msys_path("/already/posix"), "/already/posix");
         assert_eq!(wsl_path(r"C:\a"), "/mnt/c/a");

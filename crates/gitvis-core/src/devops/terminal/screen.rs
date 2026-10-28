@@ -114,10 +114,10 @@ impl Line {
                 continue;
             }
             for (i, ch) in run.text.chars().enumerate() {
-                if let Some(c) = out.get_mut(col + i) {
-                    if ch != ' ' {
-                        *c = ch.to_string();
-                    }
+                if let Some(c) = out.get_mut(col + i)
+                    && ch != ' '
+                {
+                    *c = ch.to_string();
                 }
             }
         }

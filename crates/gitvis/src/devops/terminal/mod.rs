@@ -241,6 +241,8 @@ pub struct State {
     last_pass: Option<u64>,
     /// Scripts: open the "+" menu (`new`) or the grid's context menu.
     open_menu: Option<String>,
+    /// Scripts: scroll the Settings section to the detected shells.
+    settings_scroll: bool,
     /// Synthetic key events from `term-press`, queued for the next frame.
     injected: Vec<egui::Event>,
     /// A paste asked for from the context menu goes to this tab.
@@ -280,8 +282,7 @@ impl State {
 
     /// Start shell discovery (once, unless `force`).
     fn discover(&mut self, force: bool) {
-        if matches!(self.shells, Shells::Loading(..)) || (!force && self.shells.ready().is_some())
-        {
+        if matches!(self.shells, Shells::Loading(..)) || (!force && self.shells.ready().is_some()) {
             return;
         }
         let (tx, rx) = mpsc::channel();
@@ -421,6 +422,8 @@ pub enum Act {
     Press(String),
     /// Scripts: open the "+" menu (`new`) or the context menu (`context`).
     Menu(String),
+    /// Scripts: scroll Settings > Terminal to the detected shells.
+    SettingsScroll,
 }
 
 pub enum Msg {}
@@ -569,6 +572,7 @@ fn handle(st: &mut State, act: Act) {
         Act::Focus => st.focus_next = true,
         Act::Press(spec) => st.injected.extend(input::parse_press(&spec)),
         Act::Menu(which) => st.open_menu = Some(which),
+        Act::SettingsScroll => st.settings_scroll = true,
     }
 }
 
@@ -645,9 +649,11 @@ pub fn tick(_cx: &mut Ctx, st: &mut State, g: &mut GlobalCx) {
 /// `term-close`, `term-scroll N` (lines up; negative down; 0 bottom),
 /// `term-select R0 C0 R1 C1` (view rows / columns), `term-select-all`,
 /// `term-copy`, `term-focus`, `term-restart`, `term-kill`, `term-cd`,
-/// `term-clear`, `term-shells`, `term-menu new|context`, `term-press KEYS` (synthetic key presses,
-/// e.g. `ctrl+l tab e c h o space h i enter`, which meet the app's
-/// shortcuts like real keys).
+/// `term-clear`, `term-shells`, `term-menu new|context` (the context menu
+/// opens only while the pointer is over the window),
+/// `term-settings-scroll` (Settings → Terminal down to the shells),
+/// `term-press KEYS` (synthetic key presses, e.g. `ctrl+l tab e c h o
+/// space h i enter`, which meet the app's shortcuts like real keys).
 pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
     let num = |s: &str| s.trim().parse::<isize>().ok();
     let a = match cmd {
@@ -677,6 +683,7 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         "term-shells" => Act::Discover,
         "term-press" => Act::Press(arg.to_owned()),
         "term-menu" => Act::Menu(arg.trim().to_owned()),
+        "term-settings-scroll" => Act::SettingsScroll,
         _ => return None,
     };
     Some(vec![a.into()])

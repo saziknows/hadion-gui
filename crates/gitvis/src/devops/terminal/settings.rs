@@ -4,6 +4,7 @@
 
 use egui::{FontId, RichText, Ui};
 use gitvis_core::devops::terminal::Status;
+use gitvis_core::devops::terminal::shells::native_path;
 
 use super::{Act, CursorStyle, FONT_SIZES, SCROLLBACKS, Shells, State};
 use crate::format;
@@ -13,7 +14,12 @@ use crate::views::form;
 use crate::views::icons::{Icon, IconButton};
 use crate::views::kit::{self, Col};
 
-pub(super) fn show(ui: &mut Ui, st: &mut State, settings: &mut Settings, actions: &mut Vec<Action>) {
+pub(super) fn show(
+    ui: &mut Ui,
+    st: &mut State,
+    settings: &mut Settings,
+    actions: &mut Vec<Action>,
+) {
     kit::page_header(
         ui,
         "Terminal",
@@ -65,10 +71,16 @@ fn shell_section(ui: &mut Ui, st: &State, settings: &mut Settings) {
                 options.extend(d.shells.iter().map(|s| (s.id.clone(), s.name.clone())));
                 let current = d.pick(&prefs.default_shell);
                 form::field(ui, "Default shell", None, |ui| {
-                    form::select(ui, "term_default_shell", &mut prefs.default_shell, &options, 300.0);
+                    form::select(
+                        ui,
+                        "term_default_shell",
+                        &mut prefs.default_shell,
+                        &options,
+                        300.0,
+                    );
                 });
                 if let Some(s) = current {
-                    kit::muted(ui, &format!("Starts {}", s.command_line()));
+                    kit::secondary(ui, &format!("Starts {}", s.command_line()));
                 }
                 if !prefs.default_shell.is_empty() && d.find(&prefs.default_shell).is_none() {
                     form::error(
@@ -81,16 +93,23 @@ fn shell_section(ui: &mut Ui, st: &State, settings: &mut Settings) {
                 }
             }
             Some(_) => {
-                kit::muted(ui, "No shell was found on this machine (see Detected shells).");
+                kit::secondary(
+                    ui,
+                    "No shell was found on this machine (see Detected shells).",
+                );
             }
             None => kit::loading(ui, "Looking for shells…"),
         }
         ui.add_space(space::S);
-        form::checkbox(ui, &mut prefs.start_in_repo, "Start in the repository folder");
+        form::checkbox(
+            ui,
+            &mut prefs.start_in_repo,
+            "Start in the repository folder",
+        );
         let home = std::env::var("USERPROFILE")
             .or_else(|_| std::env::var("HOME"))
             .unwrap_or_else(|_| "your home folder".into());
-        kit::muted(
+        kit::secondary(
             ui,
             &if prefs.start_in_repo {
                 "New terminals open in the active repository's working folder. Use Go to repository in the panel to move an open one there.".to_owned()
@@ -187,7 +206,7 @@ fn behaviour_section(ui: &mut Ui, settings: &mut Settings) {
         });
         // About 60 bytes per line of history plus its text.
         let estimate = prefs.scrollback * 160;
-        kit::muted(
+        kit::secondary(
             ui,
             &format!(
                 "Applies to terminals opened from now on. A full history of 120-column lines takes about {} per terminal.",
@@ -196,7 +215,7 @@ fn behaviour_section(ui: &mut Ui, settings: &mut Settings) {
         );
         ui.add_space(space::S);
         form::checkbox(ui, &mut prefs.copy_on_select, "Copy on select");
-        kit::muted(
+        kit::secondary(
             ui,
             "Selected text goes to the clipboard as soon as the mouse is released. Otherwise use Ctrl+C (with a selection), Ctrl+Shift+C or the right-click menu.",
         );
@@ -205,6 +224,10 @@ fn behaviour_section(ui: &mut Ui, settings: &mut Settings) {
 
 fn detected_section(ui: &mut Ui, st: &mut State, actions: &mut Vec<Action>) {
     let p = *pal(ui);
+    // `term-settings-scroll` (scripts): bring this part of the page up.
+    if std::mem::take(&mut st.settings_scroll) {
+        ui.scroll_to_cursor(Some(egui::Align::TOP));
+    }
     let count = st.shells.ready().map(|d| d.shells.len());
     kit::section_with(ui, "Detected shells", count, |ui| {
         let loading = matches!(st.shells, Shells::Loading(..));
@@ -271,7 +294,7 @@ fn detected_section(ui: &mut Ui, st: &mut State, actions: &mut Vec<Action>) {
                             .color(p.text),
                     );
                 });
-                kit::muted(ui, &format!("Looked at {looked}."));
+                kit::secondary(ui, &format!("Looked at {looked}."));
                 if name == "PowerShell 7" {
                     kit::secondary(ui, "Install it with:");
                     kit::code_block(ui, "winget install --id Microsoft.PowerShell", actions);
@@ -288,7 +311,7 @@ fn detected_section(ui: &mut Ui, st: &mut State, actions: &mut Vec<Action>) {
 fn running_section(ui: &mut Ui, st: &State) {
     kit::section(ui, "Open terminals", Some(st.tabs.len()));
     if st.tabs.is_empty() {
-        kit::muted(
+        kit::secondary(
             ui,
             "None. Open the panel with Ctrl+` or New terminal above; a terminal keeps running while the panel is hidden.",
         );
@@ -318,7 +341,7 @@ fn running_section(ui: &mut Ui, st: &State) {
                 .unwrap_or_default();
             vec![
                 t.title(),
-                t.cwd.display().to_string(),
+                native_path(&t.cwd),
                 status,
                 received,
                 sent,
@@ -347,16 +370,31 @@ fn keys_section(ui: &mut Ui) {
         "While the terminal has focus every key goes to the shell, including Tab, the arrows and the app's own shortcuts (Ctrl+K, Ctrl+L, Ctrl+Z, Ctrl+W). Ctrl+` still hides the panel; click outside the terminal to use the app's shortcuts.",
     );
     ui.add_space(space::S);
-    kit::kv(ui, 190.0, |kv| {
+    kit::kv(ui, 260.0, |kv| {
         kv.text("Ctrl+`", "Show or hide the terminal panel");
-        kv.text("Ctrl+C", "Copy when text is selected, otherwise interrupt (^C)");
+        kv.text(
+            "Ctrl+C",
+            "Copy when text is selected, otherwise interrupt (^C)",
+        );
         kv.text("Ctrl+Shift+C, Ctrl+Insert", "Copy the selection");
-        kv.text("Ctrl+V, Ctrl+Shift+V, Shift+Insert", "Paste (bracketed when the program asks for it)");
+        kv.text(
+            "Ctrl+V, Ctrl+Shift+V, Shift+Insert",
+            "Paste (bracketed when the program asks for it)",
+        );
         kv.text("Shift+PgUp / Shift+PgDn", "Scroll the history a page");
         kv.text("Ctrl+Shift+Up / Down", "Scroll a line");
-        kv.text("Shift+Home / Shift+End", "Oldest line / back to the live screen");
+        kv.text(
+            "Shift+Home / Shift+End",
+            "Oldest line / back to the live screen",
+        );
         kv.text("Double / triple click", "Select a word / a line");
-        kv.text("Shift+drag, Shift+right click", "Select and open the menu in programs that use the mouse");
-        kv.text("Mouse wheel", "History; arrow keys in full-screen programs; mouse reports when the program asks");
+        kv.text(
+            "Shift+drag, Shift+right click",
+            "Select and open the menu in programs that use the mouse",
+        );
+        kv.text(
+            "Mouse wheel",
+            "History; arrow keys in full-screen programs; mouse reports when the program asks",
+        );
     });
 }

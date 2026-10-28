@@ -437,7 +437,10 @@ mod tests {
     #[test]
     fn copy_paste_and_scrolling() {
         // Ctrl+C: copy with a selection, interrupt without.
-        assert_eq!(translate(&[Event::Copy], Modes::default(), true), vec![Out::Copy]);
+        assert_eq!(
+            translate(&[Event::Copy], Modes::default(), true),
+            vec![Out::Copy]
+        );
         assert_eq!(bytes(&[Event::Copy]), [0x03]);
         assert_eq!(bytes(&[Event::Cut]), [0x18]);
         assert_eq!(
@@ -455,7 +458,10 @@ mod tests {
         let t = |e| translate(&[e], Modes::default(), false);
         assert_eq!(t(key(Key::C, cs)), vec![Out::Copy]);
         assert_eq!(t(key(Key::V, cs)), vec![Out::RequestPaste]);
-        assert_eq!(t(key(Key::PageUp, Modifiers::SHIFT)), vec![Out::ScrollPages(1)]);
+        assert_eq!(
+            t(key(Key::PageUp, Modifiers::SHIFT)),
+            vec![Out::ScrollPages(1)]
+        );
         assert_eq!(t(key(Key::End, Modifiers::SHIFT)), vec![Out::ScrollBottom]);
         assert_eq!(t(key(Key::ArrowUp, cs)), vec![Out::ScrollLines(1)]);
     }

@@ -9,13 +9,14 @@ use egui::{
     Align, Align2, Color32, CornerRadius, EventFilter, FontId, Id, Layout, Pos2, Rect, RichText,
     Sense, Stroke, StrokeKind, Ui, UiBuilder, pos2, vec2,
 };
+use gitvis_core::devops::terminal::Status;
 use gitvis_core::devops::terminal::keys::{
-    self, Key as TKey, MouseButton, MouseEvent, MouseKind, MouseMode, Mods,
+    self, Key as TKey, Mods, MouseButton, MouseEvent, MouseKind, MouseMode,
 };
 use gitvis_core::devops::terminal::screen::{
     ANSI_DARK, ANSI_LIGHT, Point, Selection, View, resolve,
 };
-use gitvis_core::devops::terminal::Status;
+use gitvis_core::devops::terminal::shells::native_path;
 
 use super::{Act, CursorStyle, State, Tab, act};
 use crate::devops::global::GlobalView;
@@ -122,7 +123,7 @@ fn strip(ui: &mut Ui, st: &mut State, v: &GlobalView, actions: &mut Vec<Action>)
                     .on_hover_text(format!(
                         "Start {} again in {}",
                         tab.shell.name,
-                        tab.cwd.display()
+                        native_path(&tab.cwd)
                     ))
                     .clicked()
                 {
@@ -142,11 +143,11 @@ fn strip(ui: &mut Ui, st: &mut State, v: &GlobalView, actions: &mut Vec<Action>)
                 let tip = match repo {
                     Some(r) if alt => format!(
                         "A full-screen program is running; quit it to change to {}",
-                        r.workdir.display()
+                        native_path(&r.workdir)
                     ),
                     Some(r) => format!(
                         "Type the command that changes to {}\n{}",
-                        r.workdir.display(),
+                        native_path(&r.workdir),
                         gitvis_core::devops::terminal::shells::cd_command(
                             tab.shell.kind,
                             &r.workdir
@@ -202,7 +203,11 @@ fn tabs(ui: &mut Ui, st: &mut State, v: &GlobalView, actions: &mut Vec<Action>) 
         let badge = match &status {
             Status::Exited { code, .. } => Some((
                 format!("exit {code}"),
-                if *code == 0 { Tone::Neutral } else { Tone::Danger },
+                if *code == 0 {
+                    Tone::Neutral
+                } else {
+                    Tone::Danger
+                },
             )),
             Status::Failed(_) => Some(("failed".to_owned(), Tone::Danger)),
             _ => None,
@@ -260,19 +265,19 @@ fn tabs(ui: &mut Ui, st: &mut State, v: &GlobalView, actions: &mut Vec<Action>) 
         }
         let cy = tab_rect.center().y;
         let mark_w = mark.size().x;
-        painter.galley(pos2(rect.left() + 12.0, cy - mark.size().y / 2.0), mark, p.text_3);
+        painter.galley(
+            pos2(rect.left() + 12.0, cy - mark.size().y / 2.0),
+            mark,
+            p.text_3,
+        );
         let x = rect.left() + 12.0 + mark_w + 8.0;
-        painter.galley(pos2(x, cy - title.size().y / 2.0), title.clone(), title_color);
+        painter.galley(
+            pos2(x, cy - title.size().y / 2.0),
+            title.clone(),
+            title_color,
+        );
         if let Some((text, tone)) = &badge {
-            kit::paint_badge(
-                &painter,
-                &p,
-                dark,
-                rect.right() - 30.0,
-                cy,
-                text,
-                *tone,
-            );
+            kit::paint_badge(&painter, &p, dark, rect.right() - 30.0, cy, text, *tone);
         }
         let close_center = pos2(rect.right() - 16.0, cy);
         if matches!(status, Status::Starting) {
@@ -317,7 +322,7 @@ fn tab_tooltip(ui: &mut Ui, tab: &Tab) {
     );
     ui.label(kit::mono(tab.shell.command_line()).color(p.text_2));
     ui.label(
-        RichText::new(format!("In {}", tab.cwd.display()))
+        RichText::new(format!("In {}", native_path(&tab.cwd)))
             .size(size::SMALL)
             .color(p.text),
     );
@@ -326,7 +331,10 @@ fn tab_tooltip(ui: &mut Ui, tab: &Tab) {
         Status::Running { pid: Some(pid) } => format!("Running, process {pid}"),
         Status::Running { pid: None } => "Running".to_owned(),
         Status::Exited { code, after_ms } => {
-            format!("Exited with code {code} after {}", format::millis(*after_ms))
+            format!(
+                "Exited with code {code} after {}",
+                format::millis(*after_ms)
+            )
         }
         Status::Failed(e) => format!("Could not start: {e}"),
     };
@@ -420,7 +428,12 @@ fn body_view(ui: &mut Ui, st: &mut State, v: &GlobalView, body: Rect, actions: &
         let shells: Vec<(String, String)> = st
             .shells
             .ready()
-            .map(|d| d.shells.iter().map(|s| (s.id.clone(), s.name.clone())).collect())
+            .map(|d| {
+                d.shells
+                    .iter()
+                    .map(|s| (s.id.clone(), s.name.clone()))
+                    .collect()
+            })
             .unwrap_or_default();
         let dir = st.start_dir();
         if shells.is_empty() && st.shells.ready().is_some() {
@@ -435,23 +448,48 @@ fn body_view(ui: &mut Ui, st: &mut State, v: &GlobalView, body: Rect, actions: &
             }
             return;
         }
+        let folder = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| native_path(&dir));
         kit::empty_state(
             ui,
             Icon::Terminal,
             "No terminal open",
-            &format!("A new terminal starts in {}.", dir.display()),
+            &format!("Pick a shell; it starts in {folder}. Ctrl+` hides this panel."),
             None,
         );
         ui.add_space(space::M);
+        // The shells as one centred row of buttons.
+        let font = FontId::new(size::BODY, theme::medium());
+        let widths: Vec<f32> = shells
+            .iter()
+            .map(|(_, name)| {
+                ui.painter()
+                    .layout_no_wrap(name.clone(), font.clone(), Color32::WHITE)
+                    .size()
+                    .x
+                    + 2.0 * 11.0
+                    + 15.0
+                    + 7.0
+            })
+            .collect();
+        let gap = space::S;
+        let total = widths.iter().sum::<f32>() + gap * widths.len().saturating_sub(1) as f32;
         let mut picked = None;
-        ui.horizontal_wrapped(|ui| {
-            ui.set_max_width(body.width().min(640.0));
-            for (id, name) in &shells {
-                if IconButton::new(Icon::Terminal, name).show(ui).clicked() {
-                    picked = Some(Act::New(Some(id.clone())));
+        ui.allocate_ui_with_layout(
+            vec2(body.width(), 32.0),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                ui.add_space(((body.width() - total) / 2.0).max(space::M));
+                for (id, name) in &shells {
+                    if IconButton::new(Icon::Terminal, name).show(ui).clicked() {
+                        picked = Some(Act::New(Some(id.clone())));
+                    }
                 }
-            }
-        });
+            },
+        );
         if let Some(a) = picked {
             act(st, v, actions, a);
         }
@@ -531,8 +569,7 @@ fn glyph_w(st: &mut State, ctx: &egui::Context, font: &FontId, c: char, cell_w: 
         st.glyphs.clear();
         st.glyph_size = font.size;
     }
-    *st
-        .glyphs
+    *st.glyphs
         .entry(c)
         .or_insert_with(|| ctx.fonts_mut(|f| f.glyph_width(font, c)))
 }
@@ -546,10 +583,7 @@ fn grid(ui: &mut Ui, st: &mut State, v: &GlobalView, rect: Rect, actions: &mut V
     let (cw, ch) = ctx.fonts_mut(|f| (f.glyph_width(&font, 'M'), f.row_height(&font)));
     let inner = Rect::from_min_max(
         pos2(rect.left() + PAD_X, rect.top() + PAD_Y),
-        pos2(
-            rect.right() - PAD_X - SCROLLBAR_W,
-            rect.bottom() - PAD_Y,
-        ),
+        pos2(rect.right() - PAD_X - SCROLLBAR_W, rect.bottom() - PAD_Y),
     );
     let rows = ((inner.height() / ch).floor() as u16).max(2);
     let cols = ((inner.width() / cw).floor() as u16).max(2);
@@ -599,7 +633,9 @@ fn grid(ui: &mut Ui, st: &mut State, v: &GlobalView, rect: Rect, actions: &mut V
     mouse(ui, st, &resp, &view, inner, cw, ch, &prefs);
     let tab_id = st.tabs[active].id;
     let menu = context_menu(ui, st, &resp, &view);
-    draw(ui, st, &view, rect, inner, &font, cw, ch, focused, alive, &prefs, dark, &p);
+    draw(
+        ui, st, &view, rect, inner, &font, cw, ch, focused, alive, &prefs, dark, &p,
+    );
     scrollbar(ui, st, &view, rect, inner);
     if view.offset > 0 {
         jump_to_bottom(ui, st, &view, inner, &p);
@@ -681,8 +717,12 @@ fn mouse(
     let active = st.active;
     let (rows, cols) = (view.rows, view.cols);
     let cell_of = |pos: Pos2| -> (u16, u16) {
-        let r = ((pos.y - inner.top()) / ch).floor().clamp(0.0, rows as f32 - 1.0) as u16;
-        let c = ((pos.x - inner.left()) / cw).floor().clamp(0.0, cols as f32 - 1.0) as u16;
+        let r = ((pos.y - inner.top()) / ch)
+            .floor()
+            .clamp(0.0, rows as f32 - 1.0) as u16;
+        let c = ((pos.x - inner.left()) / cw)
+            .floor()
+            .clamp(0.0, cols as f32 - 1.0) as u16;
         (r, c)
     };
     let (modifiers, pointer, pressed, released) = ui.input(|i| {
@@ -735,7 +775,9 @@ fn mouse(
                             col,
                             mods,
                         };
-                        if let Some(b) = keys::encode_mouse(ev, view.mouse_mode, view.mouse_encoding) {
+                        if let Some(b) =
+                            keys::encode_mouse(ev, view.mouse_mode, view.mouse_encoding)
+                        {
                             tab.session.write(b);
                         }
                     }
@@ -838,7 +880,10 @@ fn mouse(
     {
         let pt = point(pos);
         tab.selection = Some(Selection::new(
-            Point { row: pt.row, col: 0 },
+            Point {
+                row: pt.row,
+                col: 0,
+            },
             Point {
                 row: pt.row,
                 col: cols - 1,
@@ -1173,7 +1218,11 @@ fn jump_to_bottom(ui: &mut Ui, st: &mut State, view: &View, inner: Rect, p: &Pal
     let label = format!("{} lines below", format::count(view.offset));
     let w = ui
         .painter()
-        .layout_no_wrap(label.clone(), FontId::new(size::SMALL, theme::medium()), p.text)
+        .layout_no_wrap(
+            label.clone(),
+            FontId::new(size::SMALL, theme::medium()),
+            p.text,
+        )
         .size()
         .x
         + 44.0;
@@ -1189,7 +1238,9 @@ fn jump_to_bottom(ui: &mut Ui, st: &mut State, view: &View, inner: Rect, p: &Pal
         StrokeKind::Inside,
     );
     let b = kit::overlay(ui, r, IconButton::new(Icon::ChevronDown, &label).compact());
-    if b.on_hover_text("Back to the live screen (Shift+End)").clicked() {
+    if b.on_hover_text("Back to the live screen (Shift+End)")
+        .clicked()
+    {
         let tab = &mut st.tabs[st.active];
         tab.scroll_to_bottom();
         st.focus_next = true;
