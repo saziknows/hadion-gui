@@ -221,7 +221,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
                             bottom: 28,
                         })
                         .show(ui, |ui| {
-                            ui.set_max_width(kit::DETAIL_MAX);
+                            ui.set_max_width(ui.available_width().min(kit::DETAIL_MAX));
                             ui.spacing_mut().item_spacing.y = 8.0;
                             form_view(ui, act, &files, tools.as_ref(), &workdir, actions);
                             kit::section(ui, "Local runs", Some(act.runs.len()));
@@ -339,7 +339,13 @@ fn form_view(
             .map(|f| (f.path.clone(), format!("{}  ({})", f.name, f.file_name())))
             .collect();
         form::field(ui, "Workflow", None, |ui| {
-            if form::select(ui, "ci_act_wf", &mut act.workflow, &wf_options, 420.0) {
+            if form::select(
+                ui,
+                "ci_act_wf",
+                &mut act.workflow,
+                &wf_options,
+                ui.available_width().min(420.0),
+            ) {
                 act.job.clear();
                 act.inputs.clear();
             }
@@ -364,7 +370,13 @@ fn form_view(
                 "Job",
                 Some("-j JOB: the job and the jobs it needs"),
                 |ui| {
-                    form::select(ui, "ci_act_job", &mut act.job, &jobs, 420.0);
+                    form::select(
+                        ui,
+                        "ci_act_job",
+                        &mut act.job,
+                        &jobs,
+                        ui.available_width().min(420.0),
+                    );
                 },
             );
             let mut events: Vec<String> = f
@@ -383,7 +395,13 @@ fn form_view(
                 act.event = events.first().cloned().unwrap_or_else(|| "push".to_owned());
             }
             form::field(ui, "Event", Some("The event act simulates"), |ui| {
-                form::select(ui, "ci_act_event", &mut act.event, &ev, 260.0);
+                form::select(
+                    ui,
+                    "ci_act_event",
+                    &mut act.event,
+                    &ev,
+                    ui.available_width().min(260.0),
+                );
             });
             if act.event == "workflow_dispatch"
                 && let Some(inputs) = f.dispatch.as_ref().filter(|i| !i.is_empty())

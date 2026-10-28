@@ -164,6 +164,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
             )
         },
         |ui, actions| {
+            widgets::fit_detail(ui);
             let Some(path) = selected.as_deref() else {
                 overview(ui, &list, local, actions);
                 return;

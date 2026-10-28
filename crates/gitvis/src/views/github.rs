@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use egui::text::{LayoutJob, TextFormat};
 use egui::{
@@ -15,7 +15,9 @@ use egui::{
     RichText, Sense, Stroke, Ui, pos2, vec2,
 };
 
-use gitvis_core::github::{Annotation, CheckRun, GitHubData, Job, Outcome, RateLimit, WorkflowRun};
+use gitvis_core::github::{
+    Annotation, CheckRun, GitHubData, Job, NotOnGitHub, Outcome, RateLimit, WorkflowRun,
+};
 use gitvis_core::joblog::{LogKind, LogLine};
 use gitvis_core::{Oid, Snapshot};
 
@@ -72,6 +74,8 @@ struct Cx<'a> {
     /// `ui.input().time`, for the running-arc animation.
     t: f64,
     dark: bool,
+    /// The API budget, so watching a running job can slow down or pause.
+    rate: Option<RateLimit>,
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +175,7 @@ pub fn show(
             gh_page,
             snapshot,
             devops,
+            rate,
             ..
         } = &mut *repo;
         if github_remote.is_none() {
@@ -201,7 +206,7 @@ pub fn show(
             empty_pane(ui, |ui| {
                 ui.add_space((ui.available_height() * 0.3).min(200.0));
                 ui.vertical_centered(|ui| {
-                    ui.set_max_width(320.0);
+                    ui.set_max_width(ui.available_width().min(320.0));
                     kit::loading(ui, "Loading pull requests and workflow runs…");
                 });
             });
@@ -220,6 +225,7 @@ pub fn show(
             now,
             t,
             dark: settings.dark,
+            rate: *rate,
         };
         list_pane(ui, "gh_runs", |ui| runs_list(ui, &cx, gh_page, ci, actions));
         if !compare_open {
@@ -266,8 +272,12 @@ fn page_head(
         }
         sub.push(s);
     }
-    kit::page_header(ui, title, &sub.join("  ·  "), |ui| {
-        let tip = match tab {
+    let options: Vec<(ci::Tab, &str)> = ci::Tab::ALL.iter().map(|t| (*t, t.label())).collect();
+    // Tabs, two icon buttons and their gaps.
+    let controls_w = segmented_width(ui, &options) + 2.0 * 30.0 + 16.0;
+    let (subtitle, dropped) = fit_subtitle(ui, title, &sub, controls_w);
+    kit::page_header(ui, title, &subtitle, |ui| {
+        let what = match tab {
             ci::Tab::Runs => "Refresh pull requests, runs and the selected run's jobs",
             ci::Tab::Workflows => {
                 "Re-read the workflow files, refresh the runs and the selected workflow's history"
@@ -276,6 +286,12 @@ fn page_head(
             ci::Tab::Caches => "Reload the cache usage and entries",
             ci::Tab::Validate => "Check the workflow files again",
             ci::Tab::Local => "Look for act and Docker again and re-read the workflow files",
+        };
+        // What the subtitle had no room for.
+        let tip = if dropped.is_empty() {
+            what.to_owned()
+        } else {
+            format!("{what}\n\n{}", dropped.join("\n"))
         };
         if loading && tab == ci::Tab::Runs {
             ui.add_space(6.0);
@@ -302,16 +318,45 @@ fn page_head(
             )));
         }
         ui.add_space(6.0);
-        let options: Vec<(ci::Tab, &str)> = ci::Tab::ALL.iter().map(|t| (*t, t.label())).collect();
-        if options.len() > 1 {
-            let w = segmented_width(ui, &options);
-            ui.allocate_ui_with_layout(vec2(w, 28.0), Layout::left_to_right(Align::Center), |ui| {
-                if let Some(t) = kit::segmented(ui, &options, tab) {
-                    actions.push(ci::Act::SetTab(t).into());
-                }
-            });
-        }
+        let w = segmented_width(ui, &options);
+        ui.allocate_ui_with_layout(vec2(w, 28.0), Layout::left_to_right(Align::Center), |ui| {
+            if let Some(t) = kit::segmented(ui, &options, tab) {
+                actions.push(ci::Act::SetTab(t).into());
+            }
+        });
     });
+}
+
+/// A page header's subtitle that fits beside `controls_w` points of
+/// controls on the right (`kit::page_header` puts them side by side, and
+/// they overlapped on a narrow window). Parts are dropped from the end;
+/// the first (usually the repository) always stays. Returns the subtitle
+/// and the dropped parts, for a tooltip.
+pub(crate) fn fit_subtitle(
+    ui: &Ui,
+    title: &str,
+    parts: &[String],
+    controls_w: f32,
+) -> (String, Vec<String>) {
+    // The header's frame has 24 + 16 points of margin; keep a gap of 24.
+    let room = ui.available_width() - 40.0 - 24.0 - controls_w;
+    let painter = ui.painter();
+    let width = |s: &str, size: f32| {
+        painter
+            .layout_no_wrap(s.to_owned(), FontId::proportional(size), Color32::WHITE)
+            .size()
+            .x
+    };
+    let title_w = width(title, size::HEADING);
+    let mut keep = parts.len();
+    while keep > 1 {
+        let s = parts[..keep].join("  ·  ");
+        if width(&s, size::SMALL).max(title_w) <= room {
+            break;
+        }
+        keep -= 1;
+    }
+    (parts[..keep].join("  ·  "), parts[keep..].to_vec())
 }
 
 /// Width `kit::segmented` takes, so it can sit in a right-to-left toolbar.
@@ -330,13 +375,15 @@ fn segmented_width<T>(ui: &Ui, options: &[(T, &str)]) -> f32 {
     labels + 2.0 * options.len().saturating_sub(1) as f32 + 4.0
 }
 
-/// The list pane on the left (same frame as `kit::split`).
+/// The list pane on the left (same frame as `kit::split`). It never takes
+/// more than 45% of the page, so the detail keeps room on a narrow window.
 fn list_pane(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
     let p = *pal(ui);
+    let w = ui.available_width();
     egui::Panel::left(id)
         .resizable(true)
-        .default_size(420.0)
-        .size_range(300.0..=760.0)
+        .default_size((w * 0.36).clamp(300.0, 420.0))
+        .size_range(300.0..=(w * 0.45).clamp(300.0, 760.0))
         .frame(Frame::NONE.fill(p.panel).inner_margin(Margin {
             left: 8,
             right: 8,
@@ -368,7 +415,7 @@ fn detail_pane(ui: &mut Ui, salt: impl Hash + std::fmt::Debug, add: impl FnOnce(
                             bottom: 28,
                         })
                         .show(ui, |ui| {
-                            ui.set_max_width(kit::DETAIL_MAX);
+                            ui.set_max_width(ui.available_width().min(kit::DETAIL_MAX));
                             ui.spacing_mut().item_spacing.y = 8.0;
                             add(ui)
                         });
@@ -476,8 +523,21 @@ fn actions_tab(
     let show_timestamps = page.show_timestamps;
     let detail = page.runs.entry(run_id).or_default();
 
+    // The job in the viewer: while it runs, keep its progress fresh; once
+    // a watched job has finished, download its log.
+    if let Some(job) = detail
+        .selected_job
+        .and_then(|id| detail.jobs().iter().find(|j| j.id == id))
+    {
+        watch_tick(ui, cx, run_id, job, detail, ci, actions);
+    }
+
     // Log viewer at the bottom, when a job is selected.
     if let Some(job_id) = detail.selected_job {
+        let watch = ci
+            .watch
+            .as_ref()
+            .filter(|w| w.run == run_id && w.job == job_id);
         let p = *pal(ui);
         let fill = if ui.visuals().dark_mode {
             p.chrome
@@ -503,6 +563,7 @@ fn actions_tab(
                     run,
                     detail,
                     job_id,
+                    watch,
                     &mut filter,
                     &mut timestamps,
                     actions,
@@ -536,6 +597,82 @@ fn actions_tab(
         );
         run_facts(ui, cx, run, detail, actions);
     });
+}
+
+/// What a job's Log button (or a click on one of its steps) asks for. A
+/// finished job's log is downloaded. A job GitHub has no log for yet
+/// (running, queued) or at all (never ran) is only selected: requesting
+/// its log would fail with HTTP 404, and the viewer shows its progress.
+pub fn show_log_action(run: u64, job: &Job, step: Option<u32>) -> Action {
+    if ci::no_log_yet(job) {
+        ci::Act::OpenJob { run, job: job.id }.into()
+    } else {
+        Action::ShowLog {
+            run,
+            job: job.id,
+            step,
+        }
+    }
+}
+
+/// Fewer than this many API requests left: no more progress reads.
+fn watch_paused(rate: Option<RateLimit>) -> bool {
+    rate.is_some_and(|r| r.remaining < ci::POLL_FLOOR)
+}
+
+/// The job shown in the log viewer, once per frame. A running or queued
+/// job's progress is read again when its interval is up (only while this
+/// view is on screen, so a hidden page costs nothing); a watched job that
+/// has finished gets its log downloaded.
+fn watch_tick(
+    ui: &Ui,
+    cx: &Cx,
+    run: u64,
+    job: &Job,
+    detail: &RunDetail,
+    ci: &ci::State,
+    actions: &mut Vec<Action>,
+) {
+    if !job.outcome().is_running() {
+        let waiting = matches!(
+            detail.logs.get(&job.id),
+            Some(LogState {
+                loading: false,
+                doc: None
+            })
+        );
+        if waiting && !job.never_ran() {
+            actions.push(
+                ci::Act::FetchLog {
+                    run,
+                    job: job.id,
+                    attempt: 0,
+                }
+                .into(),
+            );
+        }
+        return;
+    }
+    let w = ci
+        .watch
+        .as_ref()
+        .filter(|w| w.run == run && w.job == job.id);
+    if detail.jobs_loading || w.is_some_and(|w| w.in_flight) || watch_paused(cx.rate) {
+        return;
+    }
+    // A tight budget: the slowest pace.
+    let low = cx.rate.is_some_and(|r| r.remaining < r.limit / 10);
+    let interval = match w {
+        _ if low => ci::POLL_MAX,
+        Some(w) => w.interval,
+        None => ci::POLL_MIN,
+    };
+    let last = w.map(|w| w.polled).or(detail.jobs_at);
+    let now = std::time::Instant::now();
+    match last.map(|t| t + interval) {
+        Some(due) if due > now => ui.ctx().request_repaint_after(due - now),
+        _ => actions.push(ci::Act::PollJob { run, job: job.id }.into()),
+    }
 }
 
 /// The pick box at the left of a run row.
@@ -1214,13 +1351,13 @@ fn jobs_rows(
                 .compact()
                 .selected(selected)
                 .show(&mut child)
-                .on_hover_text("Show this job's log below");
-            if btn.clicked() {
-                actions.push(Action::ShowLog {
-                    run: run.id,
-                    job: job.id,
-                    step: None,
+                .on_hover_text(if job.outcome().is_running() {
+                    "Show this job's progress below (its log comes when it finishes)"
+                } else {
+                    "Show this job's log below"
                 });
+            if btn.clicked() {
+                actions.push(show_log_action(run.id, job, None));
             }
             let right = btn.rect.left() - space::M;
             job_row(ui, cx, job, rect, right, expanded, selected);
@@ -1238,11 +1375,7 @@ fn jobs_rows(
                 actions,
             );
             if ui.button("Show log").clicked() {
-                actions.push(Action::ShowLog {
-                    run: run.id,
-                    job: job.id,
-                    step: None,
-                });
+                actions.push(show_log_action(run.id, job, None));
                 ui.close();
             }
             if ui.button("Load annotations").clicked() {
@@ -1333,6 +1466,17 @@ fn job_row(ui: &Ui, cx: &Cx, job: &Job, rect: Rect, right: f32, expanded: bool, 
     }
 }
 
+/// A step's outcome dot. A step that has not started yet gets a quiet grey
+/// ring: the amber "queued" ring made a running job's later steps look
+/// like warnings.
+fn step_dot(painter: &egui::Painter, p: &Palette, o: Outcome, center: egui::Pos2, t: f64) {
+    if o == Outcome::Queued {
+        painter.circle_stroke(center, 4.5, Stroke::new(1.2, p.text_3));
+    } else {
+        outcome_dot(painter, o, center, 5.0, t);
+    }
+}
+
 fn chevron(p: &egui::Painter, c: egui::Pos2, open: bool, color: Color32) {
     let s = 3.5;
     let pts = if open {
@@ -1374,7 +1518,7 @@ fn steps_and_annotations(
         let mid = rect.center().y;
         let outcome = step.outcome();
         let x0 = rect.left() + STEP_INDENT;
-        outcome_dot(painter, outcome, pos2(x0 + 5.0, mid), 5.0, cx.t);
+        step_dot(painter, &p, outcome, pos2(x0 + 5.0, mid), cx.t);
         painter.text(
             pos2(x0 + 34.0, mid),
             Align2::RIGHT_CENTER,
@@ -1445,11 +1589,7 @@ fn steps_and_annotations(
         );
         painter.galley(pos2(name_x, mid - g.size().y / 2.0), g, p.text);
         if resp.clicked() {
-            actions.push(Action::ShowLog {
-                run: run.id,
-                job: job.id,
-                step: Some(step.number),
-            });
+            actions.push(show_log_action(run.id, job, Some(step.number)));
         }
     }
 
@@ -1554,6 +1694,37 @@ enum LogRow {
     Line(usize),
 }
 
+/// What the log panel shows for the selected job.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Panel {
+    /// The downloaded log.
+    Log,
+    /// Running or queued: GitHub publishes the log when the job finishes,
+    /// so the panel shows the job's progress.
+    Live,
+    /// The job never ran, so it has no log.
+    NeverRan,
+    /// Downloading, not asked for, or the download failed.
+    Pending,
+}
+
+fn panel_for(job: Option<&Job>, state: Option<&LogState>) -> Panel {
+    if matches!(
+        state,
+        Some(LogState {
+            doc: Some(Ok(_)),
+            ..
+        })
+    ) {
+        return Panel::Log;
+    }
+    match job {
+        Some(j) if j.outcome().is_running() => Panel::Live,
+        Some(j) if j.never_ran() => Panel::NeverRan,
+        _ => Panel::Pending,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn log_viewer(
     ui: &mut Ui,
@@ -1561,12 +1732,14 @@ fn log_viewer(
     run: &WorkflowRun,
     detail: &mut RunDetail,
     job_id: u64,
+    watch: Option<&ci::JobWatch>,
     filter: &mut String,
     show_timestamps: &mut bool,
     actions: &mut Vec<Action>,
 ) {
     let p = *pal(ui);
     let job = detail.jobs().iter().find(|j| j.id == job_id).cloned();
+    let panel = panel_for(job.as_ref(), detail.logs.get(&job_id));
     let job_name = job
         .as_ref()
         .map(|j| j.name.clone())
@@ -1589,7 +1762,9 @@ fn log_viewer(
         _ => None,
     };
 
-    // Toolbar.
+    // Toolbar. The controls on the right are laid out first; the job's
+    // name and numbers get what is left and are cut, never overlapped.
+    let log_tools = panel == Panel::Log;
     Frame::NONE
         .inner_margin(Margin {
             left: 16,
@@ -1598,39 +1773,10 @@ fn log_viewer(
             bottom: 6,
         })
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                icons::show(ui, Icon::List, 14.0, p.text_2);
-                ui.label(
-                    RichText::new(&job_name)
-                        .size(size::BODY)
-                        .family(semibold())
-                        .color(p.text_strong),
-                );
-                if let Some((lines, errors, warnings, bytes, matched)) = doc_stats {
-                    ui.label(caption(
-                        &p,
-                        format!(
-                            "{} lines  ·  {}",
-                            format::count(lines),
-                            format::bytes(bytes)
-                        ),
-                    ));
-                    if errors > 0 {
-                        kit::badge(ui, &format::plural(errors, "error", "errors"), Tone::Danger);
-                    }
-                    if warnings > 0 {
-                        kit::badge(
-                            ui,
-                            &format::plural(warnings, "warning", "warnings"),
-                            Tone::Warning,
-                        );
-                    }
-                    if !filter.trim().is_empty() {
-                        ui.label(small(&p, format!("{} matching", format::count(matched))));
-                    }
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.allocate_ui_with_layout(
+                vec2(ui.available_width(), 28.0),
+                Layout::right_to_left(Align::Center),
+                |ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     if IconButton::icon(Icon::Close)
                         .compact()
@@ -1649,85 +1795,96 @@ fn log_viewer(
                     {
                         actions.push(Action::OpenUrl(j.url.clone()));
                     }
-                    if IconButton::icon(Icon::Copy)
-                        .compact()
-                        .show(ui)
-                        .on_hover_text("Copy the shown lines")
-                        .clicked()
+                    if log_tools
+                        && IconButton::icon(Icon::Copy)
+                            .compact()
+                            .show(ui)
+                            .on_hover_text("Copy the shown lines")
+                            .clicked()
                     {
                         copy_all = true;
                     }
-                    // "Explain this failure" and other areas' tools.
-                    crate::devops::hooks::log_viewer_tools(
-                        ui,
-                        cx.log_hook,
-                        run.id,
-                        job_id,
-                        actions,
-                    );
-                    ui.add_space(4.0);
-                    icons::divider(ui, 16.0);
-                    ui.add_space(4.0);
-                    if IconButton::text("Unfold")
-                        .compact()
-                        .show(ui)
-                        .on_hover_text("Expand all groups")
-                        .clicked()
-                    {
-                        fold = Some(false);
+                    // "Explain this failure" and other areas' tools: they
+                    // need a log (or a failed download to retry).
+                    if matches!(panel, Panel::Log | Panel::Pending) {
+                        crate::devops::hooks::log_viewer_tools(
+                            ui,
+                            cx.log_hook,
+                            run.id,
+                            job_id,
+                            actions,
+                        );
                     }
-                    if IconButton::text("Fold")
-                        .compact()
-                        .show(ui)
-                        .on_hover_text("Collapse all groups")
-                        .clicked()
-                    {
-                        fold = Some(true);
-                    }
-                    if IconButton::new(Icon::Clock, "Time")
-                        .compact()
-                        .selected(*show_timestamps)
-                        .show(ui)
-                        .on_hover_text("Show the runner's timestamps (UTC)")
-                        .clicked()
-                    {
-                        *show_timestamps = !*show_timestamps;
-                    }
-                    if doc_stats.is_some_and(|s| s.1 > 0) {
-                        if IconButton::icon(Icon::ChevronDown)
+                    if log_tools {
+                        ui.add_space(4.0);
+                        icons::divider(ui, 16.0);
+                        ui.add_space(4.0);
+                        if IconButton::text("Unfold")
                             .compact()
                             .show(ui)
-                            .on_hover_text("Next error")
+                            .on_hover_text("Expand all groups")
                             .clicked()
                         {
-                            jump = Some(1);
+                            fold = Some(false);
                         }
-                        if IconButton::icon(Icon::ChevronUp)
+                        if IconButton::text("Fold")
                             .compact()
                             .show(ui)
-                            .on_hover_text("Previous error")
+                            .on_hover_text("Collapse all groups")
                             .clicked()
                         {
-                            jump = Some(-1);
+                            fold = Some(true);
                         }
-                    }
-                    ui.add_space(4.0);
-                    let w = ui.available_width().clamp(120.0, 240.0);
-                    ui.allocate_ui_with_layout(
-                        vec2(w, 26.0),
-                        Layout::left_to_right(Align::Center),
-                        |ui| {
-                            let resp = search_field(ui, "gh_log_filter", filter, "Filter lines");
-                            if (resp.has_focus() || resp.lost_focus())
-                                && ui.input(|i| i.key_pressed(egui::Key::Escape))
+                        if IconButton::new(Icon::Clock, "Time")
+                            .compact()
+                            .selected(*show_timestamps)
+                            .show(ui)
+                            .on_hover_text("Show the runner's timestamps (UTC)")
+                            .clicked()
+                        {
+                            *show_timestamps = !*show_timestamps;
+                        }
+                        if doc_stats.is_some_and(|s| s.1 > 0) {
+                            if IconButton::icon(Icon::ChevronDown)
+                                .compact()
+                                .show(ui)
+                                .on_hover_text("Next error")
+                                .clicked()
                             {
-                                filter.clear();
-                                resp.surrender_focus();
+                                jump = Some(1);
                             }
-                        },
-                    );
-                });
-            });
+                            if IconButton::icon(Icon::ChevronUp)
+                                .compact()
+                                .show(ui)
+                                .on_hover_text("Previous error")
+                                .clicked()
+                            {
+                                jump = Some(-1);
+                            }
+                        }
+                        ui.add_space(4.0);
+                        let w = (ui.available_width() - 160.0).clamp(110.0, 240.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(w, 26.0),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                let resp =
+                                    search_field(ui, "gh_log_filter", filter, "Filter lines");
+                                if (resp.has_focus() || resp.lost_focus())
+                                    && ui.input(|i| i.key_pressed(egui::Key::Escape))
+                                {
+                                    filter.clear();
+                                    resp.surrender_focus();
+                                }
+                            },
+                        );
+                    }
+                    ui.add_space(space::M);
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        log_title(ui, &job_name, doc_stats, !filter.trim().is_empty());
+                    });
+                },
+            );
         });
     kit::hairline(ui);
     if close {
@@ -1735,43 +1892,38 @@ fn log_viewer(
         return;
     }
 
+    match (panel, &job) {
+        (Panel::Live, Some(j)) => {
+            let jobs_at = detail.jobs_at;
+            live_panel(ui, cx, run.id, j, watch, jobs_at, actions);
+            return;
+        }
+        (Panel::NeverRan, Some(j)) => {
+            log_note(ui, |ui| never_ran_note(ui, j));
+            return;
+        }
+        _ => {}
+    }
+    let jobs_loading = detail.jobs_loading;
     let Some(state) = detail.logs.get_mut(&job_id) else {
         log_note(ui, |ui| {
-            kit::muted(ui, "Log not requested.");
+            kit::muted(ui, "The log has not been requested.");
         });
         return;
     };
     let doc = match &mut state.doc {
         None => {
-            log_note(ui, |ui| kit::loading(ui, "Downloading the log…"));
+            let text = if job.is_none() && jobs_loading {
+                "Loading the job…"
+            } else {
+                "Downloading the log…"
+            };
+            log_note(ui, |ui| kit::loading(ui, text));
             return;
         }
         Some(Err(e)) => {
             let e = e.clone();
-            log_note(ui, |ui| {
-                let mut retry = false;
-                kit::callout_with(
-                    ui,
-                    Tone::Warning,
-                    "The log is not available",
-                    &format!(
-                        "{e}\n\nLogs of running jobs and of jobs that never started are not available through the API."
-                    ),
-                    |ui| {
-                        retry = IconButton::new(Icon::Fetch, "Retry")
-                            .compact()
-                            .show(ui)
-                            .clicked();
-                    },
-                );
-                if retry {
-                    actions.push(Action::ShowLog {
-                        run: run.id,
-                        job: job_id,
-                        step: None,
-                    });
-                }
-            });
+            log_note(ui, |ui| log_unavailable(ui, run.id, job_id, &e, actions));
             return;
         }
         Some(Ok(doc)) => doc,
@@ -2095,6 +2247,424 @@ fn log_note(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
         .show(ui, add);
 }
 
+/// The left of the log toolbar: the job's name, then the log's size and
+/// error / warning counts when there is room for them (the name is cut
+/// first, the numbers dropped only when even a short name would not fit).
+fn log_title(
+    ui: &mut Ui,
+    job_name: &str,
+    stats: Option<(usize, usize, usize, usize, usize)>,
+    filtering: bool,
+) {
+    let p = *pal(ui);
+    ui.spacing_mut().item_spacing.x = 8.0;
+    icons::show(ui, Icon::List, 14.0, p.text_2);
+    let mut parts: Vec<(String, Tone)> = Vec::new();
+    let mut size_text = String::new();
+    if let Some((lines, errors, warnings, bytes, matched)) = stats {
+        size_text = if filtering {
+            format!(
+                "{} of {} lines",
+                format::count(matched),
+                format::count(lines)
+            )
+        } else {
+            format!("{} lines, {}", format::count(lines), format::bytes(bytes))
+        };
+        if errors > 0 {
+            parts.push((format::plural(errors, "error", "errors"), Tone::Danger));
+        }
+        if warnings > 0 {
+            parts.push((
+                format::plural(warnings, "warning", "warnings"),
+                Tone::Warning,
+            ));
+        }
+    }
+    let painter = ui.painter().clone();
+    let size_w = if size_text.is_empty() {
+        0.0
+    } else {
+        painter
+            .layout_no_wrap(
+                size_text.clone(),
+                FontId::proportional(size::SMALL),
+                p.text_3,
+            )
+            .size()
+            .x
+            + 8.0
+    };
+    let badges_w: f32 = parts
+        .iter()
+        .map(|(t, _)| kit::badge_width(&painter, t) + 8.0)
+        .sum();
+    let avail = ui.available_width();
+    let show_stats = avail - size_w - badges_w >= 120.0;
+    let name_w = if show_stats {
+        avail - size_w - badges_w
+    } else {
+        avail
+    };
+    ui.scope(|ui| {
+        ui.set_max_width(name_w.max(40.0));
+        ui.add(
+            Label::new(
+                RichText::new(job_name)
+                    .size(size::BODY)
+                    .family(semibold())
+                    .color(p.text_strong),
+            )
+            .truncate(),
+        );
+    });
+    if show_stats {
+        if !size_text.is_empty() {
+            ui.label(caption(&p, size_text));
+        }
+        for (t, tone) in &parts {
+            kit::badge(ui, t, *tone);
+        }
+    }
+}
+
+/// "Checked 12 s ago, next check in 18 s" under a watched job, or why it
+/// is not being checked.
+fn watch_status(cx: &Cx, watch: Option<&ci::JobWatch>, jobs_at: Option<Instant>) -> String {
+    if let Some(r) = cx.rate.filter(|_| watch_paused(cx.rate)) {
+        return format!(
+            "Paused to save the API budget: {} requests left until {}.",
+            r.remaining,
+            format::clock(r.reset)
+        );
+    }
+    let ago = |t: Instant| format::relative(cx.now - t.elapsed().as_secs() as i64, cx.now);
+    match watch {
+        Some(w) if w.in_flight => "Checking for progress…".to_owned(),
+        Some(w) => {
+            let next = w
+                .interval
+                .saturating_sub(w.polled.elapsed())
+                .as_secs()
+                .max(1);
+            match &w.error {
+                Some(e) => format!("The last check failed ({e}). Trying again in {next} s."),
+                None => format!("Checked {}, next check in {next} s.", ago(w.polled)),
+            }
+        }
+        None => jobs_at
+            .map(|t| format!("Checked {}.", ago(t)))
+            .unwrap_or_default(),
+    }
+}
+
+/// The log panel of a running or queued job: what it is doing and for how
+/// long, that its log comes when it finishes, and its steps as they go.
+fn live_panel(
+    ui: &mut Ui,
+    cx: &Cx,
+    run: u64,
+    job: &Job,
+    watch: Option<&ci::JobWatch>,
+    jobs_at: Option<Instant>,
+    actions: &mut Vec<Action>,
+) {
+    let queued = job.outcome() == Outcome::Queued;
+    let current = job.current_step().filter(|_| !queued).map(|s| s.number);
+    // Wide: the status on the left and the steps beside it, each scrolling
+    // on its own, so following the running step never hides the status.
+    // Narrow: one scrolling column, status first (no following then).
+    let wide = ui.available_width() >= 760.0;
+    if !wide {
+        egui::ScrollArea::vertical()
+            .id_salt(("gh_live", job.id))
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                Frame::NONE
+                    .inner_margin(Margin {
+                        left: 16,
+                        right: 12,
+                        top: 10,
+                        bottom: 10,
+                    })
+                    .show(ui, |ui| {
+                        live_info(ui, cx, run, job, watch, jobs_at, false, actions);
+                        if !job.steps.is_empty() {
+                            ui.add_space(space::S);
+                            steps_caption(ui, job);
+                            live_steps(ui, cx, job, current, false);
+                        }
+                    });
+            });
+        return;
+    }
+    Frame::NONE
+        .inner_margin(Margin {
+            left: 16,
+            right: 12,
+            top: 10,
+            bottom: 6,
+        })
+        .show(ui, |ui| {
+            let h = ui.available_height();
+            // As wide as the run detail above, at most.
+            let steps_w = (ui.available_width() - 400.0 - space::XL).min(kit::DETAIL_MAX - 400.0);
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(vec2(400.0, h), Layout::top_down(Align::Min), |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt(("gh_live_info", job.id))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            live_info(ui, cx, run, job, watch, jobs_at, true, actions);
+                        });
+                });
+                ui.add_space(space::XL);
+                ui.allocate_ui_with_layout(vec2(steps_w, h), Layout::top_down(Align::Min), |ui| {
+                    if job.steps.is_empty() {
+                        kit::muted(ui, "No steps yet: a runner has not picked the job up.");
+                        return;
+                    }
+                    steps_caption(ui, job);
+                    egui::ScrollArea::vertical()
+                        .id_salt(("gh_live_steps", job.id))
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| live_steps(ui, cx, job, current, true));
+                });
+            });
+        });
+}
+
+/// `STEPS  28 of 36 done` above a running job's steps.
+fn steps_caption(ui: &mut Ui, job: &Job) {
+    let p = *pal(ui);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        ui.label(kit::caption_text(&p, "Steps"));
+        ui.label(caption(
+            &p,
+            format!("{} of {} done", job.steps_done(), job.steps.len()),
+        ));
+    });
+    ui.add_space(2.0);
+}
+
+/// What a running job is doing: the step and for how long, why there is
+/// no log yet, a link to GitHub's live view, and when it was last checked.
+/// `full` adds the step's name and the runner as rows (the wide layout).
+#[allow(clippy::too_many_arguments)]
+fn live_info(
+    ui: &mut Ui,
+    cx: &Cx,
+    run: u64,
+    job: &Job,
+    watch: Option<&ci::JobWatch>,
+    jobs_at: Option<Instant>,
+    full: bool,
+    actions: &mut Vec<Action>,
+) {
+    let p = *pal(ui);
+    let queued = job.outcome() == Outcome::Queued;
+    let current = job.current_step().filter(|_| !queued);
+    ui.spacing_mut().item_spacing.y = 6.0;
+    ui.horizontal(|ui| {
+        let (r, _) = ui.allocate_exact_size(vec2(16.0, 20.0), Sense::hover());
+        outcome_dot(ui.painter(), job.outcome(), r.center(), 6.0, cx.t);
+        let head = match current {
+            _ if queued => "Waiting for a runner".to_owned(),
+            Some(s) if full => format!("Running step {} of {}", s.number, job.steps.len()),
+            Some(s) => format!("Step {} of {}: {}", s.number, job.steps.len(), s.name),
+            None => "Running".to_owned(),
+        };
+        ui.add(
+            Label::new(
+                RichText::new(head)
+                    .size(size::TITLE)
+                    .family(semibold())
+                    .color(p.text_strong),
+            )
+            .truncate(),
+        );
+    });
+    kit::secondary(
+        ui,
+        "GitHub publishes a job's log when the job finishes. It will appear here by itself.",
+    );
+    kit::kv(ui, 88.0, |kv| {
+        if let Some(s) = current {
+            if full {
+                kv.text("Step", s.name.as_str());
+            }
+            if let Some(st) = s.started {
+                kv.text(
+                    "Step time",
+                    format!("{} so far", format::duration((cx.now - st).max(0))),
+                );
+            }
+        }
+        if let Some(d) = job.duration_secs(cx.now) {
+            kv.text(
+                if queued { "Waiting" } else { "Job time" },
+                format!("{} so far", format::duration(d)),
+            );
+        }
+        if full && !job.labels.is_empty() {
+            kv.text("Runs on", job.labels.join(", "));
+        }
+    });
+    ui.add_space(2.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+        if IconButton::new(Icon::External, "Watch live on GitHub")
+            .compact()
+            .show(ui)
+            .on_hover_text("GitHub's page streams the log while the job runs")
+            .clicked()
+        {
+            actions.push(Action::OpenUrl(job.url.clone()));
+        }
+        let busy = watch.is_some_and(|w| w.in_flight);
+        if IconButton::new(Icon::Fetch, "Check now")
+            .compact()
+            .enabled(!busy && !watch_paused(cx.rate))
+            .show(ui)
+            .clicked()
+        {
+            actions.push(ci::Act::PollJob { run, job: job.id }.into());
+        }
+    });
+    let status = watch_status(cx, watch, jobs_at);
+    if !status.is_empty() {
+        kit::muted(ui, &status);
+    }
+}
+
+/// A running job's steps: outcome, number, name and time, the running one
+/// highlighted. With `follow`, the running step is scrolled into view
+/// whenever it changes.
+fn live_steps(ui: &mut Ui, cx: &Cx, job: &Job, current: Option<u32>, follow: bool) {
+    let p = *pal(ui);
+    let scrolled_id = egui::Id::unique(("gh_live_scrolled", job.id));
+    let scrolled: Option<u32> = ui.data(|d| d.get_temp(scrolled_id));
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for step in &job.steps {
+            let (rect, _) =
+                ui.allocate_exact_size(vec2(ui.available_width(), STEP_ROW_H), Sense::hover());
+            let o = step.outcome();
+            let is_current = current == Some(step.number);
+            if follow && is_current && scrolled != Some(step.number) {
+                ui.scroll_to_rect(rect, Some(Align::Center));
+                ui.data_mut(|d| d.insert_temp(scrolled_id, step.number));
+            }
+            if !ui.is_rect_visible(rect) {
+                continue;
+            }
+            if is_current {
+                ui.painter().rect_filled(
+                    rect.shrink2(vec2(0.0, 1.0)),
+                    CornerRadius::same(crate::theme::radius::M),
+                    p.selection,
+                );
+            }
+            let painter = ui.painter();
+            let mid = rect.center().y;
+            step_dot(painter, &p, o, pos2(rect.left() + 14.0, mid), cx.t);
+            painter.text(
+                pos2(rect.left() + 46.0, mid),
+                Align2::RIGHT_CENTER,
+                step.number.to_string(),
+                FontId::monospace(size::SMALL),
+                p.text_3,
+            );
+            let dur = match step.duration_secs(cx.now) {
+                Some(d) if o.is_running() => format!("{} so far", format::duration(d)),
+                Some(d) => format::duration(d),
+                None if o == Outcome::Skipped => "skipped".to_owned(),
+                None => String::new(),
+            };
+            let r = painter.text(
+                pos2(rect.right() - 10.0, mid),
+                Align2::RIGHT_CENTER,
+                dur,
+                FontId::proportional(size::SMALL),
+                p.text_2,
+            );
+            let name_c = if o == Outcome::Queued {
+                p.text_3
+            } else if is_current {
+                p.text_strong
+            } else {
+                p.text
+            };
+            let x = rect.left() + 58.0;
+            let g = truncated(
+                painter,
+                &step.name,
+                FontId::proportional(size::BODY - 0.5),
+                name_c,
+                (r.left() - x - 12.0).max(40.0),
+            );
+            painter.galley(pos2(x, mid - g.size().y / 2.0), g, name_c);
+        }
+    });
+}
+
+/// A finished job that never reached a runner has no log.
+fn never_ran_note(ui: &mut Ui, job: &Job) {
+    let why = match job.outcome() {
+        Outcome::Skipped => {
+            "GitHub skipped it: its `if:` condition was false, or a job it needs did not succeed."
+        }
+        Outcome::Cancelled => "It was cancelled while it waited for a runner.",
+        Outcome::Failure => {
+            "It failed before a runner picked it up (an invalid workflow or runner label, for example)."
+        }
+        _ => "It ended before a runner picked it up.",
+    };
+    kit::callout(
+        ui,
+        Tone::Neutral,
+        "This job never ran, so it has no log",
+        why,
+    );
+}
+
+/// A finished job's log could not be downloaded. GitHub's 404 means the
+/// log is gone (expired or deleted), which is information, not a failure.
+fn log_unavailable(ui: &mut Ui, run: u64, job: u64, error: &str, actions: &mut Vec<Action>) {
+    let gone = gitvis_core::github::is_not_found(error);
+    let (tone, title, body) = if gone {
+        (
+            Tone::Neutral,
+            "GitHub has no log for this job",
+            format!(
+                "GitHub keeps job logs for a limited time (90 days unless the repository sets less), and people with write access can delete them.\nGitHub answered: {error}"
+            ),
+        )
+    } else {
+        (
+            Tone::Warning,
+            "Could not download the log",
+            error.to_owned(),
+        )
+    };
+    let mut retry = false;
+    kit::callout_with(ui, tone, title, &body, |ui| {
+        ui.add_space(2.0);
+        retry = IconButton::new(Icon::Fetch, "Try again")
+            .compact()
+            .show(ui)
+            .clicked();
+    });
+    if retry {
+        actions.push(Action::ShowLog {
+            run,
+            job,
+            step: None,
+        });
+    }
+}
+
 fn line_galley(
     p: &egui::Painter,
     line: &LogLine,
@@ -2235,6 +2805,11 @@ pub fn checks_section(
         Some(Ok(c)) if !c.is_empty() => Some(c.len()),
         _ => None,
     };
+    // A commit GitHub does not have: no checks, and nothing went wrong.
+    let away = match result {
+        Some(Ok(c)) if c.is_empty() => gitvis_core::github::not_on_github(&sha.to_string()),
+        _ => None,
+    };
     kit::section_with(ui, "Checks", count, |ui| {
         if loading {
             ui.add_space(6.0);
@@ -2243,7 +2818,11 @@ pub fn checks_section(
         } else if IconButton::icon(Icon::Fetch)
             .compact()
             .show(ui)
-            .on_hover_text("Refresh checks")
+            .on_hover_text(if away.is_some() {
+                "Check again"
+            } else {
+                "Refresh checks"
+            })
             .clicked()
         {
             actions.push(Action::RefreshChecks(sha));
@@ -2252,7 +2831,12 @@ pub fn checks_section(
             ui.label(caption(
                 &p,
                 format!(
-                    "refreshed {}",
+                    "{} {}",
+                    if away.is_some() {
+                        "checked"
+                    } else {
+                        "refreshed"
+                    },
                     format::relative(now - at.elapsed().as_secs() as i64, now)
                 ),
             ));
@@ -2272,7 +2856,23 @@ pub fn checks_section(
             return;
         }
         Some(Ok(list)) if list.is_empty() => {
-            kit::muted(ui, "No checks reported for this commit.");
+            match away {
+                Some(NotOnGitHub::Unpushed) => kit::callout(
+                    ui,
+                    Tone::Neutral,
+                    "Not on GitHub yet",
+                    "This commit has not been pushed (no remote branch contains it), so it has no checks.",
+                ),
+                Some(NotOnGitHub::Unknown) => kit::callout(
+                    ui,
+                    Tone::Neutral,
+                    "Not on GitHub",
+                    "GitHub has no commit with this SHA, so it has no checks. It may be on another remote, or GitHub has not seen the push yet.",
+                ),
+                None => {
+                    kit::muted(ui, "No checks reported for this commit.");
+                }
+            }
             return;
         }
         Some(Ok(list)) => list,
@@ -2306,6 +2906,22 @@ pub fn checks_section(
     });
 }
 
+/// Show an Actions check's job on the Actions page. A running, queued or
+/// skipped job has no log on GitHub, so it is selected without asking for
+/// one (the log viewer shows its progress).
+fn open_check_job(c: &CheckRun, run: u64, job: u64, actions: &mut Vec<Action>) {
+    let o = c.outcome();
+    if o.is_running() || o == Outcome::Skipped {
+        actions.push(Action::OpenRun { run, job: None });
+        actions.push(ci::Act::OpenJob { run, job }.into());
+    } else {
+        actions.push(Action::OpenRun {
+            run,
+            job: Some(job),
+        });
+    }
+}
+
 fn check_row(ui: &mut Ui, c: &CheckRun, now: i64, t: f64, actions: &mut Vec<Action>) {
     let actions_ids = c.actions_ids();
     let dur = c
@@ -2323,10 +2939,7 @@ fn check_row(ui: &mut Ui, c: &CheckRun, now: i64, t: f64, actions: &mut Vec<Acti
     );
     if resp.clicked() {
         match actions_ids {
-            Some((run, job)) => actions.push(Action::OpenRun {
-                run,
-                job: Some(job),
-            }),
+            Some((run, job)) => open_check_job(c, run, job, actions),
             None => {
                 let url = if c.details_url.is_empty() {
                     c.html_url.clone()
@@ -2343,10 +2956,7 @@ fn check_row(ui: &mut Ui, c: &CheckRun, now: i64, t: f64, actions: &mut Vec<Acti
         ui.set_min_width(200.0);
         if actions_ids.is_some() && ui.button("Show job and log").clicked() {
             if let Some((run, job)) = actions_ids {
-                actions.push(Action::OpenRun {
-                    run,
-                    job: Some(job),
-                });
+                open_check_job(c, run, job, actions);
             }
             ui.close();
         }

@@ -238,6 +238,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
             }
         },
         |ui, actions| {
+            widgets::fit_detail(ui);
             if load.ok().is_none() {
                 kit::title(ui, "Caches");
                 widgets::loaded(

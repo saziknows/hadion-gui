@@ -190,7 +190,7 @@ pub(super) fn body(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
                     bottom: 28,
                 })
                 .show(ui, |ui| {
-                    ui.set_max_width(kit::DETAIL_MAX + 240.0);
+                    ui.set_max_width(ui.available_width().min(kit::DETAIL_MAX + 240.0));
                     ui.spacing_mut().item_spacing.y = 8.0;
                     add(ui)
                 });

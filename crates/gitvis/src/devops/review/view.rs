@@ -44,7 +44,7 @@ fn gh_missing(ui: &mut Ui, actions: &mut Vec<Action>) {
     use gitvis_core::devops::tools::Tool;
     detail_area(ui, |ui| {
         Frame::NONE.inner_margin(Margin::same(28)).show(ui, |ui| {
-            ui.set_max_width(kit::PROSE);
+            ui.set_max_width(ui.available_width().min(kit::PROSE));
             kit::title(ui, &format!("{} ({}) is not installed", Tool::Gh.name(), Tool::Gh.program()));
             ui.add_space(4.0);
             kit::body(
@@ -237,7 +237,7 @@ pub fn scroll_pane(
                 bottom: 28,
             })
             .show(ui, |ui| {
-                ui.set_max_width(kit::DETAIL_MAX);
+                ui.set_max_width(ui.available_width().min(kit::DETAIL_MAX));
                 ui.spacing_mut().item_spacing.y = 8.0;
                 add(ui)
             });
@@ -552,7 +552,7 @@ fn pr_detail(
             bottom: 8,
         }))
         .show(ui, |ui| {
-            ui.set_max_width(kit::DETAIL_MAX + 40.0);
+            ui.set_max_width(ui.available_width().min(kit::DETAIL_MAX + 40.0));
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(18.0, 22.0), egui::Sense::hover());
                 icons::paint(

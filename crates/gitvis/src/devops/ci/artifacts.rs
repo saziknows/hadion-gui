@@ -218,6 +218,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
             );
         },
         |ui, actions| {
+            widgets::fit_detail(ui);
             let Some(l) = list else {
                 kit::title(ui, "Artifacts");
                 widgets::loaded(

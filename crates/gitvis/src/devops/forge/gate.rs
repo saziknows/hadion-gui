@@ -44,7 +44,7 @@ pub fn show(
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(28, 24))
                 .show(ui, |ui| {
-                    ui.set_max_width(kit::PROSE + 40.0);
+                    ui.set_max_width(ui.available_width().min(kit::PROSE + 40.0));
                     let Some(state) = &st.tool else {
                         kit::loading(ui, &format!("Checking {} ({})…", tool.name(), tool.program()));
                         kit::muted(

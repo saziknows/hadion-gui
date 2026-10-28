@@ -66,7 +66,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) -> boo
                             bottom: 28,
                         })
                         .show(ui, |ui| {
-                            ui.set_max_width(kit::DETAIL_MAX);
+                            ui.set_max_width(ui.available_width().min(kit::DETAIL_MAX));
                             ui.spacing_mut().item_spacing.y = 8.0;
                             widgets::header(ui, "Compare with the last green run", |ui| {
                                 if IconButton::new(Icon::Close, "Back to the run")

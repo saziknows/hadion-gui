@@ -191,6 +191,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
             );
         },
         |ui, actions| {
+            widgets::fit_detail(ui);
             widgets::header(ui, "Validate workflows", |ui| {
                 if load.loading {
                     ui.add(egui::Spinner::new().size(14.0));

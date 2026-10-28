@@ -751,7 +751,7 @@ fn run_form(ui: &mut Ui, remote: &ForgeRemote, f: &mut RunForm, actions: &mut Ve
         .auto_shrink([false, false])
         .show(ui, |ui| {
             Frame::NONE.inner_margin(Margin::symmetric(28, 20)).show(ui, |ui| {
-                ui.set_max_width(kit::PROSE + 80.0);
+                ui.set_max_width(ui.available_width().min(kit::PROSE + 80.0));
                 kit::title(ui, "Run a pipeline");
                 kit::secondary(
                     ui,

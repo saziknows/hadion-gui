@@ -309,7 +309,7 @@ pub(super) fn detail_pane(
                             bottom: 28,
                         })
                         .show(ui, |ui| {
-                            ui.set_max_width(kit::DETAIL_MAX);
+                            ui.set_max_width(ui.available_width().min(kit::DETAIL_MAX));
                             ui.spacing_mut().item_spacing.y = 8.0;
                             add(ui)
                         });
@@ -1083,7 +1083,7 @@ fn create_form(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             Frame::NONE.inner_margin(Margin::symmetric(28, 20)).show(ui, |ui| {
-                ui.set_max_width(kit::PROSE + 80.0);
+                ui.set_max_width(ui.available_width().min(kit::PROSE + 80.0));
                 kit::title(ui, &format!("New {noun}"));
                 kit::secondary(
                     ui,
