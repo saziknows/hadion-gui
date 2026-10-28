@@ -1145,7 +1145,7 @@ fn counts(st: &State) -> String {
         Mode::Search => {
             let shown = r.entries();
             if r.query.is_empty() {
-                let what = chip_label(r.scope).to_lowercase();
+                let what = r.scope.label().to_lowercase();
                 if shown < r.matched {
                     format!(
                         "First {} of {} {what}",
