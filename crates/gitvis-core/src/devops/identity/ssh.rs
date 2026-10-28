@@ -601,7 +601,7 @@ mod tests {
         put(&n);
         let blob = {
             let mut s = base64_encode_nopad(&b);
-            while s.len() % 4 != 0 {
+            while !s.len().is_multiple_of(4) {
                 s.push('=');
             }
             s

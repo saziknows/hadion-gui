@@ -127,8 +127,7 @@ pub fn parse_list(bytes: &[u8], base: &Path) -> Vec<Entry> {
     let text = String::from_utf8_lossy(bytes);
     let mut fields = text.split('\0');
     let mut out = Vec::new();
-    loop {
-        let Some(scope) = fields.next() else { break };
+    while let Some(scope) = fields.next() {
         if scope.is_empty() {
             break;
         }
@@ -502,7 +501,7 @@ pub fn groups(entries: &[Entry], filter: &str) -> Vec<Group> {
             }),
         }
     }
-    out.sort_by(|a, b| a.id.to_lowercase().cmp(&b.id.to_lowercase()));
+    out.sort_by_key(|g| g.id.to_lowercase());
     out
 }
 
