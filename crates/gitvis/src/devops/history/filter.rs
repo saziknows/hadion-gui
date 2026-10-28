@@ -311,6 +311,9 @@ pub fn filter_bar(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
                 let label = |ui: &mut Ui, t: &str| {
                     ui.label(RichText::new(t).size(size::SMALL).color(p.text_2));
                 };
+                // A full-height strut first, so the first label centres on the
+                // inputs like the others.
+                ui.allocate_exact_size(vec2(0.0, form::INPUT_H), egui::Sense::hover());
                 label(ui, "Author");
                 let (r, picked) = widgets::suggest_input(
                     ui,

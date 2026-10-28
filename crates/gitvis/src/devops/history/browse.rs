@@ -45,11 +45,14 @@ pub struct Browse {
     pub select_after: Option<String>,
     /// The flattened rows and what they were made from (tree, search,
     /// open folders), so a large tree is not walked every frame.
-    rows_cache: Option<(u64, std::rc::Rc<Vec<(usize, usize)>>)>,
+    rows_cache: Option<(u64, Rows)>,
 }
 
+/// Flattened tree rows: `(node, depth)`.
+type Rows = std::rc::Rc<Vec<(usize, usize)>>;
+
 impl Browse {
-    fn rows(&mut self) -> std::rc::Rc<Vec<(usize, usize)>> {
+    fn rows(&mut self) -> Rows {
         use std::hash::{Hash, Hasher};
         let Some(Ok(tree)) = &self.tree else {
             return Default::default();
@@ -90,7 +93,7 @@ fn load(cx: &mut Ctx, repo: &mut RepoState, rev: String) {
         let mut cmds = Vec::new();
         let r = core::load(dir, &rev, &mut cmds);
         log.commands.extend(cmds);
-        Msg::Tree(seq, r)
+        Msg::Tree(seq, Box::new(r))
     });
 }
 
@@ -230,6 +233,7 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
     let b = &mut repo.devops.history.browse;
     match msg {
         Msg::Tree(seq, r) if seq == b.seq => {
+            let r = *r;
             b.loading = false;
             // Open the top-level folders of small trees.
             if let Ok(t) = &r

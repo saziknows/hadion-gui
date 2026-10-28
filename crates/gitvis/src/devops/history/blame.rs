@@ -103,7 +103,7 @@ fn run(cx: &mut Ctx, repo: &mut RepoState, rev: String, path: String, line: Opti
                 }
             });
             log.commands.extend(cmds);
-            Msg::Blamed(seq, r)
+            Msg::Blamed(seq, Box::new(r))
         },
     );
 }
@@ -165,7 +165,7 @@ pub fn on_msg(_cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
         && seq == v.seq
     {
         v.loading = false;
-        v.result = Some(r);
+        v.result = Some(*r);
     }
 }
 

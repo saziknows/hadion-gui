@@ -83,7 +83,7 @@ fn run(cx: &mut Ctx, repo: &mut RepoState) {
         let mut cmds = Vec::new();
         let r = core::run(dir, &req, &mut cmds);
         log.commands.extend(cmds);
-        Msg::Compared(seq, r)
+        Msg::Compared(seq, Box::new(r))
     });
 }
 
@@ -109,7 +109,7 @@ fn select_file(cx: &mut Ctx, repo: &mut RepoState, i: usize) {
             let r =
                 core::file_diff(dir, &cmp, &f, &mut cmds).map(|d| DiffShow::new(d, &f.path, dark));
             log.commands.extend(cmds);
-            Msg::CompareDiff(seq, f.path.clone(), r)
+            Msg::CompareDiff(seq, f.path.clone(), Box::new(r))
         },
     );
 }
@@ -170,6 +170,7 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
     let c = &mut repo.devops.history.compare;
     match msg {
         Msg::Compared(seq, r) if seq == c.seq => {
+            let r = *r;
             c.loading = false;
             let first = match &r {
                 Ok(cmp) => match c.select_after.take() {
@@ -188,7 +189,7 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
             }
         }
         Msg::CompareDiff(seq, path, r) if seq == c.seq => {
-            c.diffs.insert(path, Some(r));
+            c.diffs.insert(path, Some(*r));
         }
         _ => {}
     }

@@ -200,7 +200,7 @@ mod tests {
     use super::*;
 
     const SAMPLE: &[u8] = b":100644 100644 4aff34c d393875 M\0CLAUDE.md\0:000000 100644 0000000 7227e6d A\0src/new file.rs\0:100644 100644 1111111 2222222 R086\0old/name.rs\0new/name.rs\0:100644 000000 3333333 0000000 D\0gone.txt\0:100644 100644 4444444 5555555 M\0logo.png\0:100644 100755 6666666 6666666 M\0run.sh\0\
-14\t9\tCLAUDE.md\0230\t0\tsrc/new file.rs\03\t1\t\0old/name.rs\0new/name.rs\00\t12\tgone.txt\0-\t-\tlogo.png\00\t0\trun.sh\0";
+14\t9\tCLAUDE.md\x00230\t0\tsrc/new file.rs\x003\t1\t\0old/name.rs\0new/name.rs\x000\t12\tgone.txt\0-\t-\tlogo.png\x000\t0\trun.sh\0";
 
     #[test]
     fn raw_and_numstat_merge() {
@@ -225,7 +225,7 @@ mod tests {
 
     #[test]
     fn numstat_only() {
-        let f = parse(b"1\t2\ta.txt\05\t0\t\0x.rs\0y.rs\0");
+        let f = parse(b"1\t2\ta.txt\x005\t0\t\0x.rs\0y.rs\0");
         assert_eq!(f.len(), 2);
         assert_eq!(f[0].change, Change::Modified);
         assert_eq!(f[1].change, Change::Renamed(0));

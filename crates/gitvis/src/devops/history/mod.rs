@@ -197,56 +197,57 @@ pub enum Act {
 }
 
 pub enum Msg {
-    Compared(u64, Result<Comparison, String>),
-    CompareDiff(u64, String, Result<widgets::DiffShow, String>),
-    Tree(u64, Result<Tree, String>),
+    Compared(u64, Box<Result<Comparison, String>>),
+    CompareDiff(u64, String, Box<Result<widgets::DiffShow, String>>),
+    Tree(u64, Box<Result<Tree, String>>),
     Content(u64, String, Result<browse::ContentShow, String>),
     VersionSaved(Result<PathBuf, String>),
-    Blamed(u64, Result<blame::BlameShow, String>),
+    Blamed(u64, Box<Result<blame::BlameShow, String>>),
     FilterQueried(u64, Result<QuerySet, String>),
     Totals(u64, Result<Totals, String>),
     Patches(Result<PathBuf, String>),
     Signatures(Vec<Oid>, Result<Verified, String>),
-    SignatureDetail(Oid, Result<Verified, String>, Setup),
+    SignatureDetail(Oid, Result<Verified, String>, Box<Setup>),
 }
 
 impl Msg {
     /// One line for the activity log (`Err` when the work failed).
     pub fn summary(&self) -> Result<String, String> {
         match self {
-            Msg::Compared(_, Ok(c)) => Ok(format!(
-                "{}: {} only in A, {} only in B, {} files, {} ms",
-                c.request.title(),
-                c.count_a,
-                c.count_b,
-                c.files.len(),
-                c.elapsed_ms
-            )),
-            Msg::Compared(_, Err(e)) => Err(e.clone()),
-            Msg::CompareDiff(_, p, Ok(d)) => {
-                Ok(format!("Diff of {p}: {} hunks", d.doc.diff.hunks.len()))
-            }
-            Msg::CompareDiff(_, _, Err(e)) => Err(e.clone()),
-            Msg::Tree(_, Ok(t)) => Ok(format!(
-                "{} files at {} · {} ms",
-                t.totals().1,
-                t.rev,
-                t.elapsed_ms
-            )),
-            Msg::Tree(_, Err(e)) => Err(e.clone()),
+            Msg::Compared(_, r) => r.as_ref().as_ref().map_err(Clone::clone).map(|c| {
+                format!(
+                    "{}: {} only in A, {} only in B, {} files, {} ms",
+                    c.request.title(),
+                    c.count_a,
+                    c.count_b,
+                    c.files.len(),
+                    c.elapsed_ms
+                )
+            }),
+            Msg::CompareDiff(_, p, r) => r
+                .as_ref()
+                .as_ref()
+                .map_err(Clone::clone)
+                .map(|d| format!("Diff of {p}: {} hunks", d.doc.diff.hunks.len())),
+            Msg::Tree(_, r) => r
+                .as_ref()
+                .as_ref()
+                .map_err(Clone::clone)
+                .map(|t| format!("{} files at {} · {} ms", t.totals().1, t.rev, t.elapsed_ms)),
             Msg::Content(_, p, Ok(_)) => Ok(format!("Read {p}")),
             Msg::Content(_, _, Err(e)) => Err(e.clone()),
             Msg::VersionSaved(Ok(p)) => Ok(format!("Saved {}", p.display())),
             Msg::VersionSaved(Err(e)) => Err(e.clone()),
-            Msg::Blamed(_, Ok(b)) => Ok(format!(
-                "Blame of {} at {}: {} lines from {} commits · {} ms",
-                b.blame.path,
-                b.blame.rev,
-                b.blame.lines.len(),
-                b.blame.commits.len(),
-                b.blame.elapsed_ms
-            )),
-            Msg::Blamed(_, Err(e)) => Err(e.clone()),
+            Msg::Blamed(_, r) => r.as_ref().as_ref().map_err(Clone::clone).map(|b| {
+                format!(
+                    "Blame of {} at {}: {} lines from {} commits · {} ms",
+                    b.blame.path,
+                    b.blame.rev,
+                    b.blame.lines.len(),
+                    b.blame.commits.len(),
+                    b.blame.elapsed_ms
+                )
+            }),
             Msg::FilterQueried(_, Ok(q)) => Ok(format!(
                 "{} commits match · {} ms{}",
                 q.ids.len(),
@@ -409,7 +410,7 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
             let a = it.next()?.to_owned();
             let b = match it.next() {
                 None => Some("HEAD".to_owned()),
-                Some(b) if matches!(b, "worktree" | "working-tree" | "wip") => None,
+                Some("worktree" | "working-tree" | "wip") => None,
                 Some(b) => Some(b.to_owned()),
             };
             one(Act::Compare { a, b, select: None })

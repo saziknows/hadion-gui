@@ -111,7 +111,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                     let setup = need_setup.then(|| core::setup(dir, &mut cmds));
                     let r = core::verify(dir, std::slice::from_ref(&sha), true, &mut cmds);
                     log.commands.extend(cmds);
-                    Msg::SignatureDetail(id, r, setup.unwrap_or_default())
+                    Msg::SignatureDetail(id, r, Box::new(setup.unwrap_or_default()))
                 },
             );
         }
@@ -147,7 +147,7 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
             s.detail_pending.remove(&id);
             // An empty setup means it was not read this time (cached).
             if !setup.format.is_empty() {
-                s.setup = Some(setup);
+                s.setup = Some(*setup);
             }
             match r {
                 Ok(v) => {
