@@ -441,9 +441,42 @@ pub fn uninstall(hooks: &Path) -> Result<String, String> {
     Ok("Removed the gitvis secret check".into())
 }
 
+/// The gitvis exe a secret-check script calls (its `gitvis="…"` line),
+/// to tell whether it points at the running gitvis.
+pub fn installed_exe(script: &str) -> Option<String> {
+    let line = script
+        .lines()
+        .find(|l| l.trim_start().starts_with("gitvis=\""))?;
+    let quoted = line.trim().strip_prefix("gitvis=")?;
+    let inner = quoted.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::new();
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(n) = chars.next() {
+                out.push(n);
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_back_the_exe_path() {
+        let exe = Path::new(r"C:\Program Files\gitvis $x\gitvis.exe");
+        let s = secret_hook_script(exe);
+        assert_eq!(
+            installed_exe(&s).as_deref(),
+            Some("C:/Program Files/gitvis $x/gitvis.exe")
+        );
+        assert_eq!(installed_exe("#!/bin/sh\necho hi\n"), None);
+    }
 
     fn temp(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()

@@ -265,7 +265,7 @@ pub fn parse_semgrep(bytes: &[u8]) -> Result<SemgrepSummary, String> {
         *rules.entry(f.rule.clone()).or_default() += 1;
     }
     let mut by_severity: Vec<(String, usize)> = sev.into_iter().collect();
-    by_severity.sort_by(|a, b| severity_rank(&b.0).cmp(&severity_rank(&a.0)));
+    by_severity.sort_by_key(|s| std::cmp::Reverse(severity_rank(&s.0)));
     let mut top_rules: Vec<(String, usize)> = rules.into_iter().collect();
     top_rules.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let errors = v

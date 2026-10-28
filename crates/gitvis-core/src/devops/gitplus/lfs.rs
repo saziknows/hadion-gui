@@ -66,9 +66,12 @@ pub fn parse_gitattributes(text: &str, source: &str) -> Vec<Pattern> {
     out
 }
 
-/// `git lfs track` with no arguments: (tracked, excluded) as
-/// `(pattern, source file, lockable)`.
-pub fn parse_track(text: &str) -> (Vec<(String, String, bool)>, Vec<(String, String)>) {
+/// A pattern `git lfs track` lists: (pattern, source file, lockable).
+pub type Listed = (String, String, bool);
+
+/// `git lfs track` with no arguments: (tracked, excluded `(pattern,
+/// source file)`).
+pub fn parse_track(text: &str) -> (Vec<Listed>, Vec<(String, String)>) {
     let mut tracked = Vec::new();
     let mut excluded = Vec::new();
     let mut in_excluded = false;
@@ -103,7 +106,7 @@ pub fn parse_track(text: &str) -> (Vec<(String, String, bool)>, Vec<(String, Str
 
 /// Patterns from the root `.gitattributes`, completed with the ones
 /// `git lfs track` lists from other `.gitattributes` files.
-pub fn merge_patterns(root: Vec<Pattern>, listed: &[(String, String, bool)]) -> Vec<Pattern> {
+pub fn merge_patterns(root: Vec<Pattern>, listed: &[Listed]) -> Vec<Pattern> {
     let mut out = root;
     for (p, source, lockable) in listed {
         if !out.iter().any(|x| &x.pattern == p && &x.source == source) {

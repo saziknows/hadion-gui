@@ -223,7 +223,7 @@ fn diff_git_paths(line: &str) -> (String, String) {
     }
     // Same path on both sides: `a/P b/P` splits in the middle.
     let n = rest.len();
-    if n > 4 && (n - 1) % 2 == 0 && rest.is_char_boundary((n - 1) / 2) {
+    if n > 4 && (n - 1).is_multiple_of(2) && rest.is_char_boundary((n - 1) / 2) {
         let half = (n - 1) / 2;
         let (a, b) = (&rest[..half], &rest[half + 1..]);
         if a.strip_prefix("a/").is_some() && a.strip_prefix("a/") == b.strip_prefix("b/") {
