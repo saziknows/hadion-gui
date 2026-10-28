@@ -126,11 +126,20 @@ fn body(ui: &mut Ui, st: &mut State, cx: &Cx, keys: Keys, actions: &mut Vec<Acti
     if st.results.mode == Mode::Start && st.drill.is_none() {
         prefix_chips(ui, st);
     }
-    status_line(ui, st, cx, actions);
-    if st.results.mode == Mode::NoResults {
-        no_results(ui, st);
+    let status = status(st, cx);
+    // While what is searched is still loading, "nothing matches" would be
+    // wrong: the status line says what is loading instead.
+    let loading = matches!(status, Some(Status::Loading(_)));
+    let explained = status.is_some();
+    status_line(ui, status, actions);
+    if loading && (st.results.entries() == 0 || st.results.mode == Mode::NoResults) {
+        ui.add_space(space::S);
+    } else {
+        if st.results.mode == Mode::NoResults {
+            no_results(ui, st);
+        }
+        list(ui, st, cx, explained, actions);
     }
-    list(ui, st, cx, actions);
     footer(ui, st, cx);
 }
 
@@ -232,10 +241,10 @@ fn prefix_chips(ui: &mut Ui, st: &mut State) {
     ui.add_space(space::S + 2.0);
     let mut picked = None;
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+        ui.spacing_mut().item_spacing = vec2(5.0, 5.0);
         ui.add_space(8.0);
         for pr in &scope::PREFIXES {
-            let label = format!("{}  {}", pr.ch, chip_label(pr.scope));
+            let label = format!("{} {}", pr.ch, chip_short(pr.scope));
             if kit::chip(ui, &label, false).clicked() {
                 picked = Some(pr.ch);
             }
@@ -246,6 +255,15 @@ fn prefix_chips(ui: &mut Ui, st: &mut State) {
         st.query = c.to_string();
         st.caret_end = true;
         st.focus = true;
+    }
+}
+
+/// One short word per prefix, so the chips fit on one line.
+fn chip_short(s: Scope) -> &'static str {
+    match s {
+        Scope::Prs => "PRs",
+        Scope::Repos => "Repos",
+        s => chip_label(s),
     }
 }
 
@@ -329,7 +347,7 @@ fn tab(st: &mut State) {
     };
     let next = match (&e.item.target, scope_now) {
         (Target::Prefix(s), _) => {
-            let keep = if st.results.mode == Mode::NoResults {
+            let keep = if st.results.mode == Mode::NoResults && st.results.scope != Scope::All {
                 text.as_str()
             } else {
                 ""
@@ -386,7 +404,7 @@ fn run(st: &mut State, cx: &Cx, e: &Entry, verb: Verb, actions: &mut Vec<Action>
     match (verb, &e.item.target) {
         (Verb::UsePrefix, Target::Prefix(s)) => {
             let (_, text) = scope::parse(&st.query);
-            let keep = if st.results.mode == Mode::NoResults {
+            let keep = if st.results.mode == Mode::NoResults && st.results.scope != Scope::All {
                 text.to_owned()
             } else {
                 String::new()
@@ -547,8 +565,8 @@ fn status(st: &State, cx: &Cx) -> Option<Status> {
     }
 }
 
-fn status_line(ui: &mut Ui, st: &State, cx: &Cx, actions: &mut Vec<Action>) {
-    let Some(s) = status(st, cx) else {
+fn status_line(ui: &mut Ui, status: Option<Status>, actions: &mut Vec<Action>) {
+    let Some(s) = status else {
         return;
     };
     let p = *pal(ui);
@@ -606,22 +624,26 @@ fn no_results(ui: &mut Ui, st: &State) {
         ui.add_space(14.0);
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
-            let what = match scope {
-                Scope::All => "Nothing".to_owned(),
-                s => format!("No {}", chip_label(s).to_lowercase()),
+            let title = match scope {
+                Scope::All => format!("Nothing matches \u{201c}{text}\u{201d}"),
+                s => format!(
+                    "No {} match \u{201c}{text}\u{201d}",
+                    chip_label(s).to_lowercase()
+                ),
             };
             ui.label(
-                RichText::new(format!("{what} matches \u{201c}{text}\u{201d}"))
+                RichText::new(title)
                     .size(size::BODY)
                     .family(semibold())
                     .color(p.text_strong),
             );
-            ui.label(
-                RichText::new(
-                    "Letters only need to appear in order (\"fh\" finds \"file history\"). Try fewer of them, or search one kind:",
-                )
-                .size(size::SMALL)
-                .color(p.text_2),
+            let body = if scope == Scope::All {
+                "Letters only need to appear in order, so \"fh\" finds \"file history\": try fewer of them. Everything was searched; a prefix narrows the search to one kind:"
+            } else {
+                "Letters only need to appear in order, so \"fh\" finds \"file history\": try fewer of them, or search another kind:"
+            };
+            ui.add(
+                egui::Label::new(RichText::new(body).size(size::SMALL).color(p.text_2)).wrap(),
             );
         });
     });
@@ -632,17 +654,26 @@ fn no_results(ui: &mut Ui, st: &State) {
 // Rows
 // ---------------------------------------------------------------------------
 
-fn list(ui: &mut Ui, st: &mut State, cx: &Cx, actions: &mut Vec<Action>) {
+/// The rows; `explained` when the status line already says why there may
+/// be none.
+fn list(ui: &mut Ui, st: &mut State, cx: &Cx, explained: bool, actions: &mut Vec<Action>) {
     let n = st.results.rows.len();
     if n == 0 {
+        if explained {
+            ui.add_space(space::S);
+            return;
+        }
+        let text = match st.results.mode {
+            Mode::Search => format!(
+                "There are no {} to list here.",
+                chip_label(st.results.scope).to_lowercase()
+            ),
+            _ => "Type to search commands, branches, files, commits and more.".to_owned(),
+        };
         ui.add_space(space::L);
         ui.vertical_centered(|ui| {
             let p = *pal(ui);
-            ui.label(
-                RichText::new("Type to search commands, branches, files, commits and more")
-                    .size(size::SMALL)
-                    .color(p.text_2),
-            );
+            ui.label(RichText::new(text).size(size::SMALL).color(p.text_2));
         });
         ui.add_space(space::L);
         return;
@@ -687,17 +718,24 @@ fn list(ui: &mut Ui, st: &mut State, cx: &Cx, actions: &mut Vec<Action>) {
                 cache,
                 ..
             } = &mut *st;
-            let mode = results.mode;
-            let query = results.query.clone();
-            match &mut results.rows[i] {
+            let results::Results {
+                rows,
+                query,
+                mode,
+                scope,
+                ..
+            } = results;
+            let mode = *mode;
+            let kinds = mode == Mode::Start || *scope == Scope::All;
+            match &mut rows[i] {
                 Row::Header(t) => header(ui, rect, t),
                 Row::Entry(e) => {
                     if e.hl.is_none() {
-                        e.hl = Some(results::highlight(ranker.matcher(), mode, &query, e));
+                        e.hl = Some(results::highlight(ranker.matcher(), mode, query, e));
                     }
                     let hovered = resp.hovered();
                     kit::row_background(ui, rect, hovered, selected);
-                    entry_row(ui, rect, e, mode, selected, &cache.catalog, now);
+                    entry_row(ui, rect, e, mode, selected, kinds, &cache.catalog, now);
                     if hovered {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                     }
@@ -743,6 +781,7 @@ fn entry_row(
     e: &Entry,
     mode: Mode,
     selected: bool,
+    kinds: bool,
     catalog: &super::commands::Catalog,
     now: i64,
 ) {
@@ -770,7 +809,9 @@ fn entry_row(
     } else if mode != Mode::Actions {
         if e.item.shortcut {
             right = paint_kbd(painter, &p, right, cy, &e.item.badge) - 10.0;
-        } else {
+        } else if kinds || !e.item.badge.is_empty() {
+            // In a narrowed search every row is the same kind: only
+            // badges that say more than the kind are drawn.
             let tone = badge_tone(&e.item);
             right = kit::paint_badge(painter, &p, dark, right, cy, e.item.badge_text(), tone) - 10.0;
         }
@@ -795,11 +836,12 @@ fn entry_row(
     if let (Some(t), true) = (e.item.time, mode != Mode::Actions) {
         let when = crate::format::relative(t, now);
         if !when.is_empty() {
-            if sub.is_empty() {
-                sub = when;
-            } else {
-                sub = format!("{sub} · {when}");
-            }
+            // Second, after the SHA or run number, so it is not cut off.
+            sub = match sub.split_once(" · ") {
+                _ if sub.is_empty() => when,
+                Some((first, rest)) => format!("{first} · {when} · {rest}"),
+                None => format!("{sub} · {when}"),
+            };
         }
     }
     let hl = e.hl.as_deref().unwrap_or(&[]);
@@ -988,61 +1030,78 @@ fn footer(ui: &mut Ui, st: &State, cx: &Cx) {
             && !matches!(e.item.target, Target::Prefix(_))
             && (verbs::verbs(&e.item, cx, catalog).len() > 1 || e.recent)
     });
-    ui.allocate_ui_with_layout(vec2(w, FOOTER_H), Layout::left_to_right(Align::Center), |ui| {
-        ui.set_min_size(vec2(w, FOOTER_H));
-        ui.spacing_mut().item_spacing.x = 5.0;
-        ui.add_space(10.0);
-        key_hint(ui, &p, "↑↓", "Move");
-        if let Some(v) = default {
-            let label = match (v, &entry.map(|e| &e.item.target)) {
-                (Verb::Run, Some(Target::Command(_))) => "Run",
-                _ => v.short(),
-            };
-            key_hint(ui, &p, "Enter", label);
-        }
-        if more {
-            key_hint(ui, &p, "Ctrl+Enter", "All actions");
-        }
-        if st.drill.is_none() && entry.is_some() {
-            let (scope_now, _) = scope::parse(&st.query);
-            let tab = match entry.map(|e| &e.item.target) {
-                Some(Target::Prefix(_)) => "Use",
-                _ if scope_now == Scope::All => "Narrow",
-                _ => "Complete",
-            };
-            key_hint(ui, &p, "Tab", tab);
-        }
-        key_hint(ui, &p, "Esc", if st.drill.is_some() { "Back" } else { "Close" });
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.add_space(10.0);
-            ui.label(
-                RichText::new(counts(st))
-                    .size(size::SMALL)
-                    .color(p.text_3),
-            );
-        });
-    });
-}
+    // (priority, key, label): the most useful are kept when space runs out.
+    let mut hints: Vec<(u8, &str, &str)> = vec![(4, "↑↓", "Move")];
+    if let Some(v) = default {
+        let label = match (v, entry.map(|e| &e.item.target)) {
+            (Verb::Run, Some(Target::Command(_))) => "Run",
+            _ => v.short(),
+        };
+        hints.push((0, "Enter", label));
+    }
+    if more {
+        hints.push((2, "Ctrl+Enter", "All actions"));
+    }
+    if st.drill.is_none() && entry.is_some() {
+        let (scope_now, _) = scope::parse(&st.query);
+        let tab = match entry.map(|e| &e.item.target) {
+            Some(Target::Prefix(_)) => "Use",
+            _ if scope_now == Scope::All => "Narrow",
+            _ => "Complete",
+        };
+        hints.push((3, "Tab", tab));
+    }
+    hints.push((1, "Esc", if st.drill.is_some() { "Back" } else { "Close" }));
 
-fn key_hint(ui: &mut Ui, p: &Palette, key: &str, label: &str) {
-    let g = ui
-        .painter()
-        .layout_no_wrap(key.to_owned(), FontId::new(size::CAPTION, medium()), p.text_2);
-    let (rect, _) = ui.allocate_exact_size(vec2(g.size().x + 10.0, 18.0), Sense::hover());
-    ui.painter().rect(
-        rect,
-        CornerRadius::same(radius::S),
-        p.raised,
-        Stroke::new(1.0, p.border),
-        StrokeKind::Inside,
+    let (rect, _) = ui.allocate_exact_size(vec2(w, FOOTER_H), Sense::hover());
+    let painter = ui.painter();
+    let key_font = FontId::new(size::CAPTION, medium());
+    let label_font = FontId::proportional(size::SMALL);
+    let cy = rect.center().y;
+    let count = painter.layout_no_wrap(counts(st), label_font.clone(), p.text_3);
+    let count_w = count.size().x;
+    painter.galley(
+        pos2(rect.right() - 10.0 - count_w, cy - count.size().y / 2.0),
+        count,
+        p.text_3,
     );
-    ui.painter().galley(
-        pos2(rect.left() + 5.0, rect.center().y - g.size().y / 2.0),
-        g,
-        p.text_2,
-    );
-    ui.label(RichText::new(label).size(size::SMALL).color(p.text_2));
-    ui.add_space(8.0);
+    let room = rect.width() - 20.0 - count_w - 16.0;
+    let laid: Vec<_> = hints
+        .iter()
+        .map(|(prio, key, label)| {
+            let k = painter.layout_no_wrap((*key).to_owned(), key_font.clone(), p.text_2);
+            let l = painter.layout_no_wrap((*label).to_owned(), label_font.clone(), p.text_2);
+            let width = k.size().x + 10.0 + 5.0 + l.size().x + 14.0;
+            (*prio, k, l, width)
+        })
+        .collect();
+    let mut by_prio: Vec<usize> = (0..laid.len()).collect();
+    by_prio.sort_by_key(|&i| laid[i].0);
+    let mut keep = vec![false; laid.len()];
+    let mut used = 0.0;
+    for i in by_prio {
+        if used + laid[i].3 <= room {
+            used += laid[i].3;
+            keep[i] = true;
+        }
+    }
+    let mut x = rect.left() + 10.0;
+    for (i, (_, k, l, width)) in laid.into_iter().enumerate() {
+        if !keep[i] {
+            continue;
+        }
+        let kr = Rect::from_min_size(pos2(x, cy - 9.0), vec2(k.size().x + 10.0, 18.0));
+        painter.rect(
+            kr,
+            CornerRadius::same(radius::S),
+            p.raised,
+            Stroke::new(1.0, p.border),
+            StrokeKind::Inside,
+        );
+        painter.galley(pos2(kr.left() + 5.0, cy - k.size().y / 2.0), k, p.text_2);
+        painter.galley(pos2(kr.right() + 5.0, cy - l.size().y / 2.0), l, p.text_2);
+        x += width;
+    }
 }
 
 /// `1,812 matches · 4.1 ms`, `Recent and suggested`, `5 actions`.

@@ -242,6 +242,9 @@ pub struct Item {
     pub weight: i32,
     /// Position in its source: the order for an empty query.
     pub order: u32,
+    /// Equal scores put the shorter first: the title's length in
+    /// characters, or the file name's for a path.
+    pub sort_len: u32,
     /// When it happened (unix seconds), shown relative to now after the
     /// subtitle when the row is drawn.
     pub time: Option<i64>,
@@ -252,8 +255,10 @@ impl Item {
         let title = title.into();
         let key = target.key();
         let weight = target.kind().weight();
+        let hay = Haystack::new(&title);
         Self {
-            hay: Haystack::new(&title),
+            sort_len: hay.len() as u32,
+            hay,
             target,
             key,
             title,

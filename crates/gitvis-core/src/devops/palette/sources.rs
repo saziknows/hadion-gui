@@ -83,6 +83,13 @@ pub fn ref_items(refs: &[RefEntry]) -> Vec<Item> {
                 sub.join(" · "),
             )
             .badge(badge);
+            // `origin/feature/x` is also found as `feature/x`, as if local.
+            if kind == RefKind::Remote
+                && let Some((_, branch)) = r.name.split_once('/')
+            {
+                item.extra = Some(super::fuzzy::Haystack::new(branch));
+                item.extra_adjust = BASENAME_BONUS;
+            }
             item.order = i as u32;
             item
         })
@@ -90,7 +97,8 @@ pub fn ref_items(refs: &[RefEntry]) -> Vec<Item> {
 }
 
 /// One item per path; the file name is matched on its own too (with a
-/// small bonus), so `main` finds `src/main.rs` before `maintenance/x.rs`.
+/// small bonus), so `main` finds `src/main.rs` before `maintenance/x.rs`,
+/// and equal matches put the shorter file name first.
 pub fn file_items(paths: &[String]) -> Vec<Item> {
     paths
         .iter()
@@ -102,6 +110,7 @@ pub fn file_items(paths: &[String]) -> Vec<Item> {
                 item.extra = Some(super::fuzzy::Haystack::new(name));
                 item.extra_adjust = BASENAME_BONUS;
             }
+            item.sort_len = name.chars().count() as u32;
             item.order = i as u32;
             item
         })

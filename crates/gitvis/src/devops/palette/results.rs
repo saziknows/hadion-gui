@@ -197,14 +197,17 @@ pub fn refresh(st: &mut State, cx: &Cx) {
         out.rows = r
             .hits
             .iter()
-            .map(|h| Row::Entry(Entry::of(sources[h.source as usize].0[h.index as usize].clone())))
+            .map(|h| &sources[h.source as usize].0[h.index as usize])
+            // The help lists the other prefixes, not itself.
+            .filter(|i| i.target != Target::Prefix(Scope::Help))
+            .map(|i| Row::Entry(Entry::of(i.clone())))
             .collect();
         out.mode = if scope == Scope::Help {
             Mode::Help
         } else {
             Mode::Search
         };
-        if out.rows.is_empty() && scope != Scope::Help {
+        if out.rows.is_empty() && scope != Scope::Help && !text.is_empty() {
             out.mode = Mode::NoResults;
             out.rows = prefix_rows(scope, text);
         }
@@ -373,9 +376,15 @@ fn action_rows(
     scored.into_iter().map(|(_, _, e)| Row::Entry(e)).collect()
 }
 
-/// When nothing matched: search one kind instead (keeping the text).
+/// When nothing matched: the prefixes. A narrowed search offers the other
+/// kinds with the same text; an unprefixed one already searched them all,
+/// so it only explains the prefixes.
 fn prefix_rows(current: Scope, text: &str) -> Vec<Row> {
-    let mut rows = vec![Row::Header("Search one kind instead")];
+    let mut rows = vec![Row::Header(if current == Scope::All {
+        "Prefixes"
+    } else {
+        "Search another kind"
+    })];
     for p in scope::PREFIXES
         .iter()
         .filter(|p| p.scope != Scope::Help && p.scope != current)
@@ -384,7 +393,7 @@ fn prefix_rows(current: Scope, text: &str) -> Vec<Row> {
             .into_iter()
             .find(|i| i.target == Target::Prefix(p.scope))
             .expect("every prefix has an item");
-        let title = if text.is_empty() {
+        let title = if text.is_empty() || current == Scope::All {
             None
         } else {
             Some(format!("Search {} for \"{text}\"", p.label.to_lowercase()))
@@ -524,7 +533,7 @@ mod tests {
         let mut st = state_with("?");
         refresh(&mut st, &cx);
         assert_eq!(st.results.mode, Mode::Help);
-        assert_eq!(st.results.entries(), scope::PREFIXES.len());
+        assert_eq!(st.results.entries(), scope::PREFIXES.len() - 1);
     }
 
     #[test]

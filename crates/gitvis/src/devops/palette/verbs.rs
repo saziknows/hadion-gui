@@ -443,7 +443,11 @@ pub fn actions(verb: Verb, item: &Item, cx: &Cx, catalog: &Catalog) -> Vec<Actio
 
 /// A confirmation with the exact command, then the operation.
 fn confirm(title: String, body: String, button: &str, danger: bool, op: GitOp) -> Action {
-    let details = op.commands().iter().map(|c| c.join(" ")).collect();
+    let details = op
+        .commands()
+        .iter()
+        .map(|c| format!("{} {}", op.program(), c.join(" ")))
+        .collect();
     Action::Dialog(Dialog::ConfirmAction {
         title,
         body,

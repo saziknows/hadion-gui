@@ -36,6 +36,19 @@ pub const FIRST_CHAR_MULTIPLIER: i32 = 2;
 /// A token matched in the keywords rather than the title scores this much less.
 pub const KEYWORD_PENALTY: i32 = 12;
 
+/// The least a token of `len` characters has to score to count as a
+/// match worth showing: the points of its characters plus a little for
+/// every join. Letters strewn across unrelated words (`palette` in
+/// "page: alerts, … protection") stay below it; runs, word starts and
+/// camelCase humps pass. Single characters always pass.
+pub fn min_score(len: usize) -> i32 {
+    if len <= 1 {
+        0
+    } else {
+        SCORE_MATCH * len as i32 + 3 * (len as i32 - 1)
+    }
+}
+
 /// Longest token the alignment considers (longer ones are cut).
 const MAX_TOKEN: usize = 48;
 /// Above this many cells the alignment falls back to the greedy match.
@@ -150,6 +163,16 @@ impl Query {
     }
 }
 
+/// One token's match ([`Matcher::token_quality`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TokenMatch {
+    pub score: i32,
+    /// Worth showing (see [`Matcher::token_quality`]).
+    pub good: bool,
+    /// Index of the first matched character.
+    pub start: u32,
+}
+
 /// Scratch space for the alignment, reused between calls.
 #[derive(Default)]
 pub struct Matcher {
@@ -196,6 +219,22 @@ impl Matcher {
         out.sort_unstable();
         out.dedup();
         Some(total)
+    }
+
+    /// Score of one token and whether the match is worth showing: it
+    /// clears [`min_score`], and it is not strewn wide across words
+    /// (two or more runs starting inside words over more than
+    /// `3 × length + 6` characters: `palette` in "page: alerts, … protection").
+    pub fn token_quality(&mut self, t: &Token, hay: &Haystack) -> Option<TokenMatch> {
+        let mut idx = std::mem::take(&mut self.tmp);
+        idx.clear();
+        let r = self.token(t, hay, Some(&mut idx)).map(|score| TokenMatch {
+            score,
+            good: good_shape(score, &idx, hay),
+            start: idx.first().copied().unwrap_or(0),
+        });
+        self.tmp = idx;
+        r
     }
 
     /// Align one token. `out` receives the matched indices when given.
@@ -391,6 +430,27 @@ impl Matcher {
     }
 }
 
+/// See [`Matcher::token_quality`]: `idx` is one token's alignment.
+fn good_shape(score: i32, idx: &[u32], hay: &Haystack) -> bool {
+    let m = idx.len();
+    if score < min_score(m) {
+        return false;
+    }
+    if m < 3 {
+        return true;
+    }
+    let span = (idx[m - 1] - idx[0] + 1) as usize;
+    let weak = idx
+        .iter()
+        .enumerate()
+        .filter(|(k, j)| {
+            let starts_run = *k == 0 || idx[k - 1] + 1 != **j;
+            starts_run && hay.bonus[**j as usize] == 0
+        })
+        .count();
+    !(weak >= 2 && span > 3 * m + 6)
+}
+
 /// One-shot convenience: score and matched character indices of `query`
 /// in `text`.
 pub fn fuzzy_match(query: &str, text: &str) -> Option<(i32, Vec<usize>)> {
@@ -572,6 +632,28 @@ mod tests {
     fn single_char_prefers_bonus() {
         assert_eq!(idx("h", "push history"), vec![5]);
         assert_eq!(idx("p", "app/Page"), vec![4]);
+    }
+
+    #[test]
+    fn quality_floor() {
+        let ok = |q: &str, t: &str| {
+            let q = Query::new(q);
+            Matcher::new()
+                .token_quality(&q.tokens()[0], &Haystack::new(t))
+                .is_some_and(|m| m.good)
+        };
+        assert!(ok("palette", "Command palette: fuzzy matcher"));
+        assert!(ok("palette", "xpalettex"));
+        assert!(!ok("palette", "Govern page: alerts, SBOM, images, protection"));
+        assert!(ok("push", "Unpushed commits"));
+        assert!(!ok("push", "Exposure › Supply chain"));
+        assert!(ok("fh", "file history"));
+        assert!(!ok("fh", "offshore"));
+        assert!(ok("cmdpal", "Command palette"));
+        assert!(ok("dvpl", "devops/palette"));
+        assert!(ok("cgsm", "crates/gitvis/src/main.rs"));
+        assert!(!ok("main", "crates/gitvis/src/devops/automation/mod.rs"));
+        assert!(ok("x", "a long text with one x"));
     }
 
     #[test]

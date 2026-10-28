@@ -41,30 +41,48 @@ pub struct Ranked {
     pub narrowed: bool,
 }
 
-/// The text score of `item` (weight and frecency not included): every
-/// token has to match the title, the keywords or the exact key.
-pub fn score_item(m: &mut Matcher, q: &Query, item: &Item) -> Option<i32> {
+/// Added when two or more tokens match the title in the order they were
+/// typed (`fix crash` before "Crash fix").
+pub const ORDER_BONUS: i32 = 8;
+
+/// The text score of `item` (weight and frecency not included) when every
+/// token appears in the title, the keywords or the exact key, and whether
+/// every token also matches well somewhere (see `Matcher::token_quality`).
+/// Only good items are listed; the others still count as matches for
+/// narrowing, which needs the plain subsequence test to stay monotonic.
+pub fn score_item(m: &mut Matcher, q: &Query, item: &Item) -> Option<(i32, bool)> {
     let mut total = 0;
+    let mut good = true;
+    let mut starts: Vec<u32> = Vec::new();
     for t in q.tokens() {
         let mut best: Option<i32> = None;
+        let mut ok = false;
         if let Some(e) = &item.exact
             && t.len() >= item.exact_min
             && e.starts_with(t.text())
         {
             best = Some(EXACT_BASE + EXACT_PER_CHAR * t.len() as i32);
+            ok = true;
         }
-        if let Some(s) = m.token(t, &item.hay, None) {
-            best = Some(best.map_or(s, |b| b.max(s)));
+        if let Some(tm) = m.token_quality(t, &item.hay) {
+            best = Some(best.map_or(tm.score, |b| b.max(tm.score)));
+            ok |= tm.good;
+            starts.push(tm.start);
         }
         if let Some(x) = &item.extra
-            && let Some(s) = m.token(t, x, None)
+            && let Some(tm) = m.token_quality(t, x)
         {
-            let s = s + item.extra_adjust;
+            ok |= tm.good;
+            let s = tm.score + item.extra_adjust;
             best = Some(best.map_or(s, |b| b.max(s)));
         }
         total += best?;
+        good &= ok;
     }
-    Some(total)
+    if starts.len() >= 2 && starts.windows(2).all(|w| w[0] < w[1]) {
+        total += ORDER_BONUS;
+    }
+    Some((total, good))
 }
 
 /// Character indices of the title to emphasise: the alignment of every
@@ -152,13 +170,15 @@ impl Ranker {
                 l.scope == scope && l.stamps == stamps && query.narrows(&l.query)
             });
             let mut try_item = |s: u16, i: u32, item: &Item, m: &mut Matcher| {
-                if let Some(text) = score_item(m, query, item) {
+                if let Some((text, good)) = score_item(m, query, item) {
                     matched.push((s, i));
-                    hits.push(Hit {
-                        source: s,
-                        index: i,
-                        score: text + item.weight + frecency_bonus(values, item),
-                    });
+                    if good {
+                        hits.push(Hit {
+                            source: s,
+                            index: i,
+                            score: text + item.weight + frecency_bonus(values, item),
+                        });
+                    }
                 }
             };
             if reuse {
@@ -198,7 +218,7 @@ impl Ranker {
                 .cmp(&a.score)
                 .then_with(|| {
                     if by_text {
-                        item(a).hay.len().cmp(&item(b).hay.len())
+                        item(a).sort_len.cmp(&item(b).sort_len)
                     } else {
                         std::cmp::Ordering::Equal
                     }
@@ -359,6 +379,28 @@ mod tests {
     }
 
     #[test]
+    fn scattered_letters_are_left_out_but_still_narrow() {
+        let items = vec![
+            cmd("a", "Command palette"),
+            cmd("b", "Govern page: alerts, SBOM, images, protection"),
+            cmd("c", "Exposure › Supply chain"),
+        ];
+        let src = [(items.as_slice(), 1)];
+        let mut r = Ranker::new();
+        let res = r.rank(&src, Scope::All, &Query::new("palette"), &HashMap::new(), 10);
+        assert_eq!(titles(&res, &src), ["Command palette"]);
+        assert_eq!(res.matched, 1);
+        // "pa" alone is a fine match for the second; "pal" is not, but the
+        // item stays a candidate, so the narrowed search equals a full one.
+        let mut inc = Ranker::new();
+        for q in ["p", "pa", "pal", "pale", "palet", "palett", "palette"] {
+            let a = inc.rank(&src, Scope::All, &Query::new(q), &HashMap::new(), 10);
+            let b = Ranker::new().rank(&src, Scope::All, &Query::new(q), &HashMap::new(), 10);
+            assert_eq!(a.hits, b.hits, "{q}");
+        }
+    }
+
+    #[test]
     fn empty_query_lists_scope_by_weight_frecency_and_order() {
         let items = vec![cmd("a", "A"), cmd("b", "B"), cmd("c", "C")];
         let src = [(items.as_slice(), 1)];
@@ -397,6 +439,40 @@ mod tests {
         // So is another scope.
         let a = inc.rank(&src2, Scope::All, &Query::new("d3 file 12345"), &HashMap::new(), 50);
         assert!(!a.narrowed);
+    }
+
+    #[test]
+    fn typed_order_and_short_file_names_break_ties() {
+        let items = vec![cmd("a", "Crash fix"), cmd("b", "Fix crash")];
+        let src = [(items.as_slice(), 1)];
+        let mut r = Ranker::new();
+        let res = r.rank(&src, Scope::All, &Query::new("fix crash"), &HashMap::new(), 10);
+        assert_eq!(titles(&res, &src), ["Fix crash", "Crash fix"]);
+        let files = sources::file_items(&[
+            "android/res/menu/wallet_search.xml".into(),
+            "components/brave_rewards/core/wallet/wallet.h".into(),
+        ]);
+        let src = [(files.as_slice(), 1)];
+        let res = r.rank(&src, Scope::Files, &Query::new("wallet"), &HashMap::new(), 10);
+        assert_eq!(
+            titles(&res, &src)[0],
+            "components/brave_rewards/core/wallet/wallet.h"
+        );
+    }
+
+    #[test]
+    fn remote_branches_match_without_the_remote() {
+        let refs = sources::ref_items(&[RefEntry {
+            name: "origin/wallet_meld".into(),
+            full: "refs/remotes/origin/wallet_meld".into(),
+            kind: Some(RefKind::Remote),
+            ..Default::default()
+        }]);
+        let files = sources::file_items(&["android/wallet_search.xml".into()]);
+        let src = [(refs.as_slice(), 1), (files.as_slice(), 1)];
+        let mut r = Ranker::new();
+        let res = r.rank(&src, Scope::All, &Query::new("wallet"), &HashMap::new(), 10);
+        assert_eq!(titles(&res, &src)[0], "origin/wallet_meld");
     }
 
     #[test]
