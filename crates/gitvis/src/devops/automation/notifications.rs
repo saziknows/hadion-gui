@@ -748,7 +748,7 @@ pub fn settings(ui: &mut Ui, st: &mut Notify, settings: &mut Settings, actions: 
     );
     let now = format::now_secs();
     kit::scroll_page(ui, "automation_notifications", |ui| {
-        ui.set_max_width(kit::PROSE);
+        ui.set_max_width(ui.available_width().min(kit::PROSE));
         let p = &mut settings.ext.automation.notify;
         let on = p.enabled;
         form::card(ui, if on { Tone::Accent } else { Tone::Neutral }, |ui| {
@@ -762,9 +762,16 @@ pub fn settings(ui: &mut Ui, st: &mut Notify, settings: &mut Settings, actions: 
                 if on {
                     "gitvis checks GitHub in the background with your gh login and shows a desktop notification for what is new since the last check. The first check only takes note of what is there."
                 } else {
-                    "Off. When on, gitvis checks GitHub in the background every few minutes with your gh login and shows a desktop notification when one of your runs finishes, someone asks for your review, mentions you, or a deployment waits for your approval."
+                    "Off. When on, gitvis checks GitHub in the background with your gh login every few minutes and shows a desktop notification for the events chosen under What to watch."
                 },
             );
+            if !on {
+                ui.add_space(2.0);
+                kit::secondary(
+                    ui,
+                    "Those are: one of your runs finishing, a review request, a mention, a deployment waiting for your approval.",
+                );
+            }
             if !on {
                 return;
             }
@@ -859,7 +866,7 @@ pub fn settings(ui: &mut Ui, st: &mut Notify, settings: &mut Settings, actions: 
         }
         let cost = plan_preview(p, st.login.clone(), st);
         let per_hour = cost * (60 / p.interval_min.max(1) as usize);
-        kit::muted(
+        kit::secondary(
             ui,
             &format!(
                 "{} per check, about {} an hour of the 5,000 your GitHub account gets. Checks pause below {LOW_RATE} requests left.",
@@ -883,7 +890,7 @@ pub fn settings(ui: &mut Ui, st: &mut Notify, settings: &mut Settings, actions: 
                     p.runs = r;
                 }
             });
-            kit::muted(
+            kit::secondary(
                 ui,
                 &format!(
                     "Runs you started (actor = your login) in the repositories open in gitvis, at most {MAX_REPOS}, newest 20 each."
@@ -893,7 +900,7 @@ pub fn settings(ui: &mut Ui, st: &mut Notify, settings: &mut Settings, actions: 
             form::checkbox(ui, &mut p.reviews, "New review requests");
             form::checkbox(ui, &mut p.mentions, "Mentions");
             form::checkbox(ui, &mut p.approvals, "Deployments waiting for my approval");
-            kit::muted(
+            kit::secondary(
                 ui,
                 "Review requests and mentions come from the inbox search (review-requested:@me, mentions:@me); approvals from GitHub notifications with the reason approval_requested (environments with required reviewers).",
             );
@@ -902,7 +909,7 @@ pub fn settings(ui: &mut Ui, st: &mut Notify, settings: &mut Settings, actions: 
         kit::section(ui, "Scope and quiet hours", None);
         form::card(ui, Tone::Neutral, |ui| {
             form::checkbox(ui, &mut p.only_open, "Only repositories open in gitvis");
-            kit::muted(
+            kit::secondary(
                 ui,
                 "Review requests, mentions and approvals in other repositories are ignored. Runs are always read for open repositories only.",
             );
@@ -939,7 +946,7 @@ pub fn settings(ui: &mut Ui, st: &mut Notify, settings: &mut Settings, actions: 
             {
                 form::error(ui, "Use 24-hour times like 22:00 and 07:30.");
             }
-            kit::muted(
+            kit::secondary(
                 ui,
                 "Local time. Checks continue during quiet hours, but nothing pops up: what arrives waits in the list behind the bell in the status bar.",
             );
@@ -964,7 +971,7 @@ pub fn settings(ui: &mut Ui, st: &mut Notify, settings: &mut Settings, actions: 
         } else {
             kit::code_block(ui, &lines.join("\n"), actions);
         }
-        kit::muted(
+        kit::secondary(
             ui,
             "Every request is a read through gh api with your login and shows in the activity log (verbose). Nothing is marked as read on GitHub.",
         );

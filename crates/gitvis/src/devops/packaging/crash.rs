@@ -412,7 +412,7 @@ pub fn show(ui: &mut Ui, st: &mut State, settings: &mut Settings, actions: &mut 
     );
     let prefs = &settings.ext.packaging;
     kit::scroll_page(ui, "packaging_crashes", |ui| {
-        ui.set_max_width(super::WIDTH);
+        ui.set_max_width(ui.available_width().min(super::WIDTH));
         if let Some(t) = &st.closed_at {
             kit::callout(
                 ui,
@@ -427,7 +427,7 @@ pub fn show(ui: &mut Ui, st: &mut State, settings: &mut Settings, actions: &mut 
             );
         }
         let total: u64 = st.list.iter().map(|l| l.bytes).sum();
-        kit::stats(
+        crate::views::insights::stats(
             ui,
             &[
                 kit::Stat::new("Reports", format::count(st.list.len())),

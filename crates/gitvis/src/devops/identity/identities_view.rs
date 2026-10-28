@@ -58,20 +58,20 @@ pub fn show(
     ) {
         actions.push(Act::Refresh(Section::Identities).into());
     }
-    let global_name = config
-        .ok()
-        .and_then(|s| {
-            s.effective("user.name")
+    // The global (or system) value itself: the effective one may come from
+    // the repository's own config, which says nothing about other folders.
+    // `None` while the config has not been read.
+    let global = |key: &str| -> Option<Option<String>> {
+        config.ok().map(|s| {
+            s.values(key)
+                .into_iter()
                 .filter(|e| e.scope <= gitvis_core::devops::identity::Scope::Global)
+                .next_back()
+                .map(|e| e.value_text().to_owned())
         })
-        .map(|e| e.value_text().to_owned());
-    let global_email = config
-        .ok()
-        .and_then(|s| {
-            s.effective("user.email")
-                .filter(|e| e.scope <= gitvis_core::devops::identity::Scope::Global)
-        })
-        .map(|e| e.value_text().to_owned());
+    };
+    let global_name = global("user.name");
+    let global_email = global("user.email");
     w::page(ui, "identity_identities", scroll, |ui| {
         if let Some(f) = id_form.as_mut() {
             identity_form(
@@ -96,8 +96,8 @@ pub fn show(
                 rules(
                     ui,
                     rep,
-                    global_name.as_deref(),
-                    global_email.as_deref(),
+                    global_name.as_ref().map(Option::as_deref),
+                    global_email.as_ref().map(Option::as_deref),
                     busy,
                     form_open,
                     actions,
@@ -114,7 +114,7 @@ fn explainer(ui: &mut Ui, actions: &mut Vec<Action>) {
         ui,
         Tone::Neutral,
         "How identities work",
-        "An identity is a small config file with user.name, user.email and maybe user.signingkey, plus a rule in your global config that includes the file for every repository under a folder. A repository anywhere else keeps your global name and e-mail.",
+        "An identity is a small config file (user.name, user.email, maybe user.signingkey) that your global config includes for every repository under a folder. Repositories anywhere else keep your global name and e-mail.",
         |ui| {
             ui.add_space(4.0);
             kit::code_block(
@@ -123,26 +123,30 @@ fn explainer(ui: &mut Ui, actions: &mut Vec<Action>) {
                 actions,
             );
             ui.add_space(4.0);
-            ui.add(
-                egui::Label::new(
-                    RichText::new(
-                        "The trailing slash matters: C:/work/ matches every repository below C:/work, while C:/work without it matches only a .git folder at exactly that path. On Windows use gitdir/i: — it ignores case, so C:/Work and c:/work both match, where gitdir: is case-sensitive. Write paths with forward slashes.",
-                    )
-                    .size(size::SMALL)
-                    .color(pal(ui).text),
-                )
-                .wrap(),
-            );
+            let small = |t: &str| RichText::new(t).size(size::SMALL);
+            kit::kv(ui, 104.0, |kv| {
+                kv.text(
+                    "Trailing slash",
+                    small("C:/work/ matches every repository below C:/work; C:/work without it matches only a .git folder at exactly that path."),
+                );
+                kv.text(
+                    "Case",
+                    small("gitdir/i: ignores case, so C:/Work and c:/work both match; gitdir: is case-sensitive. Use gitdir/i: on Windows."),
+                );
+                kv.text("Slashes", small("Write paths with forward slashes."));
+            });
         },
     );
 }
 
+/// `rules` gets the global name and e-mail as `None` while the config has
+/// not been read yet, `Some(None)` when it has no such entry.
 #[allow(clippy::too_many_arguments)]
 fn rules(
     ui: &mut Ui,
     rep: &IdentityReport,
-    global_name: Option<&str>,
-    global_email: Option<&str>,
+    global_name: Option<Option<&str>>,
+    global_email: Option<Option<&str>>,
     busy: bool,
     form_open: bool,
     actions: &mut Vec<Action>,
@@ -151,9 +155,16 @@ fn rules(
     kit::section(ui, "Rules", Some(rep.rules.len()));
     if rep.rules.is_empty() {
         let who = match (global_name, global_email) {
-            (Some(n), Some(e)) => format!("{n} <{e}>"),
-            (None, Some(e)) => e.to_owned(),
-            _ => "no global name and e-mail (git refuses to commit without them)".to_owned(),
+            (Some(Some(n)), Some(Some(e))) => format!("{n} <{e}>"),
+            (Some(None), Some(Some(e))) => e.to_owned(),
+            (Some(Some(n)), Some(None)) => {
+                format!("{n} with no global e-mail (git refuses to commit without one)")
+            }
+            (Some(None), Some(None)) => {
+                "no global name and e-mail (git refuses to commit without them)".to_owned()
+            }
+            // The config has not been read yet: say nothing wrong.
+            _ => "your global name and e-mail".to_owned(),
         };
         kit::callout_with(
             ui,
@@ -595,20 +606,26 @@ fn identity_form(
                 "Identity file",
                 Some("Written next to your global config."),
                 |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        ui.label(kit::mono(".gitconfig-").color(pal(ui).text_2));
-                        if form::input(
-                            ui,
-                            "identity_form_slug",
-                            &mut f.slug,
-                            InputOpts::new("work").mono().width(180.0),
-                        )
-                        .changed()
-                        {
-                            f.slug_auto = false;
-                        }
-                    });
+                    // Centred on the input's height, so the fixed prefix sits
+                    // on the same line as the typed text.
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), form::INPUT_H),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.label(kit::mono(".gitconfig-").color(pal(ui).text_2));
+                            if form::input(
+                                ui,
+                                "identity_form_slug",
+                                &mut f.slug,
+                                InputOpts::new("work").mono().width(180.0),
+                            )
+                            .changed()
+                            {
+                                f.slug_auto = false;
+                            }
+                        },
+                    );
                 },
             );
         }

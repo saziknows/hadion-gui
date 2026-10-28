@@ -35,7 +35,7 @@ pub(super) fn show(
         },
     );
     kit::scroll_page(ui, "settings_terminal", |ui| {
-        ui.set_max_width(kit::PROSE);
+        ui.set_max_width(ui.available_width().min(kit::PROSE));
         shell_section(ui, st, settings);
         display_section(ui, settings);
         behaviour_section(ui, settings);

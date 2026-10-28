@@ -1128,8 +1128,9 @@ fn lines_chart(ui: &mut Ui, months: &[Month]) {
 /// Commits by weekday (rows) and hour (columns).
 pub fn heat_map(ui: &mut Ui, heat: &[[u32; 24]; 7]) {
     let p = *pal(ui);
-    let cell = 16.0;
     let label_w = 40.0;
+    // Smaller cells in a narrow pane, so the late hours are not cut off.
+    let cell = ((ui.available_width() - label_w) / 24.0).clamp(10.0, 16.0);
     let header_h = 18.0;
     let size = vec2(label_w + 24.0 * cell, header_h + 7.0 * cell);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());

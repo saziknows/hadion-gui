@@ -24,7 +24,7 @@ pub fn show(ui: &mut Ui, cx: &Cx, page: &mut InsightsPage, actions: &mut Vec<Act
     }
     let sel = page.selected.clone();
     match &page.lost {
-        None => {
+        None => super::scroll_empty(ui, "ins_lost_empty", |ui| {
             if page.lost_run.is_some() {
                 kit::empty_state(
                     ui,
@@ -42,7 +42,7 @@ pub fn show(ui: &mut Ui, cx: &Cx, page: &mut InsightsPage, actions: &mut Vec<Act
             ) {
                 actions.push(Action::RunLost);
             }
-        }
+        }),
         Some(Err(e)) => {
             Frame::NONE
                 .inner_margin(Margin::symmetric(24, 16))

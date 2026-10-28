@@ -596,7 +596,7 @@ fn curl_line(ui: &mut Ui, st: &LinksUi, actions: &mut Vec<Action>) {
     match &st.curl {
         None => {}
         Some(Some(p)) => {
-            kit::muted(
+            kit::secondary(
                 ui,
                 &format!(
                     "Lookups run curl --config - ({}) with the credential on standard input, never on the command line.",
@@ -655,13 +655,28 @@ pub fn settings(
         .unwrap_or_default();
     let repo_name = repo.map(|r| r.name.clone()).unwrap_or_default();
     kit::scroll_page(ui, "automation_integrations", |ui| {
-        ui.set_max_width(kit::PROSE);
+        ui.set_max_width(ui.available_width().min(kit::PROSE));
         let p = &mut settings.ext.automation.links;
         let (_, bad_rules) = links::compile_custom(&p.custom);
         kit::body(
             ui,
-            "Issue keys become links: in the commit panel (message and branches at the commit), in pull requests (title, body, branch) and as \"Add KEY\" above the commit message when the branch name has one. Lookups of titles and status are off by default; credentials stay in the OS keychain.",
+            "Issue keys such as ABC-123 become links to your tracker:",
         );
+        kit::kv(ui, 128.0, |kv| {
+            kv.text(
+                "Commit panel",
+                "in the message and the branches at the commit",
+            );
+            kv.text("Pull requests", "in the title, the body and the branch");
+            kv.text(
+                "Commit message",
+                "\"Add KEY\" above it when the branch name has a key the message lacks",
+            );
+            kv.text(
+                "Lookups",
+                "titles and status; off by default, credentials stay in the OS keychain",
+            );
+        });
 
         // Jira.
         kit::section(ui, "Jira", None);
@@ -697,7 +712,7 @@ pub fn settings(
             }
             ui.add_space(space::XS);
             form::checkbox(ui, &mut p.jira.lookup, "Look up titles and status");
-            kit::muted(
+            kit::secondary(
                 ui,
                 "Off by default. When on, gitvis asks Jira for the title and status of keys it shows (GET /rest/api/3/issue/KEY), with your e-mail and an API token.",
             );
@@ -775,7 +790,7 @@ pub fn settings(
             );
             ui.add_space(space::XS);
             form::checkbox(ui, &mut p.linear.lookup, "Look up titles and status");
-            kit::muted(
+            kit::secondary(
                 ui,
                 "Off by default. When on, gitvis asks Linear's GraphQL API for the title and state of keys it shows, with a personal API key.",
             );
@@ -822,7 +837,7 @@ pub fn settings(
             }
         });
         if p.custom.is_empty() {
-            kit::muted(
+            kit::secondary(
                 ui,
                 "Any other tracker: a regular expression and a URL. {0} is the whole match, {1}…{9} its groups, {key} group 1. Example: bug #?(\\d+) → https://bugs.example.com/show_bug.cgi?id={1}.",
             );

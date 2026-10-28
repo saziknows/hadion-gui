@@ -26,12 +26,13 @@ use crate::state::{
     Action, ExposureFilter, RepoState, ScanRun, SecurityPage, SecurityTab, Settings,
 };
 use crate::theme::{self, Palette, Tone, pal, radius, size, space};
+use crate::views::form;
 use crate::views::icons::{Icon, IconButton};
 use crate::views::kit::{self, Leading};
 use crate::views::osint;
 
 /// Width of the label column of fact tables on this page.
-pub(crate) const KV_W: f32 = 132.0;
+pub(crate) const KV_W: f32 = 144.0;
 
 // ---------------------------------------------------------------------------
 // Severity
@@ -667,14 +668,13 @@ fn history_menu(ui: &mut Ui, page: &SecurityPage, enabled: bool, actions: &mut V
                 (10_000, "10,000 commits: a few minutes on a large repository"),
                 (0, "Entire history: can take long; cancel any time"),
             ] {
-                if ui.radio(page.history_depth == n, label).clicked() {
+                if form::radio(ui, page.history_depth == n, label) {
                     actions.push(Action::SetHistoryDepth(n));
                 }
             }
             ui.separator();
             let mut all = page.all_refs;
-            if ui
-                .checkbox(&mut all, "All branches, tags and remotes (not only HEAD)")
+            if form::checkbox(ui, &mut all, "All branches, tags and remotes (not only HEAD)")
                 .clicked()
             {
                 actions.push(Action::ToggleAllRefs);
@@ -758,7 +758,9 @@ fn secrets_body(
     actions: &mut Vec<Action>,
 ) {
     if page.report.is_none() && page.alerts.is_none() {
-        secrets_empty(ui, page, actions);
+        crate::views::insights::scroll_empty(ui, "sec_empty", |ui| {
+            secrets_empty(ui, page, actions)
+        });
         return;
     }
     let mut lf = ListFilters {
@@ -799,25 +801,49 @@ fn secrets_empty(ui: &mut Ui, page: &SecurityPage, actions: &mut Vec<Action>) {
         ui,
         Icon::Shield,
         "Is this repository exposing anything it should not?",
-        "A scan reads every file for credentials (cloud keys, tokens, private keys, passwords in URLs and configuration) and sensitive file names (.env, id_rsa, *.pem, credential stores, Terraform state). For each one it tells you whether it is staged, in HEAD or only in history, and whether it was pushed. Remote URLs and git configuration are checked for embedded passwords.",
+        "A scan reads every file and tells you what it found, where it is and whether it was pushed.",
         Some((Icon::Search, "Scan working tree")),
     ) {
         actions.push(Action::ScanSecrets { history: false });
     }
     ui.vertical_centered(|ui| {
-        ui.set_max_width(440.0);
+        ui.set_max_width(ui.available_width().min(460.0));
         ui.add_space(space::XS);
         history_menu(ui, page, true, actions);
         ui.add_space(space::L);
-        kit::muted(
-            ui,
-            "Staged changes are checked automatically after every refresh, and the commit button asks before committing a possible secret. Secrets never appear in the activity log or on a command line.",
-        );
-        if let Some(e) = &page.error {
+        // What a scan looks at, one kind per row, left-aligned in the column.
+        ui.with_layout(Layout::top_down(Align::Min), |ui| {
+            let p = *pal(ui);
+            ui.label(kit::caption_text(&p, "What a scan checks"));
+            kit::kv(ui, 112.0, |kv| {
+                kv.text(
+                    "Credentials",
+                    "cloud keys, tokens, private keys, passwords in URLs and configuration",
+                );
+                kv.text(
+                    "File names",
+                    ".env, id_rsa, *.pem, credential stores, Terraform state",
+                );
+                kv.text(
+                    "Where",
+                    "staged, in HEAD or only in history, and whether it was pushed",
+                );
+                kv.text(
+                    "Configuration",
+                    "remote URLs and git config with embedded passwords",
+                );
+            });
             ui.add_space(space::M);
-            let c = pal(ui).danger;
-            ui.add(Label::new(RichText::new(e).size(size::SMALL).color(c)).wrap());
-        }
+            kit::secondary(
+                ui,
+                "Staged changes are checked automatically after every refresh, and the commit button asks before committing a possible secret. Secrets never appear in the activity log or on a command line.",
+            );
+            if let Some(e) = &page.error {
+                ui.add_space(space::M);
+                let c = pal(ui).danger;
+                ui.add(Label::new(RichText::new(e).size(size::SMALL).color(c)).wrap());
+            }
+        });
     });
 }
 
@@ -1127,25 +1153,52 @@ fn alert_line(a: &SecretAlert, now: i64) -> Line {
 // ---------------------------------------------------------------------------
 
 /// Top of a detail pane: badges and actions on one line, the title under
-/// them.
+/// them. In a pane too narrow for both, the actions get a row of their own
+/// instead of running over the badges (their width is remembered from the
+/// previous frame).
 pub(crate) fn detail_head(
     ui: &mut Ui,
     badges: &[(String, Tone)],
     title: &str,
     actions_ui: impl FnOnce(&mut Ui),
 ) {
+    let id = ui.scope_id().with("detail_head_actions");
+    let known: f32 = ui.ctx().data(|d| d.get_temp(id)).unwrap_or(0.0);
+    let badges_w: f32 = badges
+        .iter()
+        .map(|(t, _)| kit::badge_width(ui.painter(), t) + 6.0)
+        .sum();
+    let beside = badges_w + known + 12.0 <= ui.available_width();
+    let mut measured = 0.0;
+    let mut actions_ui = Some(actions_ui);
+    let mut actions_row = |ui: &mut Ui| {
+        let r = ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            if let Some(a) = actions_ui.take() {
+                a(ui)
+            }
+        });
+        r.response.rect.width()
+    };
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
             for (t, tone) in badges {
                 kit::badge(ui, t, *tone);
             }
-        });
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            actions_ui(ui);
+            if beside {
+                measured = actions_row(ui);
+            }
         });
     });
+    if !beside {
+        ui.horizontal(|ui| measured = actions_row(ui));
+    }
+    if (measured - known).abs() > 1.0 {
+        ui.ctx().data_mut(|d| d.insert_temp(id, measured));
+        ui.ctx()
+            .request_discard("detail head actions changed width");
+    }
     ui.add_space(2.0);
     kit::title(ui, title);
 }
@@ -2148,7 +2201,7 @@ fn overview(ui: &mut Ui, cx: &Cx, page: &SecurityPage, actions: &mut Vec<Action>
         let history_only = rep.findings.iter().filter(|f| f.history_only()).count();
         let critical = rep.count(Severity::Critical);
         let high = rep.count(Severity::High);
-        kit::stats(
+        crate::views::insights::stats(
             ui,
             &[
                 kit::Stat::new("Findings", format::count(rep.total())),

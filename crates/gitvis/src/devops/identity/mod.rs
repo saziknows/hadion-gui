@@ -618,7 +618,11 @@ fn remember_repos(st: &mut State, g: &GlobalCx) {
 fn reload_section(cx: &mut Ctx, st: &mut State, section: Section) {
     match section {
         Section::GitConfig => load_config(cx, st),
-        Section::Identities => load_identities(cx, st),
+        // The "no rules yet" note names the global identity from the config.
+        Section::Identities => {
+            load_config(cx, st);
+            load_identities(cx, st);
+        }
         Section::Keys => {
             load_config(cx, st);
             load_keys(cx, st);

@@ -136,33 +136,35 @@ pub fn show(ui: &mut Ui, cx: &Cx, page: &mut SecurityPage, actions: &mut Vec<Act
         ..
     } = page;
     if osint.report.is_none() && tab != SecurityTab::GitHub {
-        if let Some(e) = &osint.error {
-            if kit::empty_state(
+        crate::views::insights::scroll_empty(ui, "osint_empty", |ui| {
+            if let Some(e) = &osint.error {
+                if kit::empty_state(
+                    ui,
+                    Icon::Warning,
+                    "The analysis failed",
+                    e,
+                    Some((Icon::Rerun, "Try again")),
+                ) {
+                    actions.push(Action::RunOsint);
+                }
+            } else if osint.running() {
+                kit::empty_state(
+                    ui,
+                    Icon::Search,
+                    "Analysing",
+                    "Reading commits, files, metadata and history leftovers. Local only; nothing leaves the machine.",
+                    None,
+                );
+            } else if kit::empty_state(
                 ui,
-                Icon::Warning,
-                "The analysis failed",
-                e,
-                Some((Icon::Rerun, "Try again")),
+                Icon::Search,
+                "Not analysed yet",
+                "The analysis reads commits, files, file metadata, history leftovers and dependencies on this machine; nothing leaves it.",
+                Some((Icon::Search, "Analyse")),
             ) {
                 actions.push(Action::RunOsint);
             }
-        } else if osint.running() {
-            kit::empty_state(
-                ui,
-                Icon::Search,
-                "Analysing",
-                "Reading commits, files, metadata and history leftovers. Local only; nothing leaves the machine.",
-                None,
-            );
-        } else if kit::empty_state(
-            ui,
-            Icon::Search,
-            "Not analysed yet",
-            "The analysis reads commits, files, file metadata, history leftovers and dependencies on this machine; nothing leaves it.",
-            Some((Icon::Search, "Analyse")),
-        ) {
-            actions.push(Action::RunOsint);
-        }
+        });
         return;
     }
     match tab {
@@ -313,8 +315,9 @@ pub(crate) fn heatmap(ui: &mut Ui, heat: &[[u32; 24]; 7]) {
     const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     let p = *pal(ui);
     let dark = ui.visuals().dark_mode;
-    let cell = 18.0;
     let label_w = 40.0;
+    // Smaller cells in a narrow pane, so the late hours are not cut off.
+    let cell = ((ui.available_width() - label_w) / 24.0).clamp(10.0, 18.0);
     let header_h = 20.0;
     let size = vec2(label_w + 24.0 * cell, header_h + 7.0 * cell);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
@@ -564,7 +567,7 @@ fn person_detail(
     why(ui, kind_why(kind));
 
     sec(ui, "Activity", None);
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             kit::Stat::new("Authored", format::count(id.commits)),
@@ -769,7 +772,7 @@ fn people_overview(ui: &mut Ui, rep: &OsintReport, public: bool, actions: &mut V
         kit::Stat::new("With aliases", format::count(with_aliases))
             .tip("Addresses that share a name with another address"),
     );
-    kit::stats(ui, &tiles);
+    crate::views::insights::stats(ui, &tiles);
     kit::secondary(
         ui,
         "Every author and committer address in the history, what kind of address it is, and what the commit times give away. Select an address on the left.",
@@ -986,7 +989,7 @@ fn footprint_overview(ui: &mut Ui, cx: &Cx, rep: &OsintReport) {
         .collect();
     let pii = live.iter().filter(|f| PII_RULES.contains(&f.rule)).count();
     let pushed = live.iter().filter(|f| f.pushed).count();
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             kit::Stat::new("Identifiers", format::count(live.len())),
@@ -1238,7 +1241,7 @@ fn files_tab(ui: &mut Ui, cx: &Cx, o: &mut OsintState, actions: &mut Vec<Action>
 
 fn files_overview(ui: &mut Ui, rep: &OsintReport) {
     let gps = rep.metadata.iter().filter(|m| has_gps(m)).count();
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             kit::Stat::new("With metadata", format::count(rep.metadata.len())),
@@ -1493,7 +1496,7 @@ fn history_tab(ui: &mut Ui, cx: &Cx, o: &mut OsintState, actions: &mut Vec<Actio
     kit::scroll_page(ui, "osint_history", |ui| {
         let p = *pal(ui);
         let stash_secrets = a.stash_findings.len();
-        kit::stats(
+        crate::views::insights::stats(
             ui,
             &[
                 kit::Stat::new("Incident messages", format::count(m.incidents.len()))
@@ -1762,7 +1765,7 @@ fn history_tab(ui: &mut Ui, cx: &Cx, o: &mut OsintState, actions: &mut Vec<Actio
         match pr_refs {
             Some(Ok(pr)) => {
                 ui.add_space(space::S);
-                kit::stats(
+                crate::views::insights::stats(
                     ui,
                     &[
                         kit::Stat::new("Advertised heads", format::count(pr.total)),
@@ -1949,7 +1952,7 @@ fn unreachable_section(
 ) {
     let p = *pal(ui);
     ui.add_space(space::S);
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             kit::Stat::new("Commits", format::count(u.commit_count)),
@@ -2060,13 +2063,15 @@ fn github_tab(
     actions: &mut Vec<Action>,
 ) {
     let Some((owner, name)) = cx.github.clone() else {
-        kit::empty_state(
-            ui,
-            Icon::Shield,
-            "No GitHub remote",
-            "Add a remote on github.com to see visibility, forks, alerts and the admin surface.",
-            None,
-        );
+        crate::views::insights::scroll_empty(ui, "osint_github_empty", |ui| {
+            kit::empty_state(
+                ui,
+                Icon::Shield,
+                "No GitHub remote",
+                "Add a remote on github.com to see visibility, forks, alerts and the admin surface.",
+                None,
+            );
+        });
         return;
     };
     let o = &*o;
@@ -2104,7 +2109,7 @@ fn github_tab(
             );
         }
         if !tiles.is_empty() {
-            kit::stats(ui, &tiles);
+            crate::views::insights::stats(ui, &tiles);
         }
 
         sec(ui, "Repository", None);
@@ -2486,7 +2491,7 @@ fn supply_tab(ui: &mut Ui, cx: &Cx, o: &mut OsintState, actions: &mut Vec<Action
                     .tone_if(!v.is_empty(), Tone::Danger),
             );
         }
-        kit::stats(ui, &tiles);
+        crate::views::insights::stats(ui, &tiles);
 
         sec(
             ui,

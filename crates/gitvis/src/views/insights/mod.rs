@@ -347,21 +347,23 @@ fn depth_menu(ui: &mut Ui, page: &InsightsPage, actions: &mut Vec<Action>) {
     egui::Popup::menu(&resp)
         .id(egui::Id::unique("insights_depth"))
         .show(|ui| {
-            ui.set_min_width(220.0);
+            ui.set_min_width(240.0);
+            let p = *pal(ui);
+            ui.label(kit::caption_text(&p, "Commits the history pass reads"));
+            ui.add_space(2.0);
             for (n, text) in [
                 (2_000, "Newest 2,000 commits"),
                 (10_000, "Newest 10,000 commits"),
                 (50_000, "Newest 50,000 commits"),
                 (0, "All commits"),
             ] {
-                if ui.selectable_label(page.depth == n, text).clicked() {
+                if crate::views::form::radio(ui, page.depth == n, text) {
                     actions.push(Action::SetInsightsDepth(n));
                     ui.close();
                 }
             }
             ui.separator();
-            if ui
-                .checkbox(&mut page.all_refs.clone(), "All branches and tags")
+            if crate::views::form::checkbox(ui, &mut page.all_refs.clone(), "All branches and tags")
                 .on_hover_text(
                     "Walk every ref instead of HEAD only. Hotspots and ownership then include unmerged work.",
                 )
@@ -373,33 +375,49 @@ fn depth_menu(ui: &mut Ui, page: &InsightsPage, actions: &mut Vec<Action>) {
 }
 
 fn empty_state(ui: &mut Ui, page: &InsightsPage, actions: &mut Vec<Action>) {
-    if let Some(e) = &page.error {
-        if kit::empty_state(
+    scroll_empty(ui, "ins_empty", |ui| {
+        if let Some(e) = &page.error {
+            if kit::empty_state(
+                ui,
+                Icon::Warning,
+                "The analysis failed",
+                e,
+                Some((Icon::Rerun, "Try again")),
+            ) {
+                actions.push(Action::RunInsights);
+            }
+        } else if page.running() {
+            kit::empty_state(
+                ui,
+                Icon::Chart,
+                "Analysing the repository",
+                "Reading the index, the history, branches, tags, debt markers, workflows and licences.",
+                None,
+            );
+        } else if kit::empty_state(
             ui,
-            Icon::Warning,
-            "The analysis failed",
-            e,
-            Some((Icon::Rerun, "Try again")),
+            Icon::Chart,
+            "Not analysed yet",
+            "The analysis reads the index, the history (with line counts), branches, tags, debt markers, workflows and licences. Everything stays on this machine.",
+            Some((Icon::Search, "Analyse")),
         ) {
             actions.push(Action::RunInsights);
         }
-    } else if page.running() {
-        kit::empty_state(
-            ui,
-            Icon::Chart,
-            "Analysing the repository",
-            "Reading the index, the history, branches, tags, debt markers, workflows and licences.",
-            None,
-        );
-    } else if kit::empty_state(
-        ui,
-        Icon::Chart,
-        "Not analysed yet",
-        "The analysis reads the index, the history (with line counts), branches, tags, debt markers, workflows and licences. Everything stays on this machine.",
-        Some((Icon::Search, "Analyse")),
-    ) {
-        actions.push(Action::RunInsights);
-    }
+    });
+}
+
+/// A page-filling empty state that scrolls when the window is too short
+/// for it (otherwise its lower part is cut off). The content keeps the
+/// viewport's height, so `kit::empty_state` still places itself by it.
+pub(crate) fn scroll_empty(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
+    let h = ui.available_height();
+    egui::ScrollArea::vertical()
+        .id_salt(id)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.set_max_height(h);
+            add(ui)
+        });
 }
 
 // ---------------------------------------------------------------------------

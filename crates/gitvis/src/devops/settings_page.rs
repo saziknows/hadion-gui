@@ -212,9 +212,16 @@ pub fn show(
 fn own_section(ui: &mut Ui, title: &str, subtitle: &str, add: impl FnOnce(&mut Ui)) {
     kit::page_header(ui, title, subtitle, |_| {});
     kit::scroll_page(ui, &format!("settings_{title}"), |ui| {
-        ui.set_max_width(kit::PROSE);
+        // set_max_width widens a Ui past a narrow viewport: cap at what is there.
+        ui.set_max_width(ui.available_width().min(kit::PROSE));
         add(ui)
     });
+}
+
+/// A help line under a control: secondary colour, not the faint caption
+/// colour (explanations are never faint).
+fn help(ui: &mut Ui, text: &str) {
+    kit::secondary(ui, text);
 }
 
 fn appearance(ui: &mut Ui, settings: &Settings, actions: &mut Vec<Action>) {
@@ -254,16 +261,16 @@ fn behaviour(ui: &mut Ui, settings: &Settings, actions: &mut Vec<Action>) {
         if form::checkbox(ui, &mut verbose, "Verbose activity log").clicked() {
             actions.push(Action::ToggleVerbose);
         }
-        kit::muted(
+        help(
             ui,
-            "Record repository reads and API calls too, with their full output, not only operations and failures.",
+            "Records repository reads and API calls too, with their full output, not only operations and failures.",
         );
         ui.add_space(space::S);
         let mut scan = settings.scan_on_open;
         if form::checkbox(ui, &mut scan, "Scan for secrets when a repository opens").clicked() {
             actions.push(Action::ToggleScanOnOpen);
         }
-        kit::muted(
+        help(
             ui,
             "Reads every file of the working tree for credentials. Staged changes are always checked before a commit.",
         );
@@ -330,21 +337,34 @@ fn safety(ui: &mut Ui, settings: &Settings, actions: &mut Vec<Action>) {
     let p = *crate::theme::pal(ui);
     for (tool, blocked, allowed) in rows {
         ui.add_space(space::S);
-        ui.label(
-            egui::RichText::new(tool)
-                .family(crate::theme::semibold())
-                .color(p.text_strong),
-        );
+        kit::subtitle(ui, tool);
         kit::kv(ui, 110.0, |kv| {
             kv.text("Blocked", blocked);
-            kv.muted("Still allowed", allowed);
+            // Still information, so the secondary colour, not the faint one.
+            kv.row("Still allowed", |ui| {
+                ui.add(egui::Label::new(egui::RichText::new(allowed).color(p.text_2)).wrap());
+            });
         });
     }
     ui.add_space(space::M);
-    kit::callout(
+    kit::callout_with(
         ui,
         Tone::Neutral,
         "Not covered",
-        "Task scripts (npm, make, cargo …) run whatever they contain: safe mode cannot tell a deploy script from a build. Local git changes (commit, rebase, reset) are not remote and stay allowed; undo them from the reflog.",
+        "Two kinds of change are outside safe mode:",
+        |ui| {
+            ui.add_space(2.0);
+            let small = |t: &str| egui::RichText::new(t).size(crate::theme::size::SMALL);
+            kit::kv(ui, 110.0, |kv| {
+                kv.text(
+                    "Task scripts",
+                    small("npm, make, cargo … run whatever they contain: safe mode cannot tell a deploy script from a build."),
+                );
+                kv.text(
+                    "Local git",
+                    small("Commit, rebase and reset change nothing remote and stay allowed; undo them from the reflog."),
+                );
+            });
+        },
     );
 }

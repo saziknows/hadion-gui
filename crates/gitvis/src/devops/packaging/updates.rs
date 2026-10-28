@@ -743,7 +743,7 @@ pub fn show(ui: &mut Ui, st: &mut State, settings: &mut Settings, actions: &mut 
     let exe = info::exe();
     let dev = exe.as_deref().and_then(swap::dev_build_reason);
     kit::scroll_page(ui, "packaging_updates", |ui| {
-        ui.set_max_width(super::WIDTH);
+        ui.set_max_width(ui.available_width().min(super::WIDTH));
         if let Some(d) = paths::test_dir() {
             kit::callout(
                 ui,
@@ -771,7 +771,7 @@ pub fn show(ui: &mut Ui, st: &mut State, settings: &mut Settings, actions: &mut 
         }
 
         kit::section(ui, "This version", None);
-        kit::stats(
+        crate::views::insights::stats(
             ui,
             &[
                 kit::Stat::new("Version", b.version.clone()),
