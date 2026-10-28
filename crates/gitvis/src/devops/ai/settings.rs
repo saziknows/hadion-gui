@@ -306,6 +306,9 @@ fn usage_section(ui: &mut Ui) {
     let rows = session::with(|s| s.usage.clone());
     let (n, failed, total, cost) = session::totals();
     kit::section(ui, "This session", None);
+    if session::with(|s| std::mem::take(&mut s.scroll_to_usage)) {
+        ui.scroll_to_cursor(Some(egui::Align::TOP));
+    }
     if rows.is_empty() {
         kit::muted(
             ui,

@@ -26,7 +26,11 @@ pub struct Material {
 pub fn prepare_diff(diff: &str, budget: usize) -> Material {
     let (clean, redactions) = redact::diff(diff);
     let files = budget::split_diff(&clean);
-    let fitted = budget::fit_diff(&files, budget, budget::per_file_cap(budget));
+    let mut fitted = budget::fit_diff(&files, budget, budget::per_file_cap(budget));
+    // A withheld file's section is only its header: not "included".
+    fitted
+        .included
+        .retain(|p| !redactions.withheld.iter().any(|(w, _)| w == p));
     Material {
         text: fitted.text.clone(),
         fitted,
@@ -156,6 +160,74 @@ pub fn parse_commits(text: &str) -> Vec<(String, String)> {
             (!s.is_empty()).then(|| (s.to_owned(), b.trim().to_owned()))
         })
         .collect()
+}
+
+/// The ref a pull request's commits are counted from: the form's base ref,
+/// `origin/<base>`, `<base>`; when none is in this clone, the parent of
+/// the oldest commit that is only on `head` (no other branch or
+/// remote-tracking branch has it). The note says which was used.
+pub fn resolve_base(
+    dir: &Path,
+    base: &str,
+    base_ref: &str,
+    head: &str,
+    commands: &mut Vec<String>,
+) -> Result<(String, String), String> {
+    let mut candidates: Vec<String> = Vec::new();
+    for c in [
+        base_ref.to_owned(),
+        format!("origin/{base}"),
+        base.to_owned(),
+    ] {
+        if !c.trim().is_empty() && !candidates.contains(&c) {
+            candidates.push(c);
+        }
+    }
+    for c in &candidates {
+        let probe = format!("{c}^{{commit}}");
+        if git(dir, &["rev-parse", "--verify", "--quiet", &probe], commands).is_ok() {
+            return Ok((c.clone(), format!("{c}..{head}")));
+        }
+    }
+    // `--exclude` patterns for `--branches` are written without refs/heads/.
+    let exclude = format!("--exclude={head}");
+    let list = git(
+        dir,
+        &[
+            "rev-list",
+            "--reverse",
+            head,
+            "--not",
+            &exclude,
+            "--branches",
+            "--remotes",
+        ],
+        commands,
+    )?;
+    let oldest = list.lines().next().ok_or_else(|| {
+        format!(
+            "{base} is not in this clone (fetch it first), and {head} has no commits of its own."
+        )
+    })?;
+    let parent = format!("{oldest}^");
+    git(
+        dir,
+        &[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{parent}^{{commit}}"),
+        ],
+        commands,
+    )
+    .map_err(|_| format!("{base} is not in this clone; fetch it first."))?;
+    Ok((
+        parent,
+        format!(
+            "{base} is not in this clone, so the {} commits only on {head} were used",
+            list.lines().count()
+        ),
+    ))
 }
 
 /// `git diff --stat base...head`.
@@ -320,5 +392,12 @@ mod tests {
         assert!(!m.text.contains(&key));
         assert_eq!(m.redactions.values(), 1);
         assert!(m.fitted.complete());
+        // A withheld file is not listed as included.
+        let d = format!(
+            "diff --git a/.env b/.env\n--- /dev/null\n+++ b/.env\n@@ -0,0 +1 @@\n+X=1\n{d}"
+        );
+        let m = prepare_diff(&d, 64 * 1024);
+        assert_eq!(m.fitted.included, vec!["a.rs"]);
+        assert_eq!(m.redactions.withheld.len(), 1);
     }
 }

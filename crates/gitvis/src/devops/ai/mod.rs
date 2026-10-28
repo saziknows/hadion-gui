@@ -387,7 +387,7 @@ pub fn on_console_done(_cx: &mut Ctx, _repo: &mut RepoState, _run: &ConsoleRun) 
 ///   the log viewer without ids), `ai-summary [N]` (the selected pull
 ///   request without a number), `ai-commit-explain SHA|head`.
 /// - `ai-model NAME` / `ai-ask on|off`: session-only overrides for tests.
-/// - `ai-stop`, `ai-dismiss`, `ai-settings`, `ai-check-key`.
+/// - `ai-stop`, `ai-dismiss`, `ai-settings [usage]`, `ai-check-key`.
 pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
     let arg = arg.trim();
     let mut nums = arg.split_whitespace().map(|s| s.parse::<u64>().ok());
@@ -425,12 +425,17 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         ],
         "ai-dismiss" => vec![Act::Dismiss(Target::Wip).into()],
         "ai-check-key" => vec![Act::CheckKey.into()],
-        "ai-settings" => vec![
-            Action::DevOps(crate::devops::DevOpsAction::SetSettingsSection(
-                crate::devops::settings_page::Section::Ai,
-            )),
-            Action::ShowPage(Page::Settings),
-        ],
+        "ai-settings" => {
+            if arg == "usage" {
+                session::with(|s| s.scroll_to_usage = true);
+            }
+            vec![
+                Action::DevOps(crate::devops::DevOpsAction::SetSettingsSection(
+                    crate::devops::settings_page::Section::Ai,
+                )),
+                Action::ShowPage(Page::Settings),
+            ]
+        }
         _ => return None,
     })
 }

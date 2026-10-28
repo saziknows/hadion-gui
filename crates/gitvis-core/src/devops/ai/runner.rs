@@ -86,7 +86,11 @@ fn env_key() -> Option<String> {
 /// Look up the key (keychain first, then the environment). Call from a
 /// background task.
 pub fn key_status() -> KeyStatus {
-    let (keychain, keychain_error) = match keychain::get(&key_name()) {
+    key_status_in(&key_name())
+}
+
+fn key_status_in(name: &str) -> KeyStatus {
+    let (keychain, keychain_error) = match keychain::get(name) {
         Ok(Some(k)) if !k.trim().is_empty() => (Some(keychain::hint(k.trim())), None),
         Ok(_) => (None, None),
         Err(e) => (None, Some(e.to_string())),
@@ -109,8 +113,8 @@ fn load_key() -> Option<(String, KeySource)> {
     env_key().map(|k| (k, KeySource::Env))
 }
 
-/// Store a key (trimmed). Call from a background task.
-pub fn store_key(key: &str) -> Result<KeyStatus, String> {
+/// A pasted key, trimmed; refused when empty or with inner whitespace.
+pub fn clean_key(key: &str) -> Result<&str, String> {
     let key = key.trim();
     if key.is_empty() {
         return Err("The key is empty".to_owned());
@@ -118,14 +122,28 @@ pub fn store_key(key: &str) -> Result<KeyStatus, String> {
     if key.chars().any(|c| c.is_control() || c.is_whitespace()) {
         return Err("The key contains spaces or line breaks; paste only the key".to_owned());
     }
-    keychain::set(&key_name(), key).map_err(|e| e.to_string())?;
-    Ok(key_status())
+    Ok(key)
+}
+
+/// Store a key (trimmed). Call from a background task.
+pub fn store_key(key: &str) -> Result<KeyStatus, String> {
+    store_key_in(&key_name(), key)
+}
+
+fn store_key_in(name: &str, key: &str) -> Result<KeyStatus, String> {
+    let key = clean_key(key)?;
+    keychain::set(name, key).map_err(|e| e.to_string())?;
+    Ok(key_status_in(name))
 }
 
 /// Delete the stored key. Call from a background task.
 pub fn remove_key() -> Result<KeyStatus, String> {
-    keychain::delete(&key_name()).map_err(|e| e.to_string())?;
-    Ok(key_status())
+    remove_key_in(&key_name())
+}
+
+fn remove_key_in(name: &str) -> Result<KeyStatus, String> {
+    keychain::delete(name).map_err(|e| e.to_string())?;
+    Ok(key_status_in(name))
 }
 
 /// Is curl on PATH?
@@ -448,6 +466,37 @@ mod tests {
         };
         assert_eq!(s.source(), Some(KeySource::Env));
         assert_eq!(KeyStatus::default().source(), None);
+    }
+
+    #[test]
+    fn pasted_keys_are_cleaned() {
+        assert_eq!(
+            clean_key(
+                "  sk-ant-x 
+"
+            )
+            .unwrap(),
+            "sk-ant-x"
+        );
+        assert!(clean_key("   ").is_err());
+        let e = clean_key("sk-ant one").unwrap_err();
+        assert!(!e.contains("sk-ant"), "{e}");
+    }
+
+    #[test]
+    #[ignore = "writes the OS keychain (a gitvis-test- entry, removed again); run by hand"]
+    fn keychain_round_trip() {
+        let name = "gitvis-test-anthropic-api-key";
+        let s = store_key_in(name, " sk-ant-test-0000wxyz ").unwrap();
+        assert_eq!(s.keychain.as_deref(), Some("…wxyz"));
+        assert_eq!(s.source(), Some(KeySource::Keychain));
+        assert_eq!(
+            keychain::get(name).unwrap().as_deref(),
+            Some("sk-ant-test-0000wxyz")
+        );
+        let s = remove_key_in(name).unwrap();
+        assert_eq!(s.keychain, None);
+        assert_eq!(keychain::get(name).unwrap(), None);
     }
 
     #[test]

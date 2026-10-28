@@ -86,13 +86,38 @@ impl Model {
         })
     }
 
-    /// The label of an API id, or the id itself for models gitvis does not
-    /// know (a fallback model, for instance).
+    /// The label of an API id. Ids gitvis does not list (a fallback model)
+    /// are spelled out: `claude-opus-4-8` → `Claude Opus 4.8`.
     pub fn label_of(id: &str) -> String {
-        match Model::ALL.into_iter().find(|m| m.id() == id) {
-            Some(m) => m.label().to_owned(),
-            None => id.to_owned(),
+        if let Some(m) = Model::ALL.into_iter().find(|m| m.id() == id) {
+            return m.label().to_owned();
         }
+        let Some(rest) = id.strip_prefix("claude-") else {
+            return id.to_owned();
+        };
+        let parts: Vec<&str> = rest.split('-').collect();
+        let split = parts
+            .iter()
+            .position(|p| p.chars().all(|c| c.is_ascii_digit()))
+            .unwrap_or(parts.len());
+        let (words, numbers) = parts.split_at(split);
+        if words.is_empty() || numbers.iter().any(|n| n.len() > 2) {
+            return id.to_owned(); // dated snapshot ids stay as they are
+        }
+        let mut s = String::from("Claude");
+        for w in words {
+            let mut c = w.chars();
+            if let Some(f) = c.next() {
+                s.push(' ');
+                s.push(f.to_ascii_uppercase());
+                s.push_str(c.as_str());
+            }
+        }
+        if !numbers.is_empty() {
+            s.push(' ');
+            s.push_str(&numbers.join("."));
+        }
+        s
     }
 
     /// Prices for a request whose prompt (input plus cache reads and
@@ -322,6 +347,11 @@ mod tests {
         assert_eq!(Model::parse("fable"), Some(Model::Fable51));
         assert_eq!(Model::parse("gpt"), None);
         assert_eq!(Model::default().id(), "claude-opus-5-5");
+        assert_eq!(Model::label_of("claude-opus-5-5"), "Claude Opus 5.5");
+        assert_eq!(Model::label_of("claude-opus-5"), "Claude Opus 5");
+        assert_eq!(Model::label_of("claude-opus-4-8"), "Claude Opus 4.8");
+        assert_eq!(Model::label_of("claude-x-20250101"), "claude-x-20250101");
+        assert_eq!(Model::label_of("gpt"), "gpt");
     }
 
     #[test]

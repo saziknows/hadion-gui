@@ -41,6 +41,8 @@ pub struct Session {
     pub model_override: Option<Model>,
     /// Set by the `ai-ask` script command; never saved.
     pub ask_override: Option<bool>,
+    /// Scroll the Settings section to the session usage once.
+    pub scroll_to_usage: bool,
 }
 
 static SESSION: Mutex<Session> = Mutex::new(Session {
@@ -51,6 +53,7 @@ static SESSION: Mutex<Session> = Mutex::new(Session {
     usage: Vec::new(),
     model_override: None,
     ask_override: None,
+    scroll_to_usage: false,
 });
 
 /// Read or change the session.

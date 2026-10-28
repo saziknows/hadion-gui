@@ -530,15 +530,8 @@ fn prepare_new_pr(
     commands: &mut Vec<String>,
     key: KeySource,
 ) -> Result<Prepared, Failure> {
-    let mut base_ref = if base_ref.trim().is_empty() {
-        format!("origin/{base}")
-    } else {
-        base_ref.to_owned()
-    };
-    commands.push(format!("git rev-parse --verify --quiet {base_ref}"));
-    if gitvis_core::cli::run(dir, &["rev-parse", "--verify", "--quiet", &base_ref], None).is_err() {
-        base_ref = base.to_owned();
-    }
+    let (base_ref, range_note) =
+        inputs::resolve_base(dir, base, base_ref, head, commands).map_err(Failure::Prepare)?;
     let commits =
         inputs::commits_between(dir, &base_ref, head, commands).map_err(Failure::Prepare)?;
     let stat = inputs::stat_between(dir, &base_ref, head, commands).unwrap_or_default();
@@ -561,7 +554,7 @@ fn prepare_new_pr(
     let n = commits.len();
     let input = PrInput {
         head: head.to_owned(),
-        base: base_ref.clone(),
+        base: base.to_owned(),
         commits,
         stat,
         template: template.clone(),
@@ -571,11 +564,18 @@ fn prepare_new_pr(
     let mut sources = vec![
         (
             "Commits".to_owned(),
-            format!("{n} in {base_ref}..{head}, subjects and bodies"),
+            format!("{n} ({range_note}), subjects and bodies"),
         ),
         (
             "Diff stat".to_owned(),
-            format!("git diff --stat {base_ref}...{head}"),
+            format!(
+                "git diff --stat {}...{head}",
+                match base_ref.strip_suffix('^') {
+                    // The parent of the branch's oldest own commit.
+                    Some(sha) if sha.len() >= 40 => format!("{}^", &sha[..10]),
+                    _ => base_ref.clone(),
+                }
+            ),
         ),
     ];
     if let Some((p, _)) = &template {

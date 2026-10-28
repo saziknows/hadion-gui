@@ -110,65 +110,94 @@ fn live_text(a: &Ask) -> Option<(String, bool, u64)> {
 }
 
 /// Spinner, phase, elapsed time and Stop, for a request in flight.
-/// Returns the live text (empty while thinking).
-fn progress_row(ui: &mut Ui, a: &Ask, actions: &mut Vec<Action>) -> String {
+/// Returns the live text (empty while thinking). `short` phrases fit the
+/// narrow WIP panel.
+fn progress_row(ui: &mut Ui, a: &Ask, short: bool, actions: &mut Vec<Action>) -> String {
     let p = *pal(ui);
     ui.ctx().request_repaint_after(Duration::from_millis(120));
     let (text, phase) = match &a.phase {
         Phase::Preparing => (
             String::new(),
-            "Gathering and checking what to send…".to_owned(),
+            if short {
+                "Reading what to send…".to_owned()
+            } else {
+                "Gathering and checking what to send…".to_owned()
+            },
         ),
-        Phase::Confirming => (String::new(), "Waiting for your confirmation".to_owned()),
+        Phase::Confirming => (
+            String::new(),
+            if short {
+                "Waiting to send".to_owned()
+            } else {
+                "Waiting for your confirmation".to_owned()
+            },
+        ),
         Phase::Running { .. } => {
             let (text, thinking, secs) = live_text(a).unwrap_or_default();
-            let phase = if thinking {
-                format!("{} is thinking · {secs} s", a.model.short())
-            } else {
-                format!(
-                    "{} is writing · {} characters · {secs} s",
-                    a.model.short(),
+            let who = a.model.short();
+            let phase = match (thinking, short) {
+                (true, true) => format!("Thinking · {secs} s"),
+                (true, false) => format!("{who} is thinking · {secs} s"),
+                (false, true) => format!(
+                    "Writing · {} chars · {secs} s",
                     crate::format::count(text.chars().count())
-                )
+                ),
+                (false, false) => format!(
+                    "{who} is writing · {} characters · {secs} s",
+                    crate::format::count(text.chars().count())
+                ),
             };
             (text, phase)
         }
         Phase::Done(_) => return String::new(),
     };
     ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), 26.0),
-        Layout::left_to_right(Align::Center),
+        vec2(ui.available_width(), 24.0),
+        Layout::right_to_left(Align::Center),
         |ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-            if !matches!(a.phase, Phase::Confirming) {
-                ui.add(egui::Spinner::new().size(13.0).color(p.accent));
+            // Buttons first (rightmost), so the phase text gets what is left.
+            ui.spacing_mut().item_spacing.x = 4.0;
+            match a.phase {
+                Phase::Confirming => {
+                    if IconButton::text("Cancel").compact().show(ui).clicked() {
+                        actions.push(Act::Cancel(a.target.clone()).into());
+                    }
+                    if IconButton::text(if short { "Review" } else { "Review and send" })
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Show the confirmation again")
+                        .clicked()
+                    {
+                        actions.push(Act::Reconfirm(a.target.clone()).into());
+                    }
+                }
+                Phase::Running { .. } => {
+                    if IconButton::new(Icon::Stop, "Stop")
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Stop the request; nothing is filled in")
+                        .clicked()
+                    {
+                        actions.push(Act::Cancel(a.target.clone()).into());
+                    }
+                }
+                _ => {}
             }
-            ui.add(Label::new(RichText::new(phase).size(size::SMALL).color(p.text_2)).truncate());
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                match a.phase {
-                    Phase::Confirming => {
-                        if IconButton::text("Cancel").compact().show(ui).clicked() {
-                            actions.push(Act::Cancel(a.target.clone()).into());
-                        }
-                        if IconButton::text("Review and send")
-                            .compact()
-                            .show(ui)
-                            .clicked()
-                        {
-                            actions.push(Act::Reconfirm(a.target.clone()).into());
-                        }
-                    }
-                    Phase::Running { .. } => {
-                        if IconButton::new(Icon::Stop, "Stop")
-                            .compact()
-                            .show(ui)
-                            .clicked()
-                        {
-                            actions.push(Act::Cancel(a.target.clone()).into());
-                        }
-                    }
-                    _ => {}
+            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                if !matches!(a.phase, Phase::Confirming) {
+                    ui.add(egui::Spinner::new().size(13.0).color(p.accent));
+                }
+                let resp = ui.add(
+                    Label::new(RichText::new(&phase).size(size::SMALL).color(p.text_2)).truncate(),
+                );
+                // In the narrow panel the text so far is only in the tooltip.
+                if short && !text.is_empty() {
+                    let tail: String = {
+                        let chars: Vec<char> = text.chars().collect();
+                        chars[chars.len().saturating_sub(400)..].iter().collect()
+                    };
+                    resp.on_hover_text(tail);
                 }
             });
         },
@@ -176,15 +205,41 @@ fn progress_row(ui: &mut Ui, a: &Ask, actions: &mut Vec<Action>) -> String {
     text
 }
 
-/// A failure as a callout with what to do about it.
-fn failure(ui: &mut Ui, a: &Ask, f: &Failure, actions: &mut Vec<Action>) {
+/// The full text of a compact notice, behind an info button.
+fn details_button(ui: &mut Ui, text: &str) {
+    if !text.trim().is_empty() {
+        IconButton::new(Icon::Info, "Details")
+            .compact()
+            .show(ui)
+            .on_hover_text(text);
+    }
+}
+
+/// A failure as a callout with what to do about it. `compact` (the WIP
+/// panel): a one-line title, the text behind a Details button.
+fn failure(ui: &mut Ui, a: &Ask, f: &Failure, compact: bool, actions: &mut Vec<Action>) {
     let t = a.target.clone();
+    let short_api = match f {
+        Failure::Api(e) => {
+            let mut s = if e.kind.is_empty() {
+                "API error".to_owned()
+            } else {
+                e.kind.replace('_', " ")
+            };
+            if let Some(st) = e.status.filter(|s| *s != 200) {
+                s.push_str(&format!(" (HTTP {st})"));
+            }
+            s
+        }
+        _ => String::new(),
+    };
     let (tone, title) = match f {
         Failure::NoKey => (Tone::Warning, "No Claude API key"),
         Failure::NoCurl => (Tone::Warning, "curl is not installed"),
         Failure::Cancelled => (Tone::Neutral, "Stopped"),
         Failure::Prepare(_) => (Tone::Warning, "Could not gather what to send"),
         Failure::Transport(_) => (Tone::Danger, "The request did not get through"),
+        Failure::Api(_) if compact => (Tone::Danger, short_api.as_str()),
         Failure::Api(_) => (Tone::Danger, "The Claude API returned an error"),
         Failure::Incomplete(_) => (Tone::Danger, "The answer was cut off"),
     };
@@ -202,16 +257,27 @@ fn failure(ui: &mut Ui, a: &Ask, f: &Failure, actions: &mut Vec<Action>) {
         body.push_str(e.hint());
     }
     let wait = control::retry_wait(a);
-    kit::callout_with(ui, tone, title, &body, |ui| {
+    let shown = if compact { "" } else { body.as_str() };
+    kit::callout_with(ui, tone, title, shown, |ui| {
         ui.add_space(2.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
+            if compact {
+                details_button(ui, &body);
+            }
             match f {
                 Failure::NoKey => {
-                    if IconButton::new(Icon::Key, "Open AI settings")
-                        .compact()
-                        .show(ui)
-                        .clicked()
+                    if IconButton::new(
+                        Icon::Key,
+                        if compact {
+                            "Settings"
+                        } else {
+                            "Open AI settings"
+                        },
+                    )
+                    .compact()
+                    .show(ui)
+                    .clicked()
                     {
                         open_settings(actions);
                     }
@@ -226,10 +292,17 @@ fn failure(ui: &mut Ui, a: &Ask, f: &Failure, actions: &mut Vec<Action>) {
                     }
                 }
                 Failure::Api(e) if e.kind == "authentication_error" => {
-                    if IconButton::new(Icon::Key, "Open AI settings")
-                        .compact()
-                        .show(ui)
-                        .clicked()
+                    if IconButton::new(
+                        Icon::Key,
+                        if compact {
+                            "Settings"
+                        } else {
+                            "Open AI settings"
+                        },
+                    )
+                    .compact()
+                    .show(ui)
+                    .clicked()
                     {
                         open_settings(actions);
                     }
@@ -260,7 +333,13 @@ fn failure(ui: &mut Ui, a: &Ask, f: &Failure, actions: &mut Vec<Action>) {
 }
 
 /// A refusal or a cut-off answer; returns true when it drew one.
-fn stop_reason_notice(ui: &mut Ui, a: &Ask, actions: &mut Vec<Action>, can_use: bool) -> bool {
+fn stop_reason_notice(
+    ui: &mut Ui,
+    a: &Ask,
+    actions: &mut Vec<Action>,
+    can_use: bool,
+    compact: bool,
+) -> bool {
     let Some(r) = a.reply() else {
         return false;
     };
@@ -279,15 +358,29 @@ fn stop_reason_notice(ui: &mut Ui, a: &Ask, actions: &mut Vec<Action>, can_use: 
             body.push('\n');
             body.push_str(&n);
         }
+        let title = if compact {
+            format!(
+                "Claude declined ({})",
+                ans.refusal_category.as_deref().unwrap_or("no category")
+            )
+        } else {
+            "Claude declined this request".to_owned()
+        };
         kit::callout_with(
             ui,
             Tone::Warning,
-            "Claude declined this request",
-            &body,
+            &title,
+            if compact { "" } else { &body },
             |ui| {
-                if IconButton::text("Dismiss").compact().show(ui).clicked() {
-                    actions.push(Act::Dismiss(a.target.clone()).into());
-                }
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    if compact {
+                        details_button(ui, &body);
+                    }
+                    if IconButton::text("Dismiss").compact().show(ui).clicked() {
+                        actions.push(Act::Dismiss(a.target.clone()).into());
+                    }
+                });
             },
         );
         return true;
@@ -297,9 +390,14 @@ fn stop_reason_notice(ui: &mut Ui, a: &Ask, actions: &mut Vec<Action>, can_use: 
             ui,
             Tone::Warning,
             "The answer hit the 16,000-token limit",
-            "It stops mid-way, so it was not filled in. Use it anyway, or try again.",
+            if compact {
+                ""
+            } else {
+                "It stops mid-way, so it was not filled in. Use it anyway, or try again."
+            },
             |ui| {
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
                     if can_use
                         && IconButton::text("Use it anyway")
                             .compact()
@@ -497,12 +595,14 @@ pub fn markdown(ui: &mut Ui, text: &str, actions: &mut Vec<Action>) {
 
 /// The status of a request whose answer is filled into a field (the WIP
 /// commit message, the new pull request form).
-fn fill_status(ui: &mut Ui, a: &Ask, done_text: &str, actions: &mut Vec<Action>) {
+/// `compact` (the WIP panel, whose commit box has a fixed height): the
+/// finished state is one line, its numbers in the line itself.
+fn fill_status(ui: &mut Ui, a: &Ask, done_text: &str, compact: bool, actions: &mut Vec<Action>) {
     let p = *pal(ui);
     match &a.phase {
         Phase::Preparing | Phase::Confirming | Phase::Running { .. } => {
-            let text = progress_row(ui, a, actions);
-            if !text.is_empty() {
+            let text = progress_row(ui, a, compact, actions);
+            if !text.is_empty() && !compact {
                 Frame::NONE
                     .fill(p.raised)
                     .stroke(Stroke::new(1.0, p.border))
@@ -525,9 +625,9 @@ fn fill_status(ui: &mut Ui, a: &Ask, done_text: &str, actions: &mut Vec<Action>)
                     });
             }
         }
-        Phase::Done(Err(f)) => failure(ui, a, f, actions),
+        Phase::Done(Err(f)) => failure(ui, a, f, compact, actions),
         Phase::Done(Ok(r)) => {
-            if stop_reason_notice(ui, a, actions, true) {
+            if stop_reason_notice(ui, a, actions, true, compact) {
                 return;
             }
             if a.unapplied {
@@ -591,6 +691,11 @@ fn fill_status(ui: &mut Ui, a: &Ask, done_text: &str, actions: &mut Vec<Action>)
                 return;
             }
             // Filled in: one line with what it cost.
+            let done_text = if compact {
+                short_usage(a)
+            } else {
+                done_text.to_owned()
+            };
             ui.allocate_ui_with_layout(
                 vec2(ui.available_width(), 22.0),
                 Layout::left_to_right(Align::Center),
@@ -599,13 +704,14 @@ fn fill_status(ui: &mut Ui, a: &Ask, done_text: &str, actions: &mut Vec<Action>)
                     crate::views::icons::show(ui, Icon::Check, 12.0, p.success);
                     ui.add(
                         Label::new(
-                            RichText::new(done_text)
+                            RichText::new(&done_text)
                                 .size(size::SMALL)
                                 .family(medium())
                                 .color(p.text),
                         )
                         .truncate(),
-                    );
+                    )
+                    .on_hover_text(usage_line(a));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if IconButton::icon(Icon::Close)
                             .compact()
@@ -618,7 +724,9 @@ fn fill_status(ui: &mut Ui, a: &Ask, done_text: &str, actions: &mut Vec<Action>)
                     });
                 },
             );
-            note(ui, &usage_line(a));
+            if !compact {
+                note(ui, &usage_line(a));
+            }
             for n in fallback_notes(a) {
                 note(ui, &n);
             }
@@ -629,6 +737,7 @@ fn fill_status(ui: &mut Ui, a: &Ask, done_text: &str, actions: &mut Vec<Action>)
             }
             if let Some(p) = &a.prepared
                 && !p.redactions.is_empty()
+                && !compact
             {
                 note(
                     ui,
@@ -639,20 +748,52 @@ fn fill_status(ui: &mut Ui, a: &Ask, done_text: &str, actions: &mut Vec<Action>)
     }
 }
 
+/// `Opus 5.5 · about $0.0042 · 2 redacted` (details in the tooltip).
+fn short_usage(a: &Ask) -> String {
+    let Some(r) = a.reply() else {
+        return String::new();
+    };
+    let ans = &r.done.answer;
+    let model = if ans.model.is_empty() {
+        a.model.short().to_owned()
+    } else {
+        Model::label_of(&ans.model)
+            .trim_start_matches("Claude ")
+            .to_owned()
+    };
+    let mut s = format!("{model} · about {}", dollars(r.cost));
+    if let Some(p) = &a.prepared {
+        let n = p.redactions.values() + p.redactions.withheld.len();
+        if n > 0 {
+            s.push_str(&format!(" · {n} redacted"));
+        }
+    }
+    s
+}
+
 /// Above the commit message box.
 pub fn wip_tools(ui: &mut Ui, h: &HookCx, actions: &mut Vec<Action>) {
+    // The commit box has a fixed height (150 px in `views/details.rs`), so
+    // everything here stays on one 24 px row except errors and an answer
+    // waiting for "Replace your message?".
     let p = *pal(ui);
     let prefs = &h.settings.ext.ai;
     let st: &State = &h.devops.ai;
     let staged = !h.snap.status.staged.is_empty();
     let ask = st.asks.get(&Target::Wip);
+    let in_flight = ask.is_some_and(|a| a.running() || matches!(a.phase, Phase::Confirming));
+    if let Some(a) = ask.filter(|_| in_flight) {
+        progress_row(ui, a, true, actions);
+        ui.add_space(2.0);
+        return;
+    }
+    let done_line = ask.filter(|a| a.applied).map(short_usage);
     ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), 28.0),
+        vec2(ui.available_width(), 24.0),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            let busy = ask.is_some_and(|a| a.running() || matches!(a.phase, Phase::Confirming));
-            let enabled = staged && !busy && !h.busy;
+            let enabled = staged && !h.busy;
             let resp = IconButton::new(Icon::Edit, "Write with Claude")
                 .compact()
                 .enabled(enabled)
@@ -667,21 +808,68 @@ pub fn wip_tools(ui: &mut Ui, h: &HookCx, actions: &mut Vec<Action>) {
             if resp.clicked() {
                 actions.push(Act::Start(Target::Wip).into());
             }
-            ui.add(
-                Label::new(
-                    RichText::new(caption(prefs, Feature::CommitMessage))
-                        .size(size::SMALL)
-                        .color(p.text_3),
-                )
-                .truncate(),
-            );
+            match (&done_line, ask) {
+                (Some(line), Some(a)) => {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        if IconButton::icon(Icon::Close)
+                            .compact()
+                            .show(ui)
+                            .on_hover_text("Hide this line")
+                            .clicked()
+                        {
+                            actions.push(Act::Dismiss(Target::Wip).into());
+                        }
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = 5.0;
+                            crate::views::icons::show(ui, Icon::Check, 12.0, p.success);
+                            let mut tip = usage_line(a);
+                            if let Some(pr) = &a.prepared
+                                && !pr.redactions.is_empty()
+                            {
+                                tip.push_str(&format!(
+                                    "
+Redacted before sending: {}",
+                                    pr.redactions.summary()
+                                ));
+                            }
+                            ui.add(
+                                Label::new(
+                                    RichText::new(line).size(size::SMALL).color(p.text_2),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(tip);
+                        });
+                    });
+                }
+                _ => {
+                    ui.add(
+                        Label::new(
+                            RichText::new(caption(prefs, Feature::CommitMessage))
+                                .size(size::SMALL)
+                                .color(p.text_3),
+                        )
+                        .truncate(),
+                    );
+                }
+            }
         },
     );
-    if let Some(a) = ask {
+    if let Some(a) = ask.filter(|a| !a.applied) {
         let what = format!("Message written by {}", a.model.label());
-        fill_status(ui, a, &what, actions);
+        fill_status(ui, a, &what, true, actions);
+    } else if let Some(a) = ask
+        && let Some(r) = a.reply()
+    {
+        for w in output::commit_message(&r.done.answer.text).warnings {
+            kit::callout(ui, Tone::Warning, "", &w);
+        }
+        for n in fallback_notes(a) {
+            note(ui, &n);
+        }
     }
-    ui.add_space(4.0);
+    ui.add_space(2.0);
 }
 
 /// Above the new pull request form.
@@ -725,7 +913,7 @@ pub fn new_pr_tools(ui: &mut Ui, h: &HookCx, actions: &mut Vec<Action>) {
             if let Some(a) = ask {
                 ui.add_space(4.0);
                 let what = format!("Title and description written by {}", a.model.label());
-                fill_status(ui, a, &what, actions);
+                fill_status(ui, a, &what, false, actions);
             }
         });
 }
@@ -743,69 +931,90 @@ fn result_card(
     let collapsed = st.collapsed.contains(&a.target);
     form::card(ui, Tone::Neutral, |ui| {
         ui.spacing_mut().item_spacing.y = 6.0;
+        // Buttons first (right to left), so a narrow panel cuts the title
+        // instead of drawing the buttons over it.
+        let wide = ui.available_width() > 520.0;
         ui.allocate_ui_with_layout(
             vec2(ui.available_width(), 24.0),
-            Layout::left_to_right(Align::Center),
+            Layout::right_to_left(Align::Center),
             |ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                let done = matches!(a.phase, Phase::Done(Ok(_)));
-                if done
-                    && IconButton::icon(if collapsed {
-                        Icon::ChevronDown
-                    } else {
-                        Icon::ChevronUp
-                    })
-                    .compact()
-                    .show(ui)
-                    .on_hover_text(if collapsed { "Show" } else { "Fold" })
-                    .clicked()
+                ui.spacing_mut().item_spacing.x = 4.0;
+                if matches!(a.phase, Phase::Done(_))
+                    && IconButton::icon(Icon::Close)
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Dismiss")
+                        .clicked()
                 {
-                    actions.push(Act::ToggleCollapsed(a.target.clone()).into());
+                    actions.push(Act::Dismiss(a.target.clone()).into());
                 }
-                ui.label(
-                    RichText::new(title)
-                        .size(size::BODY)
-                        .family(semibold())
-                        .color(p.text_strong),
-                );
-                for (b, tone) in badges {
-                    kit::badge(ui, b, *tone);
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    if matches!(a.phase, Phase::Done(_))
-                        && IconButton::icon(Icon::Close)
-                            .compact()
-                            .show(ui)
-                            .on_hover_text("Dismiss")
-                            .clicked()
+                if let Some(r) = a.reply() {
+                    if IconButton::icon(Icon::Copy)
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Copy the answer")
+                        .clicked()
                     {
-                        actions.push(Act::Dismiss(a.target.clone()).into());
+                        actions.push(Action::Copy(r.done.answer.text.clone()));
                     }
-                    if let Some(r) = a.reply() {
-                        if IconButton::icon(Icon::Copy)
-                            .compact()
-                            .show(ui)
-                            .on_hover_text("Copy the answer")
-                            .clicked()
-                        {
-                            actions.push(Action::Copy(r.done.answer.text.clone()));
-                        }
-                        if IconButton::new(Icon::Rerun, "Regenerate")
-                            .compact()
-                            .show(ui)
-                            .clicked()
-                        {
-                            actions.push(Act::Start(a.target.clone()).into());
+                    let regen = if wide {
+                        IconButton::new(Icon::Rerun, "Regenerate")
+                    } else {
+                        IconButton::icon(Icon::Rerun)
+                    };
+                    if regen
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Ask again with the current settings")
+                        .clicked()
+                    {
+                        actions.push(Act::Start(a.target.clone()).into());
+                    }
+                }
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    if matches!(a.phase, Phase::Done(Ok(_)))
+                        && IconButton::icon(if collapsed {
+                            Icon::ChevronDown
+                        } else {
+                            Icon::ChevronUp
+                        })
+                        .compact()
+                        .show(ui)
+                        .on_hover_text(if collapsed { "Show" } else { "Fold" })
+                        .clicked()
+                    {
+                        actions.push(Act::ToggleCollapsed(a.target.clone()).into());
+                    }
+                    ui.add(
+                        Label::new(
+                            RichText::new(title)
+                                .size(size::BODY)
+                                .family(semibold())
+                                .color(p.text_strong),
+                        )
+                        .truncate(),
+                    );
+                    if wide {
+                        for (b, tone) in badges {
+                            kit::badge(ui, b, *tone);
                         }
                     }
                 });
             },
         );
+        if !wide && !badges.is_empty() {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                for (b, tone) in badges {
+                    kit::badge(ui, b, *tone);
+                }
+            });
+        }
         match &a.phase {
-            Phase::Done(Err(f)) => failure(ui, a, f, actions),
+            Phase::Done(Err(f)) => failure(ui, a, f, false, actions),
             Phase::Done(Ok(r)) => {
-                if stop_reason_notice(ui, a, actions, false) || collapsed {
+                if stop_reason_notice(ui, a, actions, false, false) || collapsed {
                     if collapsed {
                         note(ui, &usage_line(a));
                     }
@@ -828,7 +1037,7 @@ fn result_card(
                 }
             }
             _ => {
-                let text = progress_row(ui, a, actions);
+                let text = progress_row(ui, a, false, actions);
                 if !text.is_empty() {
                     markdown(ui, &text, actions);
                 }
@@ -972,9 +1181,9 @@ fn explain_window(ctx: &egui::Context, a: &Ask, job: u64, actions: &mut Vec<Acti
         .id(egui::Id::unique(("ai_explain_window", job)))
         .title_bar(false)
         .collapsible(false)
-        .resizable(true)
         .frame(frame)
-        .default_size(vec2(600.0, 560.0))
+        .default_width(600.0)
+        .resizable([true, false])
         .pivot(Align2::RIGHT_TOP)
         .default_pos(egui::pos2(screen.right() - 24.0, screen.top() + 90.0))
         .constrain(true)
@@ -1014,20 +1223,21 @@ fn explain_window(ctx: &egui::Context, a: &Ask, job: u64, actions: &mut Vec<Acti
                 },
             );
             kit::hairline(ui);
-            let footer_h = 64.0;
+            // The body scrolls; the window keeps to its content up to that.
+            let max_body = (screen.height() * 0.62).clamp(200.0, 560.0);
             egui::ScrollArea::vertical()
                 .id_salt(("ai_explain_scroll", job))
-                .max_height((ui.available_height() - footer_h).max(120.0))
-                .auto_shrink([false, false])
+                .max_height(max_body)
+                .auto_shrink([false, true])
                 .show(ui, |ui| match &a.phase {
-                    Phase::Done(Err(f)) => failure(ui, a, f, actions),
+                    Phase::Done(Err(f)) => failure(ui, a, f, false, actions),
                     Phase::Done(Ok(r)) => {
-                        if !stop_reason_notice(ui, a, actions, false) {
+                        if !stop_reason_notice(ui, a, actions, false, false) {
                             markdown(ui, &r.done.answer.text, actions);
                         }
                     }
                     _ => {
-                        let text = progress_row(ui, a, actions);
+                        let text = progress_row(ui, a, false, actions);
                         if !text.is_empty() {
                             markdown(ui, &text, actions);
                         }

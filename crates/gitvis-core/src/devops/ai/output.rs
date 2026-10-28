@@ -150,7 +150,7 @@ impl Flaky {
     pub fn label(self) -> &'static str {
         match self {
             Flaky::Yes => "Looks flaky",
-            Flaky::No => "Not flaky",
+            Flaky::No => "Real failure",
             Flaky::Maybe => "Maybe flaky",
         }
     }
