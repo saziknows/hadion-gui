@@ -371,7 +371,6 @@ fn quick_pairs(repo: &RepoState) -> Vec<(String, String, Option<String>)> {
 }
 
 fn revision_bar(ui: &mut Ui, c: &mut Compare, suggestions: &[String], actions: &mut Vec<Action>) {
-    let p = *pal(ui);
     Frame::NONE
         .inner_margin(Margin {
             left: 24,
@@ -384,7 +383,7 @@ fn revision_bar(ui: &mut Ui, c: &mut Compare, suggestions: &[String], actions: &
             ui.spacing_mut().interact_size.y = crate::views::form::INPUT_H;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
-                ui.label(RichText::new("A").size(size::SMALL).color(p.text_2));
+                widgets::bar_label(ui, "A");
                 let (ra, picked_a) = widgets::rev_input(
                     ui,
                     "cmp_a",
@@ -404,7 +403,7 @@ fn revision_bar(ui: &mut Ui, c: &mut Compare, suggestions: &[String], actions: &
                 {
                     actions.push(Act::SwapCompare.into());
                 }
-                ui.label(RichText::new("B").size(size::SMALL).color(p.text_2));
+                widgets::bar_label(ui, "B");
                 if c.worktree {
                     let mut wt = "Working tree".to_owned();
                     crate::views::form::input(

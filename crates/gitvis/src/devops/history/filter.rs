@@ -308,12 +308,7 @@ pub fn filter_bar(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
             ui.spacing_mut().interact_size.y = form::INPUT_H;
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                let label = |ui: &mut Ui, t: &str| {
-                    ui.label(RichText::new(t).size(size::SMALL).color(p.text_2));
-                };
-                // A full-height strut first, so the first label centres on the
-                // inputs like the others.
-                ui.allocate_exact_size(vec2(0.0, form::INPUT_H), egui::Sense::hover());
+                let label = |ui: &mut Ui, t: &str| widgets::bar_label(ui, t);
                 label(ui, "Author");
                 let (r, picked) = widgets::suggest_input(
                     ui,

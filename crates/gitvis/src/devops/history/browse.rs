@@ -285,7 +285,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
             ui.spacing_mut().interact_size.y = crate::views::form::INPUT_H;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
-                ui.label(RichText::new("Revision").size(size::SMALL).color(p.text_2));
+                widgets::bar_label(ui, "Revision");
                 let (r, picked) = widgets::rev_input(
                     ui,
                     "browse_rev",

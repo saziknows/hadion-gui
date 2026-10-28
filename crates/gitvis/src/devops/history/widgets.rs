@@ -119,6 +119,24 @@ pub fn suggest_input(
     (resp, picked)
 }
 
+/// A label in a row of inputs, centred on their height. (A plain label as
+/// the first item of a row sits at the top: the row only grows to the
+/// inputs' height after it.)
+pub fn bar_label(ui: &mut Ui, text: &str) {
+    let p = *pal(ui);
+    let w = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), FontId::proportional(size::SMALL), p.text_2)
+        .size()
+        .x
+        + 2.0;
+    ui.add_sized(
+        vec2(w, form::INPUT_H),
+        egui::Label::new(egui::RichText::new(text).size(size::SMALL).color(p.text_2))
+            .wrap_mode(egui::TextWrapMode::Extend),
+    );
+}
+
 /// Enter pressed in a single-line input that just lost focus.
 pub fn submitted(ui: &Ui, resp: &Response) -> bool {
     resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))

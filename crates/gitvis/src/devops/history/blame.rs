@@ -206,7 +206,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                 {
                     actions.push(Act::BlameBack.into());
                 }
-                ui.label(RichText::new("Revision").size(size::SMALL).color(p.text_2));
+                widgets::bar_label(ui, "Revision");
                 let (r, picked) = widgets::rev_input(
                     ui,
                     "blame_rev",
@@ -217,7 +217,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                     false,
                 );
                 submit |= widgets::submitted(ui, &r) || picked;
-                ui.label(RichText::new("File").size(size::SMALL).color(p.text_2));
+                widgets::bar_label(ui, "File");
                 let r = crate::views::form::input(
                     ui,
                     ("hist_blame", "path"),
