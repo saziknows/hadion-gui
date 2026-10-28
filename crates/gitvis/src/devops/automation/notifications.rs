@@ -914,32 +914,40 @@ pub fn settings(ui: &mut Ui, st: &mut Notify, settings: &mut Settings, actions: 
                 "Review requests, mentions and approvals in other repositories are ignored. Runs are always read for open repositories only.",
             );
             ui.add_space(space::S);
-            ui.horizontal(|ui| {
-                form::checkbox(ui, &mut p.quiet, "Quiet hours from");
-                let bad_from = core::parse_hhmm(&p.quiet_from).is_none();
-                form::input(
-                    ui,
-                    "automation_quiet_from",
-                    &mut p.quiet_from,
-                    form::InputOpts::new("22:00")
-                        .width(64.0)
-                        .mono()
-                        .invalid(bad_from)
-                        .enabled(p.quiet),
-                );
-                ui.label(RichText::new("to").size(size::BODY).color(pal(ui).text_2));
-                let bad_to = core::parse_hhmm(&p.quiet_to).is_none();
-                form::input(
-                    ui,
-                    "automation_quiet_to",
-                    &mut p.quiet_to,
-                    form::InputOpts::new("07:00")
-                        .width(64.0)
-                        .mono()
-                        .invalid(bad_to)
-                        .enabled(p.quiet),
-                );
-            });
+            // The row gets the inputs' height up front, so the checkbox is
+            // centred on them instead of on its own shorter height.
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), form::INPUT_H + 2.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    form::checkbox(ui, &mut p.quiet, "Quiet hours from");
+                    // Only flagged while quiet hours are on (the inputs are
+                    // disabled otherwise).
+                    let bad_from = p.quiet && core::parse_hhmm(&p.quiet_from).is_none();
+                    form::input(
+                        ui,
+                        "automation_quiet_from",
+                        &mut p.quiet_from,
+                        form::InputOpts::new("22:00")
+                            .width(64.0)
+                            .mono()
+                            .invalid(bad_from)
+                            .enabled(p.quiet),
+                    );
+                    ui.label(RichText::new("to").size(size::BODY).color(pal(ui).text_2));
+                    let bad_to = p.quiet && core::parse_hhmm(&p.quiet_to).is_none();
+                    form::input(
+                        ui,
+                        "automation_quiet_to",
+                        &mut p.quiet_to,
+                        form::InputOpts::new("07:00")
+                            .width(64.0)
+                            .mono()
+                            .invalid(bad_to)
+                            .enabled(p.quiet),
+                    );
+                },
+            );
             if p.quiet
                 && (core::parse_hhmm(&p.quiet_from).is_none()
                     || core::parse_hhmm(&p.quiet_to).is_none())

@@ -468,8 +468,19 @@ fn overview(
         (None, None) => {
             kit::secondary(
                 ui,
-                "Walks `git rev-list --objects --all` through `git cat-file --batch-check` to find the biggest blobs ever committed, what is dead weight (no longer in HEAD) and which extensions and directories the history is made of. Takes seconds to a minute on a large repository.",
+                "Measures every object ever committed, not only what HEAD holds.",
             );
+            kit::kv(ui, 140.0, |kv| {
+                kv.text(
+                    "Finds",
+                    "the biggest blobs ever committed, dead weight (no longer in HEAD), the extensions and directories the history is made of",
+                );
+                kv.text(
+                    "How",
+                    kit::mono("git rev-list --objects --all | git cat-file --batch-check"),
+                );
+                kv.text("Takes", "seconds, up to a minute on a large repository");
+            });
             button_row(ui, |ui| {
                 if IconButton::new(Icon::Search, "Measure history")
                     .show(ui)

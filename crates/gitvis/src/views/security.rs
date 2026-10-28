@@ -2354,13 +2354,14 @@ fn overview(ui: &mut Ui, cx: &Cx, page: &SecurityPage, actions: &mut Vec<Action>
                 kv.text(
                     "Rules",
                     format!(
-                        "{} content patterns with placeholder and entropy filters, sensitive-name rules, remote URL, credential helper and TLS checks. A gitvis:allow comment on a line skips it.",
+                        "{} content patterns with placeholder and entropy filters; sensitive-name rules; remote URL, credential helper and TLS checks",
                         secrets::rules().rules.len()
                     ),
                 );
+                kv.text("Skipping a line", "a gitvis:allow comment on it");
             });
         } else {
-            kit::muted(
+            kit::secondary(
                 ui,
                 "Only the staged, unstaged and untracked changes were checked so far. Run a scan for the whole tree.",
             );

@@ -28,6 +28,10 @@ use crate::views::form;
 use crate::views::icons::{Icon, IconButton};
 use crate::views::kit;
 
+/// What `form::input` adds around the width it is given: a 10 pt margin
+/// and a 1 pt border on each side.
+const INPUT_FRAME: f32 = 22.0;
+
 /// UI-only state of the Integrations section.
 #[derive(Default)]
 pub struct LinksUi {
@@ -846,7 +850,10 @@ pub fn settings(
         for (i, r) in p.custom.iter_mut().enumerate() {
             form::card(ui, Tone::Neutral, |ui| {
                 ui.horizontal(|ui| {
-                    let w = (ui.available_width() - 40.0).max(120.0);
+                    // The trash button, the gap, and the input's own frame:
+                    // without the frame the row overflowed and every card
+                    // came out wider than the one before.
+                    let w = (ui.available_width() - 26.0 - 8.0 - INPUT_FRAME).max(120.0);
                     form::input(
                         ui,
                         ("automation_custom_name", i),
@@ -876,7 +883,10 @@ pub fn settings(
                         .invalid(bad.is_some()),
                 );
                 if let Some(e) = bad {
-                    form::error(ui, &e);
+                    // The regex error marks the column with a caret under
+                    // the pattern: monospace keeps it under the right one.
+                    let c = pal(ui).danger;
+                    ui.add(egui::Label::new(kit::mono(e).color(c)).wrap());
                 }
                 ui.add_space(4.0);
                 form::input(

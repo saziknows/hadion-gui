@@ -12,6 +12,25 @@ use crate::theme::{pal, size};
 use crate::views::icons::{Icon, IconButton};
 use crate::views::kit::{self, Tone};
 
+/// What `form::input` adds around the width it is given: a 10 pt margin
+/// and a 1 pt border on each side. Rows that size an input to leave room
+/// for a button must subtract it, or the row overflows its card.
+pub const INPUT_FRAME: f32 = 22.0;
+
+/// Width of a `form::button` / `form::primary` with `label` (a text-only
+/// `IconButton`: 11 points of padding on each side, the medium body font).
+pub fn button_width(ui: &Ui, label: &str) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            label.to_owned(),
+            egui::FontId::new(size::BODY, crate::theme::medium()),
+            egui::Color32::WHITE,
+        )
+        .size()
+        .x
+        + 22.0
+}
+
 /// The tone of a scope's badge: global is yours, local belongs to the
 /// repository, command-line values are unusual.
 pub fn scope_tone(scope: Scope) -> Tone {

@@ -436,7 +436,9 @@ fn check_folder(
     ui.add_space(2.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
-        let wdt = (ui.available_width() - 90.0).clamp(200.0, 620.0);
+        // The Check button, the gap and the input frame.
+        let wdt = (ui.available_width() - w::button_width(ui, "Check") - 8.0 - w::INPUT_FRAME)
+            .clamp(200.0, 620.0);
         let resp = form::input(
             ui,
             "identity_check_path",
@@ -535,7 +537,13 @@ fn identity_form(
             |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    let wdt = (ui.available_width() - 100.0).max(200.0);
+                    // The Choose… button, the gap and the input frame: the row
+                    // used to overflow its card.
+                    let wdt = (ui.available_width()
+                        - w::button_width(ui, "Choose…")
+                        - 8.0
+                        - w::INPUT_FRAME)
+                        .max(200.0);
                     let before = f.folder.clone();
                     form::input(
                         ui,

@@ -892,18 +892,19 @@ fn all(
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            let half = ((ui.available_width() - 8.0) / 2.0).max(160.0);
+            // Two inputs and the gap; each input adds its frame to its width.
+            let half = ((ui.available_width() - 8.0) / 2.0).max(160.0) - w::INPUT_FRAME;
             form::input(
                 ui,
                 "identity_raw_key",
                 &mut raw.key,
-                InputOpts::new("section.name").mono().width(half - 20.0),
+                InputOpts::new("section.name").mono().width(half),
             );
             form::input(
                 ui,
                 "identity_raw_value",
                 &mut raw.value,
-                InputOpts::new("value").mono().width(half - 20.0),
+                InputOpts::new("value").mono().width(half),
             );
         });
         ui.add_space(4.0);

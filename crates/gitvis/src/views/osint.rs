@@ -1561,8 +1561,18 @@ fn history_tab(ui: &mut Ui, cx: &Cx, o: &mut OsintState, actions: &mut Vec<Actio
         } else {
             kit::secondary(
                 ui,
-                "Reachable only through the reflog: amended, rebased or reset-away commits. They stay in this clone until the reflog expires (90 days) and git gc runs, and if they were pushed before the rewrite, the server still serves them by SHA.",
+                "Amended, rebased or reset-away commits that only the reflog still reaches.",
             );
+            kit::kv(ui, KV_W, |kv| {
+                kv.text(
+                    "In this clone",
+                    "until the reflog expires (90 days) and git gc runs",
+                );
+                kv.text(
+                    "On the server",
+                    "still served by SHA if they were pushed before the rewrite",
+                );
+            });
             ask_github(ui, cx, &a.rewritten, served, actions);
             let shown = a.rewritten.len().min(40);
             served_rows(ui, cx, &a.rewritten[..shown], served, actions);
@@ -1711,8 +1721,18 @@ fn history_tab(ui: &mut Ui, cx: &Cx, o: &mut OsintState, actions: &mut Vec<Actio
         sec(ui, "Unreachable objects", None);
         kit::secondary(
             ui,
-            "git fsck --unreachable lists objects no ref and no reflog reaches: leftovers of deleted branches, rebases and git add of files never committed. They are still readable here and, if ever pushed, on the server. Seconds on small repositories, up to a minute on large ones.",
+            "Objects no ref and no reflog reaches (git fsck --unreachable): leftovers of deleted branches, rebases, and git add of files never committed.",
         );
+        kit::kv(ui, KV_W, |kv| {
+            kv.text(
+                "Still readable",
+                "here, and on the server if they were ever pushed",
+            );
+            kv.text(
+                "Takes",
+                "seconds on small repositories, up to a minute on large ones",
+            );
+        });
         ui.add_space(space::XS);
         if let Some(run) = unreachable_run {
             if kit::progress(ui, run, "Finding unreachable objects", true) {
@@ -2400,8 +2420,18 @@ fn github_tab(
         sec(ui, "Dork yourself", None);
         kit::secondary(
             ui,
-            "The GitHub code-search queries an attacker runs against an owner first (.env files, private keys, registry tokens, credential files, Terraform state and more), run with your own account against every repository of the owner. Twelve requests; GitHub allows ten code searches a minute, so the run pauses briefly between queries.",
+            "The GitHub code-search queries an attacker runs against an owner first, run with your own account against every repository of the owner.",
         );
+        kit::kv(ui, KV_W, |kv| {
+            kv.text(
+                "Looks for",
+                ".env files, private keys, registry tokens, credential files, Terraform state and more",
+            );
+            kv.text(
+                "Cost",
+                "12 requests; GitHub allows 10 code searches a minute, so the run pauses briefly between queries",
+            );
+        });
         ui.add_space(space::XS);
         if o.dorks_running {
             kit::loading(ui, "Searching");
