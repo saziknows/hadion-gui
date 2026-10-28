@@ -29,7 +29,7 @@ impl Source {
     pub fn label(&self) -> String {
         match self {
             Source::GitHub(r) => r.clone(),
-            Source::Folder(d) => format!("{} (test folder)", d.display()),
+            Source::Folder(_) => "the test folder (GITVIS_UPDATE_DIR)".to_owned(),
         }
     }
 }

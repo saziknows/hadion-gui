@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use egui::{Align, Layout, RichText, Ui};
+use egui::{Align, Layout, RichText, Ui, vec2};
 use gitvis_core::devops::packaging::{release, time, update};
 
 use super::{Act, info, updates};
@@ -131,7 +131,7 @@ pub fn show(
     });
     let prefs = &settings.ext.packaging;
     kit::scroll_page(ui, "packaging_about", |ui| {
-        ui.set_max_width(kit::PROSE + 120.0);
+        ui.set_max_width(super::WIDTH);
         kit::stats(
             ui,
             &[
@@ -202,29 +202,34 @@ pub fn show(
                     }
                     Some(p) => {
                         let exists = p.exists();
-                        ui.horizontal_wrapped(|ui| {
-                            ui.add(
-                                egui::Label::new(
-                                    kit::mono(p.display().to_string()).color(if exists {
-                                        pal(ui).text
-                                    } else {
-                                        pal(ui).text_2
-                                    }),
-                                )
-                                .wrap(),
+                        // Path on the left (wrapping), the button at the
+                        // right end of the same line.
+                        ui.horizontal_top(|ui| {
+                            let w = (ui.available_width() - 84.0).max(120.0);
+                            ui.allocate_ui_with_layout(
+                                vec2(w, 0.0),
+                                Layout::top_down(Align::Min),
+                                |ui| {
+                                    ui.set_width(w);
+                                    ui.add(
+                                        egui::Label::new(kit::mono(p.display().to_string()).color(
+                                            if exists { pal(ui).text } else { pal(ui).text_2 },
+                                        ))
+                                        .wrap(),
+                                    );
+                                    if !exists {
+                                        kit::badge(ui, "Not created yet", Tone::Neutral);
+                                    }
+                                },
                             );
-                            if !exists {
-                                kit::badge(ui, "Not created yet", Tone::Neutral);
+                            if IconButton::new(Icon::Folder, "Open")
+                                .compact()
+                                .show(ui)
+                                .clicked()
+                            {
+                                actions.push(Act::OpenFolder(folder_of(&p, is_file)).into());
                             }
                         });
-                        let dir = folder_of(&p, is_file);
-                        if IconButton::new(Icon::Folder, "Open folder")
-                            .compact()
-                            .show(ui)
-                            .clicked()
-                        {
-                            actions.push(Act::OpenFolder(dir).into());
-                        }
                     }
                 });
             }

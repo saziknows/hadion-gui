@@ -176,12 +176,16 @@ fn detect_staged(st: &mut State) {
     let text = info::update_log()
         .and_then(|l| std::fs::read_to_string(l).ok())
         .unwrap_or_default();
-    // `… stage     v0.2.0 C:\…\gitvis.exe.new sha256=…`
-    let tag = text
+    // `… stage     v0.2.0 sha256=<hex> C:\…\gitvis.exe.new`
+    let line = text
         .lines()
         .rev()
         .find(|l| l.split_whitespace().nth(1) == Some("stage"))
-        .and_then(|l| l.split_whitespace().nth(2))
+        .unwrap_or("");
+    let tag = line.split_whitespace().nth(2).unwrap_or("").to_owned();
+    let sha = line
+        .split_whitespace()
+        .find_map(|w| w.strip_prefix("sha256="))
         .unwrap_or("")
         .to_owned();
     st.staged = Some(StagedInfo {
@@ -189,7 +193,7 @@ fn detect_staged(st: &mut State) {
         tag,
         bytes: std::fs::metadata(&p.new).map(|m| m.len()).unwrap_or(0),
         path: p.new,
-        sha256: String::new(),
+        sha256: sha,
         steps: Vec::new(),
         earlier: true,
     });
@@ -455,16 +459,18 @@ pub fn download(cx: &mut Ctx, st: &mut State, prefs: &Prefs) {
             Ok(s) => &s.steps,
             Err(f) => &f.steps,
         };
-        for s in steps.iter().skip(1) {
+        for s in steps {
             let event = match s.step {
-                Step::Download => "download",
+                Step::Download => "fetched",
                 Step::Verify => "verify",
                 Step::Extract => "extract",
                 Step::Stage => "stage",
             };
             let detail = if s.step == Step::Stage {
-                // The tag first: a later session reads it back.
-                format!("{} {}", job.tag, s.detail)
+                // Tag and hash first: a later session reads them back and
+                // checks the staged file before swapping it in.
+                let sha = r.as_ref().map(|s| s.sha256.as_str()).unwrap_or("");
+                format!("{} sha256={sha} {}", job.tag, s.detail)
             } else {
                 s.detail.clone()
             };
@@ -536,20 +542,28 @@ pub fn confirm_restart(cx: &mut Ctx, st: &State) {
 }
 
 /// Start the new executable with this process's arguments. The script of
-/// a scripted run is not passed on (it would update again), unless
-/// `GITVIS_SCRIPT_AFTER_UPDATE` names one for the new process.
+/// a scripted run is not passed on (it would update again):
+/// `GITVIS_SCRIPT_AFTER_UPDATE` names the new process's script, and a
+/// scripted run without one gets `wait 5; quit`, so a test never turns
+/// into a normal session that saves settings on exit.
 fn relaunch(exe: &Path, args: &[OsString], old: &Path, from: &str) -> std::io::Result<u32> {
     let mut cmd = std::process::Command::new(exe);
     cmd.args(args)
         .env("GITVIS_UPDATED_FROM", from)
         .env("GITVIS_UPDATE_OLD", old)
-        .env_remove("GITVIS_SCRIPT");
+        .env_remove("GITVIS_SCRIPT")
+        .env_remove("GITVIS_SCRIPT_AFTER_UPDATE");
     if let Ok(cwd) = std::env::current_dir() {
         cmd.current_dir(cwd);
     }
-    if let Ok(s) = std::env::var("GITVIS_SCRIPT_AFTER_UPDATE") {
-        cmd.env("GITVIS_SCRIPT", s)
-            .env_remove("GITVIS_SCRIPT_AFTER_UPDATE");
+    match std::env::var("GITVIS_SCRIPT_AFTER_UPDATE") {
+        Ok(s) => {
+            cmd.env("GITVIS_SCRIPT", s);
+        }
+        Err(_) if std::env::var_os("GITVIS_SCRIPT").is_some() => {
+            cmd.env("GITVIS_SCRIPT", "wait 5; quit");
+        }
+        Err(_) => {}
     }
     cmd.spawn().map(|c| c.id())
 }
@@ -562,6 +576,43 @@ pub fn restart(cx: &mut Ctx, st: &mut State, g: &mut GlobalCx) {
     if let Some(why) = swap::dev_build_reason(&p.exe) {
         cx.toast(ToastKind::Error, why);
         return;
+    }
+    if st.job.is_some() {
+        cx.toast(
+            ToastKind::Error,
+            "A download is still running: restart once it is verified and staged",
+        );
+        return;
+    }
+    // The staged file must still be the one that was verified.
+    if let Some(s) = st.staged.as_ref().filter(|s| !s.sha256.is_empty())
+        && p.new.is_file()
+    {
+        match gitvis_core::devops::packaging::checksum::sha256_file(&p.new) {
+            Ok(h) if h.eq_ignore_ascii_case(&s.sha256) => {}
+            Ok(h) => {
+                let e = format!(
+                    "{} changed since it was verified (SHA-256 {h}, expected {}); download the update again",
+                    p.new.display(),
+                    s.sha256
+                );
+                log("failed", &format!("restart: {e}"));
+                cx.toast(ToastKind::Error, e.clone());
+                st.restart = Some(RestartResult {
+                    steps: Vec::new(),
+                    error: e,
+                    rolled_back: false,
+                });
+                return;
+            }
+            Err(e) => {
+                cx.toast(
+                    ToastKind::Error,
+                    format!("Could not read {}: {e}", p.new.display()),
+                );
+                return;
+            }
+        }
     }
     let b = info::build();
     let from = format!("{} ({})", b.version, b.short_commit());
@@ -647,7 +698,10 @@ pub fn status_item(ui: &mut Ui, st: &State, prefs: &Prefs) -> Option<Section> {
             Tone::Success,
         )
     } else {
-        let c = evaluation(st, prefs).and_then(|e| e.best().cloned())?;
+        // Only a release that can actually be installed.
+        let c = evaluation(st, prefs)
+            .and_then(|e| e.best().cloned())
+            .filter(|c| c.problem(&Platform::current()).is_none())?;
         kit::badge(
             ui,
             &format!("Update to {} available", c.release.tag_name),
@@ -689,7 +743,7 @@ pub fn show(ui: &mut Ui, st: &mut State, settings: &mut Settings, actions: &mut 
     let exe = info::exe();
     let dev = exe.as_deref().and_then(swap::dev_build_reason);
     kit::scroll_page(ui, "packaging_updates", |ui| {
-        ui.set_max_width(kit::PROSE + 120.0);
+        ui.set_max_width(super::WIDTH);
         if let Some(d) = paths::test_dir() {
             kit::callout(
                 ui,
@@ -735,9 +789,7 @@ pub fn show(ui: &mut Ui, st: &mut State, settings: &mut Settings, actions: &mut 
             ],
         );
 
-        kit::section(ui, "Source", None);
-        source_card(ui, st, prefs, actions);
-
+        // What happens now first; the settings after it.
         kit::section(ui, "Status", None);
         status_block(ui, st, prefs, src.as_ref(), dev.is_some(), actions);
 
@@ -752,6 +804,9 @@ pub fn show(ui: &mut Ui, st: &mut State, settings: &mut Settings, actions: &mut 
             kit::section(ui, "What's new", Some(e.newer.len()));
             notes(ui, &e, actions);
         }
+
+        kit::section(ui, "Source", None);
+        source_card(ui, st, prefs, actions);
 
         kit::section_with(ui, "Last update", None, |ui| {
             if let Some(p) = info::update_log()
@@ -866,7 +921,7 @@ fn status_block(
                     None => {
                         kit::secondary(
                             ui,
-                            "Enter the source repository above first. gitvis does not guess one and never goes online on its own.",
+                            "Enter the source repository under Source below first. gitvis does not guess one and never goes online on its own.",
                         );
                     }
                 }
@@ -891,29 +946,29 @@ fn status_block(
                 .request_repaint_after(std::time::Duration::from_millis(200));
         }
         Check::Done {
-            result: Err(e),
-            gh_missing: true,
-            ..
+            gh_missing: true, ..
         } => {
             let mut again = false;
-            kit::callout_with(
-                ui,
-                Tone::Warning,
-                "gh is not installed",
-                &format!("gitvis reads releases with the GitHub CLI and your gh sign-in ({e})."),
-                |ui| {
-                    ui.label(
-                        RichText::new("Install it with")
-                            .size(size::SMALL)
-                            .color(pal(ui).text_2),
-                    );
-                    ui.label(kit::mono(Tool::Gh.install_hint()).color(pal(ui).text));
-                    again = IconButton::new(Icon::Fetch, "Check again")
-                        .compact()
-                        .show(ui)
-                        .clicked();
-                },
-            );
+            let program = gitvis_core::github::gh_program();
+            let why = if program == "gh" {
+                "gitvis reads releases with the GitHub CLI (gh) and your gh sign-in; gh was not found on PATH.".to_owned()
+            } else {
+                format!(
+                    "gitvis reads releases with the GitHub CLI and your gh sign-in; GITVIS_GH names {program}, which does not exist."
+                )
+            };
+            kit::callout_with(ui, Tone::Warning, "gh is not installed", &why, |ui| {
+                ui.label(
+                    RichText::new("Install it with")
+                        .size(size::SMALL)
+                        .color(pal(ui).text_2),
+                );
+                ui.label(kit::mono(Tool::Gh.install_hint()).color(pal(ui).text));
+                again = IconButton::new(Icon::Fetch, "Check again")
+                    .compact()
+                    .show(ui)
+                    .clicked();
+            });
             if again {
                 gitvis_core::devops::tools::refresh();
                 actions.push(Act::CheckNow.into());
@@ -1009,10 +1064,16 @@ fn status_block(
                 Some(c) => {
                     let platform = Platform::current();
                     let problem = c.problem(&platform);
+                    let ready = st
+                        .staged
+                        .as_ref()
+                        .is_some_and(|s| s.tag == c.release.tag_name);
                     form::card(
                         ui,
                         if problem.is_some() {
                             Tone::Warning
+                        } else if ready {
+                            Tone::Success
                         } else {
                             Tone::Accent
                         },
@@ -1020,7 +1081,14 @@ fn status_block(
                             ui.horizontal(|ui| {
                                 kit::title(
                                     ui,
-                                    &format!("gitvis {} is available", c.version.plain()),
+                                    &if ready {
+                                        format!(
+                                            "gitvis {} is verified and ready to install",
+                                            c.version.plain()
+                                        )
+                                    } else {
+                                        format!("gitvis {} is available", c.version.plain())
+                                    },
                                 );
                                 if c.release.is_prerelease() {
                                     kit::badge(ui, "Pre-release", Tone::Warning);
@@ -1090,17 +1158,19 @@ fn status_block(
                                 .as_ref()
                                 .is_some_and(|s| s.tag == c.release.tag_name);
                             form::actions_row(ui, |ui| {
-                                let label = if staged_this {
-                                    "Downloaded"
-                                } else if busy {
-                                    "Downloading…"
-                                } else {
-                                    "Download and verify"
-                                };
-                                if form::primary(
+                                if staged_this {
+                                    // Verified and staged: the next step is here too.
+                                    if form::primary(ui, "Restart to update", !dev).clicked() {
+                                        actions.push(Act::Restart.into());
+                                    }
+                                } else if form::primary(
                                     ui,
-                                    label,
-                                    problem.is_none() && !busy && !dev && !staged_this,
+                                    if busy {
+                                        "Downloading…"
+                                    } else {
+                                        "Download and verify"
+                                    },
+                                    problem.is_none() && !busy && !dev,
                                 )
                                 .clicked()
                                 {
@@ -1172,7 +1242,9 @@ fn step_row(ui: &mut Ui, label: &str, state: &StepState, add: impl FnOnce(&mut U
                         .family(medium())
                         .color(color),
                 );
-                if let StepState::Done(_, ms) = state {
+                if let StepState::Done(_, ms) = state
+                    && *ms > 0
+                {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
                             RichText::new(format::millis(*ms))

@@ -412,7 +412,7 @@ pub fn show(ui: &mut Ui, st: &mut State, settings: &mut Settings, actions: &mut 
     );
     let prefs = &settings.ext.packaging;
     kit::scroll_page(ui, "packaging_crashes", |ui| {
-        ui.set_max_width(kit::DETAIL_MAX);
+        ui.set_max_width(super::WIDTH);
         if let Some(t) = &st.closed_at {
             kit::callout(
                 ui,

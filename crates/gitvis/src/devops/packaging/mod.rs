@@ -30,6 +30,9 @@ use crate::devops::global::{GlobalCx, GlobalView};
 use crate::devops::settings_page::Section;
 use crate::state::{Action, Page, Settings};
 
+/// Content width of the three sections (prose stays capped at `kit::PROSE`).
+const WIDTH: f32 = crate::views::kit::PROSE + 120.0;
+
 #[derive(Default)]
 pub struct State {
     /// The once-per-session start work has run.
@@ -298,4 +301,51 @@ pub fn hook_status_items(ui: &mut egui::Ui, st: &State, v: &GlobalView, actions:
 pub fn install_crash_handler() {
     updates::after_relaunch();
     crash::install();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn one(cmd: &str, arg: &str) -> Option<Act> {
+        let mut v = script(cmd, arg)?;
+        assert_eq!(v.len(), 1, "{cmd}");
+        match v.remove(0) {
+            Action::DevOps(DevOpsAction::Packaging(a)) => Some(a),
+            _ => panic!("{cmd}: not a packaging action"),
+        }
+    }
+
+    #[test]
+    fn script_commands() {
+        assert!(matches!(one("update-check", ""), Some(Act::CheckNow)));
+        assert!(matches!(one("update-download", ""), Some(Act::Download)));
+        assert!(matches!(
+            one("update-restart", ""),
+            Some(Act::ScriptRestart)
+        ));
+        assert!(matches!(
+            one("update-confirm-restart", ""),
+            Some(Act::Restart)
+        ));
+        assert!(matches!(
+            one("update-channel", "pre"),
+            Some(Act::SetChannel(Channel::PreRelease))
+        ));
+        assert!(matches!(
+            one("update-channel", "stable"),
+            Some(Act::SetChannel(Channel::Stable))
+        ));
+        assert!(matches!(one("update-source", " o/r "), Some(Act::SetSource(s)) if s == "o/r"));
+        assert!(matches!(one("crash-open", "2"), Some(Act::ViewCrashAt(2))));
+        assert!(matches!(
+            one("crash-report", "x"),
+            Some(Act::ReportCrashAt(0))
+        ));
+        assert!(script("not-ours", "").is_none());
+        // Without both switches the crash test does nothing.
+        if std::env::var("GITVIS_ALLOW_CRASH_TEST").as_deref() != Ok("1") {
+            assert_eq!(script("crash-test", "").map(|v| v.len()), Some(0));
+        }
+    }
 }

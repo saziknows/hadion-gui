@@ -169,12 +169,17 @@ pub fn finish(report: &str) -> String {
         let mut ids: Vec<&str> = found.clone();
         ids.sort_unstable();
         ids.dedup();
-        text.push_str(&format!(
-            "\nRedacted:   {} value{} that looked secret ({})\n",
+        let line = format!(
+            "Redacted:   {} value{} that looked secret ({})\n",
             found.len(),
             if found.len() == 1 { "" } else { "s" },
             ids.join(", ")
-        ));
+        );
+        // In the header (the list reads only the head of each file).
+        match text.find("\nMessage\n") {
+            Some(i) => text.insert_str(i, &line),
+            None => text.push_str(&line),
+        }
     }
     text
 }
@@ -454,6 +459,12 @@ mod tests {
         assert!(!text.contains(&token), "{text}");
         assert!(!text.contains(aws), "{text}");
         assert!(text.contains("[redacted: "), "{text}");
+        // The note is in the header, right before the message.
+        assert!(
+            text.contains("app.rs:120:9\nRedacted:   2 values"),
+            "{text}"
+        );
+        assert!(text.contains("that looked secret (aws-access-key, github-token)\n\nMessage\n"));
         let s = summarize(&text);
         assert!(
             s.redacted.starts_with("2 values that looked secret"),
