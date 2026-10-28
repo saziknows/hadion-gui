@@ -687,8 +687,13 @@ fn wip_panel(
     });
     ui.add_space(4.0);
 
-    // Commit box goes at the bottom; lists take the rest.
-    let commit_h = 150.0;
+    // Commit box goes at the bottom; lists take the rest. Its height is
+    // last frame's (the secrets callout and hook rows make it grow).
+    let box_h_id = ui.id().with("commit_box_h");
+    let commit_h = ui
+        .data(|d| d.get_temp::<f32>(box_h_id))
+        .unwrap_or(150.0)
+        .max(150.0);
     let lists_h = (ui.available_height() - commit_h).max(80.0);
     let (lists_rect, _) =
         ui.allocate_exact_size(vec2(ui.available_width(), lists_h), Sense::hover());
@@ -870,6 +875,7 @@ fn wip_panel(
     });
 
     // Commit box
+    let box_top = ui.cursor().top();
     ui.separator();
     let pending = snap.pending;
     let can_commit = !busy
@@ -1016,6 +1022,8 @@ fn wip_panel(
             }
         });
     });
+    let box_h = ui.cursor().top() - box_top + 8.0;
+    ui.data_mut(|d| d.insert_temp(box_h_id, box_h));
 }
 
 /// Red shield on a working-tree row whose file holds a possible secret.
