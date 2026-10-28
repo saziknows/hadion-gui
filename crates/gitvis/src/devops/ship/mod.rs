@@ -2046,10 +2046,18 @@ fn recompute_dora(st: &mut State) {
 /// `rollback [rerun]`, `promote ENV`, `approve N`, `reject N`,
 /// `dora-source env NAME|releases|tags
 /// PATTERN|workflow NAME`, `dora-period 30|90|180`, `ship-scroll Y` (Where
-/// and DORA pages). Writes stop at their confirmation dialog.
+/// and DORA pages), `explain open|closed` (every folded explanation of the
+/// Ship, Govern and Tools pages drawn open). Writes stop at their
+/// confirmation dialog.
 pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
     let arg = arg.trim();
     let num = || arg.parse::<usize>().ok();
+    if cmd == "explain" {
+        // `explain open|closed`: draw every folded explanation of the Ship,
+        // Govern and Tools pages open, for screenshots.
+        crate::devops::pages::explain::set_open_all(arg != "closed");
+        return Some(Vec::new());
+    }
     let (tab, a) = match cmd {
         "release" => (ShipTab::Releases, Act::SelectReleaseIndex(num()?)),
         "new-release" => (ShipTab::Releases, Act::NewRelease),

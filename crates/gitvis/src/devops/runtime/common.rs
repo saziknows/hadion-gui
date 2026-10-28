@@ -3,13 +3,14 @@
 use std::hash::Hash;
 use std::path::PathBuf;
 
-use egui::{Frame, Margin, RichText, Sense, Ui};
+use egui::{Frame, RichText, Sense, Ui};
 
 use gitvis_core::devops::runtime::matching::{Distance, MatchKind, RefMatch};
 use gitvis_core::{Commit, Oid, Snapshot, repo};
 
 use super::{Act, RefCache};
 use crate::devops::console::Console;
+use crate::devops::pages::layout;
 use crate::format;
 use crate::state::Action;
 use crate::theme::{pal, size, space};
@@ -101,75 +102,19 @@ pub fn fetched(at: Option<i64>, ms: Option<u64>, now: i64) -> String {
     }
 }
 
-/// The list pane on the left (the frame of `kit::split_keyed`).
+/// The list pane on the left (gives way in a narrow window).
 pub fn list_pane(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
-    let p = *pal(ui);
-    egui::Panel::left(id)
-        .resizable(true)
-        .default_size(400.0)
-        .size_range(300.0..=700.0)
-        .frame(Frame::NONE.fill(p.panel).inner_margin(Margin {
-            left: 8,
-            right: 8,
-            top: 12,
-            bottom: 6,
-        }))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            add(ui)
-        });
+    layout::list_pane(ui, id, 400.0, add);
 }
 
-/// The scrollable detail pane (as in `kit::split_keyed`).
+/// The scrollable detail pane.
 pub fn detail_pane(ui: &mut Ui, salt: impl Hash + std::fmt::Debug, add: impl FnOnce(&mut Ui)) {
-    let p = *pal(ui);
-    egui::CentralPanel::default()
-        .frame(Frame::NONE.fill(p.canvas))
-        .show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt(salt)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    Frame::NONE
-                        .inner_margin(Margin {
-                            left: 28,
-                            right: 28,
-                            top: 20,
-                            bottom: 28,
-                        })
-                        .show(ui, |ui| {
-                            ui.set_max_width(kit::DETAIL_MAX);
-                            ui.spacing_mut().item_spacing.y = 8.0;
-                            add(ui)
-                        });
-                });
-        });
+    layout::detail_pane(ui, salt, add);
 }
 
 /// A full-width page in the remaining area (empty and error states).
 pub fn page(ui: &mut Ui, salt: &str, add: impl FnOnce(&mut Ui)) {
-    let p = *pal(ui);
-    egui::CentralPanel::default()
-        .frame(Frame::NONE.fill(p.canvas))
-        .show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt(salt)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    Frame::NONE
-                        .inner_margin(Margin {
-                            left: 28,
-                            right: 28,
-                            top: 20,
-                            bottom: 28,
-                        })
-                        .show(ui, |ui| {
-                            ui.set_max_width(kit::DETAIL_MAX);
-                            ui.spacing_mut().item_spacing.y = 8.0;
-                            add(ui)
-                        });
-                });
-        });
+    layout::detail_pane(ui, salt, add);
 }
 
 /// A console run in a resizable panel at the bottom of the remaining area,

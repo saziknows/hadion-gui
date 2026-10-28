@@ -98,7 +98,7 @@ pub fn environments(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>
         ..
     } = &mut repo.devops.govern;
     let acc = access.ok();
-    kit::page_header(
+    crate::devops::pages::layout::page_header(
         ui,
         "Environments",
         "Where deployments go, who approves them, how long they wait, which branches may deploy",
@@ -151,7 +151,7 @@ pub fn environments(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>
         (None, Some(s)) => s.clone(),
         _ => String::new(),
     };
-    kit::split_keyed(
+    crate::devops::pages::layout::split_keyed(
         ui,
         "gov_env",
         &key,
@@ -644,7 +644,7 @@ pub fn secrets(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
     let scope = secret_scope.clone();
     let current = secrets.get(&scope);
     let read_only = scope == Scope::Organization;
-    kit::page_header(
+    crate::devops::pages::layout::page_header(
         ui,
         "Secrets",
         "Names and dates only: GitHub never returns a secret's value",
@@ -969,7 +969,7 @@ pub fn variables(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
     let scope = var_scope.clone();
     let current = variables.get(&scope);
     let read_only = scope == Scope::Organization;
-    kit::page_header(
+    crate::devops::pages::layout::page_header(
         ui,
         "Variables",
         "Configuration values for workflows (vars.NAME); not secret, shown in full",

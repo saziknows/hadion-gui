@@ -309,7 +309,7 @@ pub fn show(
     let now = format::now_secs();
     let workdir = repo.workdir.clone();
     let wb = &mut repo.devops.workbench;
-    kit::page_header(ui, "Tasks", super::Tab::Tasks.hint(), |ui| {
+    crate::devops::pages::layout::page_header(ui, "Tasks", super::Tab::Tasks.hint(), |ui| {
         if IconButton::new(Icon::Rerun, "Scan again")
             .compact()
             .enabled(!wb.tasks.loading)

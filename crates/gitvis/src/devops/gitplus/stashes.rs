@@ -551,7 +551,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
     let busy = repo.is_busy() || repo.devops.gitplus.stashes.busy;
     let (changed, conflicted) = changed_files(repo);
     let s = &repo.devops.gitplus.stashes;
-    kit::page_header(
+    crate::devops::pages::layout::page_header(
         ui,
         "Stashes",
         crate::devops::workbench::Tab::Stashes.hint(),

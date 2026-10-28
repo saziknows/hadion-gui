@@ -596,6 +596,13 @@ fn sev_summary(items: impl Iterator<Item = Severity>) -> String {
     }
 }
 
+/// Did GitHub refuse to show something this account may not read (HTTP 403,
+/// or 404, which GitHub answers for settings only administrators see)?
+fn access_refused(e: &str) -> bool {
+    let l = e.to_ascii_lowercase();
+    l.contains("(http 403)") || l.contains("(http 404)")
+}
+
 /// Is this alerts error "switched off / no access" rather than a failure?
 fn alerts_unavailable(e: &str) -> bool {
     let l = e.to_ascii_lowercase();
@@ -618,6 +625,16 @@ impl Msg {
         let alerts_err = |e: &String| {
             if alerts_unavailable(e) {
                 Ok(format!("not available: {e}"))
+            } else {
+                Err(e.clone())
+            }
+        };
+        // The same for the settings only administrators may read
+        // (protection, secrets, variables, …): the page explains the
+        // refusal, so it is information in the log.
+        let access_err = |e: &String| {
+            if access_refused(e) {
+                Ok(format!("not available to this account: {e}"))
             } else {
                 Err(e.clone())
             }
@@ -661,7 +678,7 @@ impl Msg {
                 "GitHub SBOM: {}",
                 count(s.packages.len(), "package", "packages")
             )),
-            Msg::GhSbom(Err(e)) => err(e),
+            Msg::GhSbom(Err(e)) => access_err(e),
             Msg::Images(Err(e)) => err(e),
             Msg::Images(Ok(r)) => Ok(format!(
                 "{}, {} ({} high or worse), {}",
@@ -694,17 +711,17 @@ impl Msg {
             )),
             Msg::ScanParsed(_, Err(e)) => err(e),
             Msg::Protected(Ok(v)) => Ok(count(v.len(), "protected branch", "protected branches")),
-            Msg::Protected(Err(e)) => err(e),
+            Msg::Protected(Err(e)) => access_err(e),
             Msg::Protection(b, Ok(Some(_))) => Ok(format!("Protection of {b}")),
             Msg::Protection(b, Ok(None)) => Ok(format!("{b} is not protected")),
-            Msg::Protection(_, Err(e)) => err(e),
+            Msg::Protection(_, Err(e)) => access_err(e),
             Msg::Rules(b, Ok(v)) => Ok(format!(
                 "{} in effect on {b}",
                 count(v.len(), "rule", "rules")
             )),
-            Msg::Rules(_, Err(e)) => err(e),
+            Msg::Rules(_, Err(e)) => access_err(e),
             Msg::Rulesets(Ok(v)) => Ok(count(v.len(), "ruleset", "rulesets")),
-            Msg::Rulesets(Err(e)) => err(e),
+            Msg::Rulesets(Err(e)) => access_err(e),
             Msg::CoFile(Ok(b)) => Ok(match &b.0.path {
                 Some(p) => format!(
                     "{p}: {} bytes, {} tracked files",
@@ -726,14 +743,14 @@ impl Msg {
                 "GitHub reports {} in CODEOWNERS",
                 count(v.len(), "error", "errors")
             )),
-            Msg::CoErrors(Err(e)) => err(e),
+            Msg::CoErrors(Err(e)) => access_err(e),
             Msg::Envs(Ok(v)) => Ok(count(v.len(), "environment", "environments")),
-            Msg::Envs(Err(e)) => err(e),
+            Msg::Envs(Err(e)) => access_err(e),
             Msg::Policies(env, Ok(v)) => Ok(format!(
                 "{} for {env}",
                 count(v.len(), "branch policy", "branch policies")
             )),
-            Msg::Policies(_, Err(e)) => err(e),
+            Msg::Policies(_, Err(e)) => access_err(e),
             Msg::Resolved(Ok(v)) => Ok(format!(
                 "Resolved {}",
                 count(v.len(), "reviewer", "reviewers")
@@ -744,7 +761,7 @@ impl Msg {
                 count(v.len(), "secret", "secrets"),
                 s.label()
             )),
-            Msg::Secrets(_, Err(e)) => err(e),
+            Msg::Secrets(_, Err(e)) => access_err(e),
             Msg::WorkflowSecrets(v) => Ok(format!(
                 "{} referenced in workflows",
                 count(v.len(), "secret", "secrets")
@@ -754,7 +771,7 @@ impl Msg {
                 count(v.len(), "variable", "variables"),
                 s.label()
             )),
-            Msg::Variables(_, Err(e)) => err(e),
+            Msg::Variables(_, Err(e)) => access_err(e),
             Msg::Changed(_) | Msg::ChangeFailed => Ok(String::new()),
         }
     }
@@ -1009,7 +1026,7 @@ fn nav_count(st: &State, t: Tab) -> Option<(usize, Tone)> {
 fn content(ui: &mut egui::Ui, repo: &mut RepoState, console: &Console, actions: &mut Vec<Action>) {
     let tab = repo.devops.govern.tab;
     if tab.needs_github() && repo.github_remote.is_none() {
-        kit::page_header(ui, tab.label(), tab.hint(), |_| {});
+        crate::devops::pages::layout::page_header(ui, tab.label(), tab.hint(), |_| {});
         kit::scroll_page(ui, "gov_no_remote", |ui| {
             widgets::no_github(ui, repo, tab);
         });

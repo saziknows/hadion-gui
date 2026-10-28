@@ -323,18 +323,23 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         .unwrap_or(0);
     let errors = problems(repo);
     let r = &mut repo.devops.workbench.rebase;
-    kit::page_header(ui, "Interactive rebase", super::Tab::Rebase.hint(), |ui| {
-        if let Some(Ok(l)) = &r.loaded
-            && IconButton::new(Icon::Rerun, "Reload")
-                .compact()
-                .enabled(!r.loading)
-                .show(ui)
-                .on_hover_text("Read the commits again (the plan starts over)")
-                .clicked()
-        {
-            actions.push(Act::LoadRebase(l.base.clone()).into());
-        }
-    });
+    crate::devops::pages::layout::page_header(
+        ui,
+        "Interactive rebase",
+        super::Tab::Rebase.hint(),
+        |ui| {
+            if let Some(Ok(l)) = &r.loaded
+                && IconButton::new(Icon::Rerun, "Reload")
+                    .compact()
+                    .enabled(!r.loading)
+                    .show(ui)
+                    .on_hover_text("Read the commits again (the plan starts over)")
+                    .clicked()
+            {
+                actions.push(Act::LoadRebase(l.base.clone()).into());
+            }
+        },
+    );
     wui::page(ui, "wb_rebase_page", |ui| {
         base_bar(ui, r, actions);
         if pending == Some("rebase") {

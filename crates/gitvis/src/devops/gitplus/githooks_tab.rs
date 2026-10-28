@@ -900,7 +900,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
         .map(|s| s.status.staged.len())
         .unwrap_or(0);
     let h = &mut repo.devops.gitplus.hooks;
-    kit::page_header(
+    crate::devops::pages::layout::page_header(
         ui,
         "Hooks",
         crate::devops::workbench::Tab::Hooks.hint(),

@@ -214,7 +214,7 @@ fn header(ui: &mut Ui, cx: &Cx, k: &KubeState, actions: &mut Vec<Action>) {
         parts.join(" · ")
     };
     let loading = k.loading;
-    kit::page_header(ui, "Kubernetes", &sub, |ui| {
+    crate::devops::pages::layout::page_header(ui, "Kubernetes", &sub, |ui| {
         if loading {
             ui.add(egui::Spinner::new().size(14.0));
         }
@@ -242,9 +242,28 @@ fn toolbar(ui: &mut Ui, k: &KubeState, cfg: &KubeConfig, actions: &mut Vec<Actio
         })
         .show(ui, |ui| {
             let w = ui.available_width();
-            ui.allocate_ui_with_layout(egui::vec2(w, 32.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                ui.label(RichText::new("Context").size(size::SMALL).color(p.text_2));
+            // One row on a wide window, two on a narrow one: combo boxes do
+            // not wrap, and a row wider than the page widens the panes below.
+            let wide = w >= 780.0;
+            let row = |ui: &mut Ui, add: &mut dyn FnMut(&mut Ui)| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(w, 32.0),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        add(ui)
+                    },
+                );
+            };
+            let label_w = if wide { 0.0 } else { 76.0 };
+            let label = |ui: &mut Ui, text: &str| {
+                let r = ui.label(RichText::new(text).size(size::SMALL).color(p.text_2));
+                if r.rect.width() < label_w {
+                    ui.add_space(label_w - r.rect.width());
+                }
+            };
+            let mut context = |ui: &mut Ui| {
+                label(ui, "Context");
                 let mut ctx = target.context.clone();
                 let opts: Vec<(String, String)> = cfg
                     .contexts
@@ -260,8 +279,9 @@ fn toolbar(ui: &mut Ui, k: &KubeState, cfg: &KubeConfig, actions: &mut Vec<Actio
                 if crate::views::form::select(ui, "k8s_context", &mut ctx, &opts, 220.0) {
                     actions.push(Act::KubeContext(ctx).into());
                 }
-                ui.add_space(8.0);
-                ui.label(RichText::new("Namespace").size(size::SMALL).color(p.text_2));
+            };
+            let namespace = |ui: &mut Ui, actions: &mut Vec<Action>| {
+                label(ui, "Namespace");
                 let mut ns = target.namespace.clone();
                 let mut opts: Vec<(String, String)> = match k.load.as_ref().map(|l| &l.namespaces) {
                     Some(Ok(list)) => list
@@ -292,7 +312,19 @@ fn toolbar(ui: &mut Ui, k: &KubeState, cfg: &KubeConfig, actions: &mut Vec<Actio
                 {
                     actions.push(Act::KubeProbeAll.into());
                 }
-            });
+            };
+            let mut later: Vec<Action> = Vec::new();
+            if wide {
+                row(ui, &mut |ui| {
+                    context(ui);
+                    ui.add_space(8.0);
+                    namespace(ui, &mut later);
+                });
+            } else {
+                row(ui, &mut |ui| context(ui));
+                row(ui, &mut |ui| namespace(ui, &mut later));
+            }
+            actions.extend(later);
         });
     kit::hairline(ui);
 }

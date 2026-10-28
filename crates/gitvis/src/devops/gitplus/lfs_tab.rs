@@ -333,7 +333,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
         .overview
         .as_ref()
         .is_some_and(|o| o.installed() && !o.unused());
-    kit::page_header(
+    crate::devops::pages::layout::page_header(
         ui,
         "Git LFS",
         crate::devops::workbench::Tab::Lfs.hint(),

@@ -10,6 +10,7 @@ use gitvis_core::devops::ship::deploy;
 use gitvis_core::devops::ship::dora::{self, Band, FIX_WINDOW_DAYS, Outcome, Report, THRESHOLDS};
 
 use super::{Act, DoraSource, State, count, ui as sui};
+use crate::devops::pages::explain;
 use crate::format;
 use crate::state::{Action, RepoState, Settings};
 use crate::theme::{self, Tone, pal, radius, size};
@@ -44,7 +45,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
             "Deployment frequency, lead time, change failure rate and time to restore".to_owned()
         }
     };
-    kit::page_header(ui, "DORA metrics", &subtitle, |ui| {
+    crate::devops::pages::layout::page_header(ui, "DORA metrics", &subtitle, |ui| {
         if IconButton::new(Icon::Rerun, "Refresh")
             .compact()
             .enabled(!d.events.loading && !d.local.loading)
@@ -96,7 +97,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         };
         if rep.coverage.events == 0 {
             let all = d.events.ok().map(Vec::len).unwrap_or(0);
-            let other = "Pick another source: a production environment, published releases, version tags or a deploy workflow.";
+            let other = "Count something else above: a production environment, published releases, version tags or a deploy workflow.";
             let (title, body) = if all == 0 {
                 let what = match &d.source {
                     Some(DoraSource::Tags(p)) => format!("No tag matches {p} in this repository."),
@@ -113,12 +114,12 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                     }
                     None => String::new(),
                 };
-                ("Nothing to count".to_owned(), format!("{what} {other}"))
+                ("Nothing to count".to_owned(), format!("{what}\n{other}"))
             } else {
                 (
                     "Nothing deployed in this period".to_owned(),
                     format!(
-                        "{} {} read, none in the last {} days. Pick a longer period, or another source.",
+                        "{} {} read, none in the last {} days.\nPick a longer period, or another source.",
                         format::count(all),
                         if all == 1 { "event was" } else { "events were" },
                         rep.days
@@ -147,10 +148,12 @@ fn controls(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
     let st: &mut State = &mut repo.devops.ship;
     let envs = st.env_order();
     let kind = kind_of(st.dora.source.as_ref());
-    form::card(ui, Tone::Neutral, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 10.0;
-            kit::secondary(ui, "Count as a deployment");
+    // Plain rows on the canvas: a segmented control on a raised card is
+    // invisible in the light theme (both are the raised colour).
+    let label_w = 168.0;
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 6.0;
+        form::row(ui, label_w, "Count as a deployment", |ui| {
             let opts = [
                 (Some(Kind::Env), "Environment"),
                 (Some(Kind::Releases), "Releases"),
@@ -194,18 +197,17 @@ fn controls(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                     )),
                 }
             }
-            ui.add_space(12.0);
-            kit::secondary(ui, "Period");
+        });
+        form::row(ui, label_w, "Period", |ui| {
             let periods = [(30u32, "30 days"), (90, "90 days"), (180, "180 days")];
             if let Some(p) = kit::segmented(ui, &periods, st.dora.period) {
                 actions.push(Act::DoraPeriod(p).into());
             }
         });
-        ui.add_space(6.0);
+        let mut help: Vec<&str> = Vec::new();
         match st.dora.source.clone() {
             Some(DoraSource::Environment(cur)) => {
-                ui.horizontal(|ui| {
-                    kit::secondary(ui, "Environment");
+                form::row(ui, label_w, "Environment", |ui| {
                     let mut v = cur.clone();
                     let opts: Vec<(String, String)> = if envs.is_empty() {
                         vec![(cur.clone(), cur.clone())]
@@ -215,12 +217,11 @@ fn controls(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                     if form::select(ui, "ship_dora_env", &mut v, &opts, 220.0) {
                         actions.push(Act::DoraSource(DoraSource::Environment(v)).into());
                     }
-                    kit::muted(ui, "Successful and failed deployments to it.");
                 });
+                help.push("Its successful and failed deployments count.");
             }
             Some(DoraSource::Tags(cur)) => {
-                ui.horizontal(|ui| {
-                    kit::secondary(ui, "Tag pattern");
+                form::row(ui, label_w, "Tag pattern", |ui| {
                     let resp = form::input(
                         ui,
                         "ship_dora_tags",
@@ -236,12 +237,11 @@ fn controls(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                                 .into(),
                         );
                     }
-                    kit::muted(ui, "A git for-each-ref glob, dated by each tag's creation; every tag counts as a successful deployment.");
                 });
+                help.push("A git for-each-ref glob. Each tag is a successful deployment, dated by its creation.");
             }
             Some(DoraSource::Workflow(id, _)) => {
-                ui.horizontal(|ui| {
-                    kit::secondary(ui, "Workflow");
+                form::row(ui, label_w, "Workflow", |ui| {
                     let mut v = id;
                     let opts: Vec<(u64, String)> = workflows.clone();
                     if form::select(ui, "ship_dora_workflow", &mut v, &opts, 260.0)
@@ -249,47 +249,58 @@ fn controls(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                     {
                         actions.push(Act::DoraSource(DoraSource::Workflow(*wid, n.clone())).into());
                     }
-                    kit::muted(
-                        ui,
-                        "Completed runs on the default branch: success deploys, failure fails.",
-                    );
                 });
+                help.push(
+                    "Its completed runs on the default branch: a success deploys, a failure fails.",
+                );
             }
             Some(DoraSource::Releases) => {
-                kit::muted(
-                    ui,
-                    "Published releases (not drafts or pre-releases), dated by publication. A release has no failed state, so only the revert / hotfix heuristic estimates failures.",
-                );
+                help.push("Published releases (not drafts or pre-releases), dated by publication.");
+                help.push("A release cannot fail, so only the revert / hotfix heuristic estimates failures.");
             }
             None => {}
         }
         if !has_gh {
-            kit::muted(
-                ui,
-                "Without a GitHub remote (or gh), only local tags can be counted.",
-            );
+            help.push("Without a GitHub remote (or gh), only local tags can be counted.");
+        }
+        if !help.is_empty() {
+            // Under the controls, which start one item spacing after the
+            // label column.
+            ui.horizontal_top(|ui| {
+                ui.add_space(label_w + ui.spacing().item_spacing.x);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    for h in help {
+                        kit::secondary(ui, h);
+                    }
+                });
+            });
         }
     });
+    ui.add_space(4.0);
+    kit::hairline(ui);
 }
 
 fn coverage(ui: &mut Ui, st: &State, rep: &Report) {
     let c = &rep.coverage;
-    let mut parts = vec![format!(
-        "{} in the last {} days",
-        count(c.events, "event", "events"),
-        rep.days
-    )];
+    kit::secondary(
+        ui,
+        &format!(
+            "{} in the last {} days, {} with a lead time.",
+            count(c.events, "event", "events"),
+            rep.days,
+            count(c.lead_commits, "commit", "commits")
+        ),
+    );
     if c.folded > 0 {
-        parts.push(format!(
-            "{} repeated deployments of one commit within an hour folded into one",
-            format::count(c.folded)
-        ));
+        kit::secondary(
+            ui,
+            &format!(
+                "{} of one commit within an hour folded into one.",
+                count(c.folded, "repeated deployment", "repeated deployments")
+            ),
+        );
     }
-    parts.push(format!(
-        "{} with a lead time",
-        count(c.lead_commits, "commit", "commits")
-    ));
-    kit::secondary(ui, &parts.join(" · "));
     if c.missing_local > 0 {
         kit::callout(
             ui,
@@ -418,11 +429,11 @@ fn metrics(ui: &mut Ui, rep: &Report) {
             )];
             if let Some(h) = rep.fix_rate {
                 v.push(format!(
-                        "Heuristic: {:.0}% ({} of {}) followed by a revert or hotfix within {FIX_WINDOW_DAYS} days",
-                        h * 100.0,
-                        rep.fix_followed,
-                        rep.successes
-                    ));
+                    "{} of {} followed by a revert or hotfix within {FIX_WINDOW_DAYS} days ({:.0}%)",
+                    rep.fix_followed,
+                    rep.successes,
+                    h * 100.0
+                ));
             }
             v
         }),
@@ -575,6 +586,25 @@ fn week_chart(
     }
 }
 
+/// Colour swatches with their labels, then a note.
+fn legend(ui: &mut Ui, items: &[(Color32, &str)], note: &str) {
+    let p = *pal(ui);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        for (c, label) in items {
+            let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+            ui.painter().rect_filled(r, CornerRadius::same(2), *c);
+            ui.label(
+                egui::RichText::new(*label)
+                    .size(size::SMALL)
+                    .color(p.text_2),
+            );
+            ui.add_space(8.0);
+        }
+        ui.label(egui::RichText::new(note).size(size::SMALL).color(p.text_2));
+    });
+}
+
 /// `2026-10-26` (local).
 fn day(t: i64) -> String {
     let a = format::absolute(t);
@@ -615,9 +645,10 @@ fn charts(ui: &mut Ui, rep: &Report) {
         },
         |m| format!("{m:.0}"),
     );
-    kit::muted(
+    legend(
         ui,
-        "Blue: successful deployments; red on top: failed ones. Weeks start on Monday (UTC).",
+        &[(p.accent, "Successful"), (p.danger, "Failed (on top)")],
+        "Weeks start on Monday (UTC).",
     );
     let lead: Vec<(i64, f64, f64)> = rep
         .weeks
@@ -686,11 +717,7 @@ fn rows(ui: &mut Ui, repo: &RepoState, rep: &Report, actions: &mut Vec<Action>) 
                 notes.push("not in local history".to_owned());
             }
             vec![
-                ins::muted(format!(
-                    "{} · {}",
-                    format::absolute(r.time),
-                    format::relative(r.time, now)
-                )),
+                ins::muted(sui::when(r.time, now)),
                 if r.sha.as_deref().is_some_and(|s| sui::in_graph(repo, s)) {
                     Cell::MonoLink(r.label.clone())
                 } else {
@@ -718,6 +745,8 @@ fn rows(ui: &mut Ui, repo: &RepoState, rep: &Report, actions: &mut Vec<Action>) 
     ins::more(ui, rep.rows.len(), shown.len());
 }
 
+/// What the four metrics mean (one plain sentence each), with the method
+/// and the performance bands folded away.
 fn how(ui: &mut Ui, st: &State) {
     kit::section(ui, "How this is computed", None);
     let source = st
@@ -726,42 +755,105 @@ fn how(ui: &mut Ui, st: &State) {
         .as_ref()
         .map(|s| s.describe())
         .unwrap_or_else(|| "the chosen source".to_owned());
-    let points = [
-        format!(
-            "Deployments are {source}. Repeated deployments of the same commit within an hour count once (parallel jobs of one run)."
-        ),
-        "Deployment frequency: successful deployments in the period divided by its days (and times seven for a week).".to_owned(),
-        format!(
-            "Lead time for changes: for each successful deployment, the commits it brought that the previous {} deployed commits did not have (git log NEW ^PREV …, read locally); lead time = deployment time − commit (committer) time. Median and 90th percentile over all those commits.",
-            dora::EXCLUDE_PREVIOUS
-        ),
-        format!(
-            "Change failure rate: failed or errored deployments over all completed ones. Separately, a heuristic counts successful deployments followed within {FIX_WINDOW_DAYS} days by a deployment that brought a revert (\"Revert …\") or a hotfix commit."
-        ),
-        "Time to restore: from a failed deployment to the next successful one in the same environment; consecutive failures are one incident. Median over the incidents of the period.".to_owned(),
-    ];
-    for t in points {
-        kit::body(ui, &format!("•  {t}"));
-    }
-    ui.add_space(6.0);
-    kit::subtitle(ui, "Bands (DORA State of DevOps 2023 clusters)");
-    let rows: Vec<Vec<String>> = THRESHOLDS
-        .iter()
-        .map(|(m, b)| {
-            let mut r = vec![(*m).to_owned()];
-            r.extend(b.iter().map(|s| (*s).to_owned()));
-            r
-        })
-        .collect();
-    kit::table(
+    kit::body(ui, &format!("Deployments here are the {source}."));
+    ui.add_space(2.0);
+    explain::terms(
         ui,
+        TERM_W,
         &[
-            Col::text("Metric"),
-            Col::text("Elite"),
-            Col::text("High"),
-            Col::text("Medium"),
-            Col::text("Low"),
+            ("Deployment frequency", "How often a deployment succeeds."),
+            (
+                "Lead time for changes",
+                "How long a commit takes to reach a successful deployment.",
+            ),
+            ("Change failure rate", "The share of deployments that fail."),
+            (
+                "Time to restore",
+                "How long it takes from a failed deployment to the next successful one.",
+            ),
         ],
-        &rows,
     );
+    ui.add_space(4.0);
+    explain::details(
+        ui,
+        "ship_dora_method",
+        "Method, step by step",
+        false,
+        |ui| {
+            let lead = format!(
+                "For each successful deployment: the commits it brought that the previous {} deployed commits did not have.\nRead from local history: git log NEW ^PREV …\nLead time = deployment time − commit (committer) time.\nMedian and 90th percentile over all those commits.",
+                dora::EXCLUDE_PREVIOUS
+            );
+            let failure = format!(
+                "Failed or errored deployments ÷ all completed ones.\nSeparately, a heuristic counts the successful deployments followed within {FIX_WINDOW_DAYS} days by a deployment that brought a revert (\"Revert …\") or a hotfix commit."
+            );
+            explain::terms(
+                ui,
+                TERM_W - 26.0,
+                &[
+                    (
+                        "Deployments",
+                        "Repeated deployments of the same commit within an hour count once (parallel jobs of one run).",
+                    ),
+                    (
+                        "Deployment frequency",
+                        "Successful deployments in the period ÷ its days.\n× 7 for a week.",
+                    ),
+                    ("Lead time for changes", &lead),
+                    ("Change failure rate", &failure),
+                    (
+                        "Time to restore",
+                        "From a failed deployment to the next successful one in the same environment.\nConsecutive failures are one incident.\nMedian over the incidents of the period.",
+                    ),
+                ],
+            );
+        },
+    );
+    explain::details(
+        ui,
+        "ship_dora_bands",
+        "Performance bands (DORA State of DevOps 2023 clusters)",
+        false,
+        bands,
+    );
+}
+
+/// Width of the term column in the explanations.
+const TERM_W: f32 = 200.0;
+
+/// The band thresholds: a table where it fits, a group per metric where
+/// it does not.
+fn bands(ui: &mut Ui) {
+    if ui.available_width() >= 780.0 {
+        let rows: Vec<Vec<String>> = THRESHOLDS
+            .iter()
+            .map(|(m, b)| {
+                let mut r = vec![(*m).to_owned()];
+                r.extend(b.iter().map(|s| (*s).to_owned()));
+                r
+            })
+            .collect();
+        kit::table(
+            ui,
+            &[
+                Col::text("Metric"),
+                Col::text("Elite"),
+                Col::text("High"),
+                Col::text("Medium"),
+                Col::text("Low"),
+            ],
+            &rows,
+        );
+        return;
+    }
+    for (m, b) in THRESHOLDS {
+        ui.add_space(8.0);
+        kit::subtitle(ui, m);
+        let rows: Vec<(&str, &str)> = [Band::Elite, Band::High, Band::Medium, Band::Low]
+            .iter()
+            .zip(b.iter())
+            .map(|(band, t)| (band.label(), *t))
+            .collect();
+        explain::terms(ui, 90.0, &rows);
+    }
 }

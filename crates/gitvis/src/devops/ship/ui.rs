@@ -216,32 +216,8 @@ pub fn span(secs: i64) -> String {
     }
 }
 
-/// `kit::scroll_page` with a scroll offset the script driver can set
+/// A scrolling page with a scroll offset the script driver can set
 /// (`ship-scroll N`), taken once.
 pub fn scroll_page(ui: &mut Ui, id: &str, offset: &mut Option<f32>, add: impl FnOnce(&mut Ui)) {
-    let p = *pal(ui);
-    egui::CentralPanel::default()
-        .frame(egui::Frame::NONE.fill(p.canvas))
-        .show(ui, |ui| {
-            let mut area = egui::ScrollArea::vertical()
-                .id_salt(id)
-                .auto_shrink([false, false]);
-            if let Some(o) = offset.take() {
-                area = area.vertical_scroll_offset(o);
-            }
-            area.show(ui, |ui| {
-                egui::Frame::NONE
-                    .inner_margin(egui::Margin {
-                        left: 28,
-                        right: 28,
-                        top: 20,
-                        bottom: 32,
-                    })
-                    .show(ui, |ui| {
-                        ui.set_max_width(kit::DETAIL_MAX + 120.0);
-                        ui.spacing_mut().item_spacing.y = 8.0;
-                        add(ui)
-                    });
-            });
-        });
+    crate::devops::pages::layout::page_at(ui, id, offset, add);
 }

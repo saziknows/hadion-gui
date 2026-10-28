@@ -1,5 +1,12 @@
 //! The Ship page: one section navigation over two areas, releases and
 //! deployments ([`super::ship`]) and what is running ([`super::runtime`]).
+//!
+//! Its submodules are shared by the Ship, Govern and Tools pages: pane
+//! frames that stay inside a narrow window ([`layout`]) and the pieces
+//! explanations are built from ([`explain`]).
+
+pub mod explain;
+pub mod layout;
 
 use crate::devops::console::Console;
 use crate::devops::ctx::Ctx;

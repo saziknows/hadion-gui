@@ -526,7 +526,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
         .and_then(|s| s.head.branch().map(str::to_owned))
         .unwrap_or_else(|| "HEAD".to_owned());
     let p = &mut repo.devops.gitplus.patches;
-    kit::page_header(
+    crate::devops::pages::layout::page_header(
         ui,
         "Patches",
         crate::devops::workbench::Tab::Patches.hint(),

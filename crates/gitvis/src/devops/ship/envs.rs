@@ -7,6 +7,7 @@ use egui::Ui;
 use gitvis_core::devops::ship::deploy::{self, Approval, Deployment};
 
 use super::{Act, State, count, ui as sui};
+use crate::devops::pages::explain;
 use crate::format;
 use crate::state::{Action, RepoState, Settings};
 use crate::theme::{Tone, pal};
@@ -112,7 +113,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         None => "What is deployed where, pending approvals, promote and roll back".to_owned(),
     };
     let can = repo.github_remote.is_some() && st.gh_ok != Some(false);
-    kit::page_header(ui, "Environments", &subtitle, |ui| {
+    crate::devops::pages::layout::page_header(ui, "Environments", &subtitle, |ui| {
         if can
             && IconButton::new(Icon::Rerun, "Refresh")
                 .compact()
@@ -233,7 +234,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         .collect();
     let selected = st.selected_env.clone();
     let key = selected.clone().unwrap_or_default();
-    kit::split_keyed(
+    crate::devops::pages::layout::split_keyed(
         ui,
         "ship_envs",
         &key,
@@ -304,9 +305,33 @@ fn where_section(ui: &mut Ui, repo: &RepoState, now: i64, actions: &mut Vec<Acti
         .unwrap_or_else(|| "the default branch".to_owned());
     kit::secondary(
         ui,
-        &format!(
-            "Each environment's current commit: the newest active deployment, else the newest successful one. Behind counts commits on {default} that are not deployed; ahead counts commits the environment has and the next one in the pipeline does not."
-        ),
+        "The commit each environment runs, and how far it is from the default branch and from the next environment.",
+    );
+    explain::details(
+        ui,
+        "ship_envs_where_terms",
+        "What the columns mean",
+        false,
+        |ui| {
+            explain::terms(
+                ui,
+                130.0,
+                &[
+                    (
+                        "Commit",
+                        "The newest active deployment, else the newest successful one.",
+                    ),
+                    (
+                        "Behind",
+                        &format!("Commits on {default} that are not deployed there."),
+                    ),
+                    (
+                        "Ahead of next",
+                        "Commits the environment has that the next one in the pipeline does not.",
+                    ),
+                ],
+            );
+        },
     );
     let cols = [
         Col::text("Environment"),
@@ -381,7 +406,7 @@ fn where_section(ui: &mut Ui, repo: &RepoState, now: i64, actions: &mut Vec<Acti
             Tone::Warning,
             "Some deployed commits are not in the local history",
             &format!(
-                "{} run a commit this clone does not have, so behind and ahead counts are unknown there. Fetch (git fetch --all) to compare them.",
+                "Not in this clone: the commits of {}.\nBehind and ahead are unknown there until you fetch (git fetch --all).",
                 missing
                     .iter()
                     .map(|s| s.as_str())
@@ -405,7 +430,11 @@ fn where_section(ui: &mut Ui, repo: &RepoState, now: i64, actions: &mut Vec<Acti
     });
     kit::secondary(
         ui,
-        "Changes flow from top to bottom; each environment is compared with the next one. The order starts as a guess from the names (development, test, staging, production) and can be changed here.",
+        "Changes flow from top to bottom; each environment is compared with the next one.",
+    );
+    kit::secondary(
+        ui,
+        "The order starts as a guess from the names (development, test, staging, production); the arrows change it.",
     );
     for (i, name) in order.iter().enumerate() {
         ui.horizontal(|ui| {
@@ -463,9 +492,10 @@ fn approvals_section(ui: &mut Ui, st: &mut State, now: i64, actions: &mut Vec<Ac
         return;
     };
     if list.is_empty() {
-        kit::muted(
+        kit::secondary(ui, "No run is waiting for a deployment review.");
+        kit::secondary(
             ui,
-            "No run is waiting for a deployment review. Runs wait here when an environment requires reviewers or has a wait timer.",
+            "Runs wait here when an environment requires reviewers or has a wait timer.",
         );
         return;
     }
@@ -499,11 +529,11 @@ fn approval_card(ui: &mut Ui, a: &Approval, now: i64, actions: &mut Vec<Action>)
             &format!("{} #{}", run.name, run.run_number),
             &[("Waiting".to_owned(), Tone::Warning)],
         );
+        kit::secondary(ui, &run.display_title);
         kit::secondary(
             ui,
             &format!(
-                "{} · {} on {} · started {} by {}",
-                run.display_title,
+                "{} on {}, started {} by {}",
                 short(&run.head_sha),
                 run.head_branch.clone().unwrap_or_default(),
                 run.created_at
@@ -514,40 +544,51 @@ fn approval_card(ui: &mut Ui, a: &Approval, now: i64, actions: &mut Vec<Action>)
                 run.actor.as_ref().map(|x| x.login.as_str()).unwrap_or("?")
             ),
         );
-        for p in &a.pending {
-            let reviewers: Vec<String> = p
-                .reviewers
-                .iter()
-                .map(|r| {
-                    if r.kind == "Team" {
-                        format!("{} (team)", r.name)
-                    } else {
-                        r.name.clone()
+        // One block per environment the run waits for.
+        let rows: Vec<(String, String)> = a
+            .pending
+            .iter()
+            .map(|p| {
+                let reviewers: Vec<String> = p
+                    .reviewers
+                    .iter()
+                    .map(|r| {
+                        if r.kind == "Team" {
+                            format!("{} (team)", r.name)
+                        } else {
+                            r.name.clone()
+                        }
+                    })
+                    .collect();
+                let mut lines = vec![if reviewers.is_empty() {
+                    "No reviewers required.".to_owned()
+                } else {
+                    format!("Reviewers: {}", reviewers.join(", "))
+                }];
+                if p.wait_timer > 0 {
+                    let mut t = format!("Wait timer: {} min", p.wait_timer);
+                    if let Some(s) = p.wait_timer_started {
+                        let left = s + p.wait_timer as i64 * 60 - now;
+                        if left > 0 {
+                            t.push_str(&format!(" ({} left)", sui::dur(left)));
+                        }
                     }
-                })
-                .collect();
-            let mut line = format!("{}: ", p.environment.name);
-            line.push_str(&if reviewers.is_empty() {
-                "no reviewers required".to_owned()
-            } else {
-                format!("reviewers {}", reviewers.join(", "))
-            });
-            if p.wait_timer > 0 {
-                line.push_str(&format!(" · wait timer {} min", p.wait_timer));
-                if let Some(t) = p.wait_timer_started {
-                    let left = t + p.wait_timer as i64 * 60 - now;
-                    if left > 0 {
-                        line.push_str(&format!(" ({} left)", sui::dur(left)));
-                    }
+                    lines.push(t);
                 }
-            }
-            line.push_str(if p.current_user_can_approve {
-                " · you can approve"
-            } else {
-                " · you cannot approve"
-            });
-            kit::body(ui, &line);
-        }
+                lines.push(
+                    if p.current_user_can_approve {
+                        "You can approve."
+                    } else {
+                        "You cannot approve."
+                    }
+                    .to_owned(),
+                );
+                (p.environment.name.clone(), lines.join("\n"))
+            })
+            .collect();
+        let refs: Vec<(&str, &str)> = rows.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        ui.add_space(2.0);
+        explain::terms(ui, 160.0, &refs);
         let mine: Vec<(u64, String)> = a
             .approvable()
             .iter()
@@ -812,11 +853,7 @@ fn env_detail(ui: &mut Ui, repo: &mut RepoState, env: &str, now: i64, actions: &
                 ins::sec(d.ref_name.clone()),
                 Cell::Badges(vec![sui::state_badge(s)]),
                 ins::sec(d.creator.clone()),
-                ins::muted(format!(
-                    "{} · {}",
-                    format::absolute(d.created),
-                    format::relative(d.created, now)
-                )),
+                ins::muted(sui::when(d.created, now)),
                 d.duration_secs()
                     .map(|x| ins::sec(sui::dur(x)))
                     .unwrap_or_else(|| ins::muted("")),
@@ -855,9 +892,13 @@ fn env_detail(ui: &mut Ui, repo: &mut RepoState, env: &str, now: i64, actions: &
         });
     });
     ins::more(ui, list.len(), shown.len());
-    kit::muted(
+    kit::secondary(
         ui,
-        "Took is the time from the deployment's creation to its successful status. Click a row to show the commit in the graph; right-click for more.",
+        "Took: from the deployment's creation to its successful status.",
+    );
+    kit::secondary(
+        ui,
+        "Click a row to show the commit in the graph; right-click for more.",
     );
 }
 
@@ -878,8 +919,24 @@ fn promote_section(
     kit::section(ui, "Promote and roll back", None);
     kit::secondary(
         ui,
-        "Two ways to move a commit, depending on how the pipeline is built. Re-running an Actions run repeats it on its original commit: right when one workflow deploys every environment. Creating a deployment sends GitHub's deployment event: right when a workflow listens to `on: deployment` or an external deployer watches the API. Both ask first and show the exact request.",
+        "Two ways to move a commit; which one fits depends on how the pipeline is built. Both ask first and show the exact request.",
     );
+    explain::details(ui, "ship_envs_two_ways", "Which one to use", false, |ui| {
+        explain::terms(
+            ui,
+            170.0,
+            &[
+                (
+                    "Create a deployment",
+                    "Sends GitHub's deployment event.\nRight when a workflow listens to `on: deployment`, or an external deployer watches the API.",
+                ),
+                (
+                    "Re-run",
+                    "Repeats an Actions run on its original commit.\nRight when one workflow deploys every environment.",
+                ),
+            ],
+        );
+    });
     form::card(ui, Tone::Neutral, |ui| {
         kit::subtitle(ui, &format!("Promote {} from {env}", short(&cur.sha)));
         let others: Vec<(String, String)> = order
@@ -896,7 +953,7 @@ fn promote_section(
             kit::muted(ui, "There is no other environment to promote to.");
         } else {
             if !downstream {
-                kit::muted(
+                kit::secondary(
                     ui,
                     &format!(
                         "{env} is the last stage of the pipeline order; pick where to copy its commit (the order is on the overview)."
@@ -906,8 +963,7 @@ fn promote_section(
             if !others.iter().any(|(e, _)| *e == st.promote_to) {
                 st.promote_to = others[0].0.clone();
             }
-            ui.horizontal(|ui| {
-                kit::secondary(ui, "To");
+            form::row(ui, 28.0, "To", |ui| {
                 form::select(ui, "ship_promote_to", &mut st.promote_to, &others, 200.0);
             });
             let to = st.promote_to.clone();
@@ -933,7 +989,7 @@ fn promote_section(
         kit::subtitle(ui, &format!("Roll {env} back"));
         match prev {
             None => {
-                kit::muted(
+                kit::secondary(
                     ui,
                     "No earlier successful deployment of a different commit in the history read.",
                 );

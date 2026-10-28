@@ -18,7 +18,7 @@ use crate::views::{form, kit};
 
 pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &mut Vec<Action>) {
     let now = format::now_secs();
-    kit::page_header(
+    crate::devops::pages::layout::page_header(
         ui,
         "Where is my commit",
         "Which pull request, branches, tags, releases, checks and environments contain a commit",
@@ -34,14 +34,17 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         // The question.
         let st = &mut repo.devops.ship;
         let mut go = false;
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
+        // The buttons wrap under the input in a narrow window (a row wider
+        // than the page widens everything below it).
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+            let w = (ui.available_width() - 24.0).min(340.0);
             let resp = form::input(
                 ui,
                 "ship_where_input",
                 &mut st.where_input,
                 form::InputOpts::new("Commit id, branch or tag")
-                    .width(340.0)
+                    .width(w)
                     .mono(),
             );
             if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {

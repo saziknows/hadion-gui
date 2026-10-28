@@ -610,6 +610,21 @@ fn n_of(n: usize, one: &str, many: &str) -> String {
     crate::format::plural(n, one, many)
 }
 
+/// A packages error for the activity log. GitHub saying the login lacks
+/// `read:packages` is the expected state of a default `gh auth login` (the
+/// Packages tab explains the fix), so it is information, not a failure
+/// that turns the status bar red.
+fn scope_note(e: &str) -> Result<String, String> {
+    if packages::problem(e) == packages::Problem::MissingScope {
+        Ok(format!(
+            "Needs the read:packages scope (the Packages tab shows the fix): {}",
+            e.lines().next().unwrap_or(e)
+        ))
+    } else {
+        Err(e.to_owned())
+    }
+}
+
 impl Msg {
     /// One line for the activity log (`Err` when the work failed).
     pub fn summary(&self) -> Result<String, String> {
@@ -622,14 +637,14 @@ impl Msg {
                     l.packages.iter().filter(|p| p.linked_to(&l.repo)).count(),
                     l.repo
                 )),
-                Err(e) => Err(e.clone()),
+                Err(e) => scope_note(e),
             },
             Msg::Versions { package, result } => match result {
                 Ok(v) => Ok(format!(
                     "{} of {package}",
                     n_of(v.len(), "version", "versions")
                 )),
-                Err(e) => Err(e.clone()),
+                Err(e) => scope_note(e),
             },
             Msg::PkgDeleted { package } => Ok(format!("Reloading the versions of {package}")),
             Msg::Kube {

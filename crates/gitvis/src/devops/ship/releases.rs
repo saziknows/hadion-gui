@@ -9,6 +9,7 @@ use gitvis_core::devops::ship::release::{self, Release};
 
 use super::{Act, EditForm, NotesFrom, ReleaseForm, State, count, ui as sui};
 use crate::devops::console::Console;
+use crate::devops::pages::explain;
 use crate::format;
 use crate::state::{Action, RepoState, Settings};
 use crate::theme::{Tone, pal, size};
@@ -68,7 +69,7 @@ pub fn show(
         None => "Published releases and their assets; publish a new one".to_owned(),
     };
     let can = repo.github_remote.is_some() && st.gh_ok != Some(false);
-    kit::page_header(ui, "Releases", &subtitle, |ui| {
+    crate::devops::pages::layout::page_header(ui, "Releases", &subtitle, |ui| {
         if can
             && IconButton::new(Icon::Plus, "New release")
                 .primary(true)
@@ -188,10 +189,12 @@ pub fn show(
         selected.map(|s| s.to_string()).unwrap_or_default()
     };
     let mut filter = std::mem::take(&mut repo.devops.ship.filter);
-    kit::split_keyed(
+    let offset = repo.devops.ship.scroll_to.take();
+    crate::devops::pages::layout::split_keyed_at(
         ui,
         "ship_releases",
         &key,
+        offset,
         actions,
         |ui, actions| {
             kit::list_header(ui, "Releases", Some(total), |_| {});
@@ -238,13 +241,20 @@ pub fn show(
                         return;
                     };
                     let p = *pal(ui);
+                    // In a narrow list the title needs the room more than
+                    // the download count (the detail has it).
+                    let meta = if rect.width() >= 340.0 {
+                        r.meta.as_str()
+                    } else {
+                        ""
+                    };
                     let row = Row::new(&r.title)
                         .leading(Leading::Icon(
                             Icon::Tag,
                             if r.dimmed { p.text_3 } else { p.text_2 },
                         ))
                         .subtitle(&r.subtitle)
-                        .meta(&r.meta)
+                        .meta(meta)
                         .badges(&r.badges)
                         .dimmed(r.dimmed);
                     kit::paint_row(ui, rect, &row, Some(r.id) == selected);
@@ -308,7 +318,7 @@ fn overview(ui: &mut Ui, st: &State, now: i64, actions: &mut Vec<Action>) {
         let span = times.iter().max().unwrap_or(&0) - times.iter().min().unwrap_or(&0);
         let days = span as f64 / 86_400.0 / (times.len() - 1) as f64;
         tiles.push(
-            kit::Stat::new("Every", format!("{days:.0} days"))
+            kit::Stat::new("Between releases", format!("{days:.0} days"))
                 .tip("Mean days between the loaded published releases"),
         );
     }
@@ -329,7 +339,11 @@ fn overview(ui: &mut Ui, st: &State, now: i64, actions: &mut Vec<Action>) {
     kit::section(ui, "Next", None);
     kit::secondary(
         ui,
-        "Select a release for its assets, notes and local history, or start a new one: gitvis suggests the version from the conventional commits since the latest version tag.",
+        "Select a release for its assets, notes and local history.",
+    );
+    kit::secondary(
+        ui,
+        "A new release gets a suggested version from the conventional commits since the latest version tag.",
     );
     ins::button_row(ui, |ui| {
         if form::primary(ui, "New release", true).clicked() {
@@ -430,14 +444,14 @@ fn detail(
                                 actions.push(Act::JumpToTag(r.tag_name.clone()).into());
                             }
                         } else {
-                            kit::muted(ui, &format!("{text} (not in the graph)"));
+                            explain::quiet(ui, &format!("{text} (not in the graph)"));
                         }
                     }
                     Some((None, _)) => {
-                        kit::muted(ui, "not in local history: git fetch --tags");
+                        explain::quiet(ui, "not in local history: git fetch --tags");
                     }
                     None if st.facts_loading => {
-                        kit::muted(ui, "checking local history…");
+                        explain::quiet(ui, "checking local history…");
                     }
                     None => {}
                 }
@@ -483,7 +497,7 @@ fn detail(
     // Assets.
     kit::section(ui, "Assets", Some(r.assets.len()));
     if r.assets.is_empty() {
-        kit::muted(
+        kit::secondary(
             ui,
             "No assets: GitHub still offers the source code as zip and tar.gz.",
         );
@@ -550,7 +564,7 @@ fn detail(
                 }
             });
         });
-        kit::muted(
+        kit::secondary(
             ui,
             "Click an asset to download it with gh release download into a folder you pick; the output shows below.",
         );
@@ -677,7 +691,7 @@ fn publish_form(
     kit::title(ui, "New release");
     kit::secondary(
         ui,
-        "Publishes with gh release create: the tag (created from the target when it does not exist), a title, notes on standard input, flags and assets. Nothing is sent until you confirm the exact command.",
+        "Publishes with gh release create. Nothing is sent until you confirm the exact command.",
     );
 
     // Suggestion.
@@ -714,7 +728,7 @@ fn publish_form(
                         actions.push(Act::Prepare.into());
                     }
                     if prep.truncated {
-                        kit::muted(
+                        explain::note(
                             ui,
                             &format!(
                                 "Read the newest {} commits only.",
@@ -758,8 +772,14 @@ fn publish_form(
             ),
         };
         form::field(ui, "Tag", Some(&help), |ui| {
-            ui.horizontal(|ui| {
-                let w = (ui.available_width() - 230.0).max(160.0);
+            // The picker beside the input on a wide pane, under it on a
+            // narrow one: a row wider than the pane widens the whole form
+            // (and a combo box does not wrap in a wrapping row).
+            let avail = ui.available_width();
+            let wide = avail >= 460.0;
+            let mut tag_row = |ui: &mut Ui| {
+                // The frame adds its padding and border to the width.
+                let w = if wide { avail - 216.0 } else { avail } - 24.0;
                 form::input(
                     ui,
                     "ship_form_tag",
@@ -770,12 +790,17 @@ fn publish_form(
                 let mut opts: Vec<(String, String)> =
                     vec![(String::new(), "Existing tags…".to_owned())];
                 opts.extend(tags.iter().map(|t| (t.clone(), t.clone())));
-                if form::select(ui, "ship_form_tag_pick", &mut pick, &opts, 200.0)
+                if form::select(ui, "ship_form_tag_pick", &mut pick, &opts, 180.0)
                     && !pick.is_empty()
                 {
                     actions.push(Act::SetFormTag(pick).into());
                 }
-            });
+            };
+            if wide {
+                ui.horizontal(tag_row);
+            } else {
+                tag_row(ui);
+            }
         });
         // Target.
         let current = snap
@@ -835,8 +860,8 @@ fn publish_form(
             );
         });
         if f.prepared_for != (f.target.clone(), f.previous.clone()) && !f.prepared.loading {
-            ui.horizontal(|ui| {
-                kit::muted(ui, "Target or previous tag changed:");
+            ui.horizontal_wrapped(|ui| {
+                explain::note(ui, "Target or previous tag changed:");
                 if kit::link(ui, "recompute the suggestion").clicked() {
                     actions.push(Act::Prepare.into());
                 }
@@ -854,14 +879,8 @@ fn publish_form(
             NotesFrom::GitHub => "written by GitHub",
             NotesFrom::Local => "grouped from local commits",
         };
-        form::field(
-            ui,
-            "Notes",
-            Some(&format!(
-                "Markdown, {from}. GitHub's generator lists merged pull requests and new contributors; the local one groups conventional commits into breaking changes, features, fixes, performance, documentation, refactoring and other."
-            )),
-            |ui| {
-                ui.horizontal_wrapped(|ui| {
+        form::field(ui, "Notes", Some(&format!("Markdown, {from}.")), |ui| {
+            ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     if IconButton::new(
                         Icon::Cloud,
@@ -875,7 +894,7 @@ fn publish_form(
                     .enabled(!f.generating && !f.tag.trim().is_empty())
                     .show(ui)
                     .on_hover_text(
-                        "POST releases/generate-notes: GitHub only writes text, nothing is created",
+                        "Lists the merged pull requests and new contributors.\nPOST releases/generate-notes: GitHub only writes text, nothing is created.",
                     )
                     .clicked()
                     {
@@ -885,6 +904,9 @@ fn publish_form(
                         .compact()
                         .enabled(!f.prepared.loading)
                         .show(ui)
+                        .on_hover_text(
+                            "Groups the conventional commits since the previous tag into breaking changes, features, fixes, performance, documentation, refactoring and other.",
+                        )
                         .clicked()
                     {
                         actions.push(Act::LocalNotes.into());
@@ -896,32 +918,31 @@ fn publish_form(
                             .map(|(g, n)| format!("{} {n}", group_short(*g)))
                             .collect();
                         if !parts.is_empty() {
-                            kit::muted(ui, &parts.join(" · "));
+                            explain::quiet(ui, &parts.join(" · "));
                         }
                     }
                 });
-                if let Some(e) = &f.gen_error {
-                    form::error(ui, e);
-                }
-                ui.add_space(4.0);
-                form::input(
-                    ui,
-                    "ship_form_notes",
-                    &mut f.notes,
-                    form::InputOpts::new("What changed in this release?")
-                        .rows(14)
-                        .mono(),
-                );
-                kit::muted(
-                    ui,
-                    &format!(
-                        "{} · {}",
-                        format::bytes(f.notes.len()),
-                        count(f.notes.lines().count(), "line", "lines")
-                    ),
-                );
-            },
-        );
+            if let Some(e) = &f.gen_error {
+                form::error(ui, e);
+            }
+            ui.add_space(4.0);
+            form::input(
+                ui,
+                "ship_form_notes",
+                &mut f.notes,
+                form::InputOpts::new("What changed in this release?")
+                    .rows(14)
+                    .mono(),
+            );
+            kit::muted(
+                ui,
+                &format!(
+                    "{} · {}",
+                    format::bytes(f.notes.len()),
+                    count(f.notes.lines().count(), "line", "lines")
+                ),
+            );
+        });
 
         // Flags.
         form::field(ui, "Options", None, |ui| {
@@ -936,7 +957,7 @@ fn publish_form(
                     f.latest = latest;
                 }
             });
-            kit::muted(
+            kit::secondary(
                 ui,
                 if f.draft || f.prerelease {
                     "Drafts and pre-releases are never marked latest (--latest=false)."
@@ -962,12 +983,6 @@ fn publish_form(
                 let mut remove = None;
                 for (i, (path, size_b)) in f.files.iter().enumerate() {
                     ui.horizontal(|ui| {
-                        ui.label(kit::mono(path).color(p.text));
-                        ui.label(
-                            RichText::new(format::bytes(*size_b as usize))
-                                .size(size::SMALL)
-                                .color(p.text_2),
-                        );
                         if IconButton::icon(Icon::Close)
                             .compact()
                             .show(ui)
@@ -976,6 +991,14 @@ fn publish_form(
                         {
                             remove = Some(i);
                         }
+                        ui.label(
+                            RichText::new(format::bytes(*size_b as usize))
+                                .size(size::SMALL)
+                                .color(p.text_2),
+                        );
+                        // A long path is cut instead of widening the form.
+                        ui.add(egui::Label::new(kit::mono(path).color(p.text)).truncate())
+                            .on_hover_text(path);
                     });
                 }
                 if let Some(i) = remove {
@@ -1023,7 +1046,7 @@ fn publish_form(
                 actions.push(Act::CloseForm.into());
             }
             if let Some(pr) = problem {
-                kit::muted(ui, pr);
+                explain::note(ui, pr);
             }
         });
     });

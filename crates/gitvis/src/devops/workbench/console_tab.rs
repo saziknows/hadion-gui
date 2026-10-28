@@ -18,7 +18,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
     let running = runs.iter().filter(|r| r.running()).count();
     let finished = runs.len() - running;
     let failed = runs.iter().filter(|r| r.failed()).count();
-    kit::page_header(ui, "Console", super::Tab::Console.hint(), |ui| {
+    crate::devops::pages::layout::page_header(ui, "Console", super::Tab::Console.hint(), |ui| {
         if IconButton::new(Icon::Trash, "Clear finished")
             .compact()
             .enabled(finished > 0)

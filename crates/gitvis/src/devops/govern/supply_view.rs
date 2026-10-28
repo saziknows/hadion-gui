@@ -83,7 +83,7 @@ pub fn sbom(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
         ..
     } = &mut repo.devops.govern;
     let ready = sbom.ok().is_some();
-    kit::page_header(
+    crate::devops::pages::layout::page_header(
         ui,
         "SBOM",
         "Every locked package in the working tree, as CycloneDX 1.5 or SPDX 2.3, compared with GitHub's dependency graph",
@@ -134,7 +134,7 @@ pub fn sbom(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
     let visible = groups(&local.packages, sbom_search, sbom_eco.as_deref());
     let sel = sbom_selected.clone();
     let gh = gh_sbom.ok();
-    kit::split_keyed(
+    crate::devops::pages::layout::split_keyed(
         ui,
         "gov_sbom",
         sel.as_deref().unwrap_or(""),
@@ -615,7 +615,7 @@ pub fn images(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mu
         scans,
         ..
     } = &mut repo.devops.govern;
-    kit::page_header(
+    crate::devops::pages::layout::page_header(
         ui,
         "Container images",
         "Dockerfiles and compose files in the working tree, linted locally; image scans on demand",
@@ -645,7 +645,7 @@ pub fn images(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mu
         return;
     };
     let sel = image_selected.clone();
-    kit::split_keyed(
+    crate::devops::pages::layout::split_keyed(
         ui,
         "gov_img",
         sel.as_deref().unwrap_or(""),

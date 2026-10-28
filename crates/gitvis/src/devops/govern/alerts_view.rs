@@ -98,7 +98,7 @@ fn header(
     shown: usize,
     actions: &mut Vec<Action>,
 ) {
-    kit::page_header(ui, title, subtitle, |ui| {
+    crate::devops::pages::layout::page_header(ui, title, subtitle, |ui| {
         widgets::refresh(
             ui,
             fetch.loading,
@@ -192,7 +192,7 @@ pub fn dependabot(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
     let all: &[DependabotAlert] = dependabot.ok().map(|v| v.as_slice()).unwrap_or(&[]);
     let visible = filter_dep(all, dep_search);
     let packages: &[gitvis_core::osint::Package] = dep_packages.as_deref().unwrap_or(&[]);
-    kit::split_keyed(
+    crate::devops::pages::layout::split_keyed(
         ui,
         "gov_dep",
         &key,
@@ -707,7 +707,7 @@ pub fn code(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
     let all: &[CodeAlert] = code.ok().map(|v| v.as_slice()).unwrap_or(&[]);
     let visible = filter_code(all, code_search);
     let snippets = &*snippets;
-    kit::split_keyed(
+    crate::devops::pages::layout::split_keyed(
         ui,
         "gov_code",
         &key,
