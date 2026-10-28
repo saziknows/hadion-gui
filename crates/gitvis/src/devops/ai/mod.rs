@@ -1,89 +1,535 @@
 //! AI assist (Claude API): "Write the message" in the WIP panel, "Write
 //! the description" in the new pull request form, "Explain this failure" in
-//! the Actions log viewer, "Summarise" on a pull request, and the AI
-//! section of the Settings page. Per-repository state (requests in flight,
-//! results); configuration in `Settings::ext.ai`.
+//! the Actions log viewer, "Summarise" on a pull request, "Explain this
+//! commit" in the commit panel and menu, and the AI section of the Settings
+//! page. Per-repository state (requests in flight, results); configuration
+//! in `Settings::ext.ai`; the key's status and the session's usage in
+//! [`session`] (app-wide).
+//!
+//! A request goes through four phases: gathering and redacting the
+//! material in a background read ([`Phase::Preparing`]), the confirmation
+//! that shows what is sent ([`Phase::Confirming`], skipped when "Ask before
+//! sending" is off), the streamed curl run ([`Phase::Running`], the text
+//! shows as it arrives) and the result ([`Phase::Done`]).
 
+mod control;
+pub mod session;
+mod settings;
+mod view;
+
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::time::Instant;
+
+use gitvis_core::Commit;
+use gitvis_core::devops::ai::redact::Redactions;
+use gitvis_core::devops::ai::runner::{Done, KeySource};
+use gitvis_core::devops::ai::{Effort, Failure, Feature, KeyStatus, Model, Prompt, Shared};
 use serde::{Deserialize, Serialize};
 
 use crate::devops::console::ConsoleRun;
 use crate::devops::ctx::Ctx;
-use crate::state::{Action, RepoState, Settings};
-use gitvis_core::Commit;
-
 use crate::devops::hooks::HookCx;
+use crate::state::{Action, Page, RepoState, Settings};
+
+/// What a request is about (one request per target at a time).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Target {
+    /// The commit message of the working tree.
+    Wip,
+    /// The new pull request form.
+    NewPr,
+    /// A pull request's summary.
+    Pr(u64),
+    /// A failed Actions job.
+    Job { run: u64, job: u64 },
+    /// One commit (full hash).
+    Commit(String),
+}
+
+impl Target {
+    pub fn feature(&self) -> Feature {
+        match self {
+            Target::Wip => Feature::CommitMessage,
+            Target::NewPr => Feature::PrDescription,
+            Target::Pr(_) => Feature::SummarisePr,
+            Target::Job { .. } => Feature::ExplainFailure,
+            Target::Commit(_) => Feature::ExplainCommit,
+        }
+    }
+}
+
+/// What was gathered for a request, after redaction and fitting.
+#[derive(Clone, Debug)]
+pub struct Prepared {
+    pub prompt: Prompt,
+    /// `(what, detail)` lines for the confirmation: "Staged diff" → "12 of
+    /// 48 files, 30 KB of 210 KB; …".
+    pub sources: Vec<(String, String)>,
+    /// Files (or log ranges) included.
+    pub files: Vec<String>,
+    pub redactions: Redactions,
+    pub key: KeySource,
+}
+
+/// An answer, ready to show.
+#[derive(Clone, Debug)]
+pub struct Reply {
+    pub done: Box<Done>,
+    pub cost: f64,
+}
+
+pub enum Phase {
+    Preparing,
+    Confirming,
+    Running {
+        live: Shared,
+        cancel: Arc<AtomicBool>,
+    },
+    Done(Result<Reply, Failure>),
+}
+
+/// One request and what became of it.
+pub struct Ask {
+    pub id: u64,
+    pub target: Target,
+    pub model: Model,
+    pub effort: Effort,
+    pub ask_first: bool,
+    pub phase: Phase,
+    pub prepared: Option<Prepared>,
+    pub started: Instant,
+    /// The answer was filled in (commit message, pull request form).
+    pub applied: bool,
+    /// The answer waits for "Replace your message?".
+    pub unapplied: bool,
+}
+
+impl Ask {
+    pub fn feature(&self) -> Feature {
+        self.target.feature()
+    }
+
+    pub fn running(&self) -> bool {
+        matches!(self.phase, Phase::Preparing | Phase::Running { .. })
+    }
+
+    pub fn reply(&self) -> Option<&Reply> {
+        match &self.phase {
+            Phase::Done(Ok(r)) => Some(r),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Default)]
-pub struct State {}
+pub struct State {
+    pub asks: HashMap<Target, Ask>,
+    pub next_id: u64,
+    /// The request waiting at its confirmation (for `ai-send`).
+    pub last_pending: Option<Target>,
+    /// Result cards folded away.
+    pub collapsed: HashSet<Target>,
+    /// Jobs seen in the log viewer: did they fail? (`None`: unknown.)
+    pub job_failed: HashMap<u64, Option<bool>>,
+}
+
+/// A secret value that never shows in `Debug` output (actions are
+/// cloneable and debuggable).
+#[derive(Clone)]
+pub struct Secret(pub String);
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Secret(•••)")
+    }
+}
 
 #[derive(Clone, Debug)]
-pub enum Act {}
+pub enum Act {
+    /// Gather the material for a target (then confirm or send).
+    Start(Target),
+    /// The confirmation was accepted.
+    Send {
+        target: Target,
+        id: u64,
+    },
+    /// `ai-send`: send the request waiting at its confirmation.
+    SendPending,
+    /// Show the confirmation again (it was closed without an answer).
+    Reconfirm(Target),
+    /// Stop a running request, or drop one waiting for confirmation.
+    Cancel(Target),
+    /// Forget a result.
+    Dismiss(Target),
+    /// Fill in an answer that waited for "Replace your message?".
+    Use {
+        target: Target,
+        id: u64,
+    },
+    ToggleCollapsed(Target),
+    /// The log viewer shows this job: learn whether it failed.
+    SeenJob {
+        run: u64,
+        job: u64,
+    },
+    /// The job shown in the log viewer (`ai-explain` without arguments).
+    ExplainShownJob,
+    /// The selected pull request (`ai-summary` without a number).
+    SummariseSelected,
+    /// `ai-commit-explain head`.
+    ExplainHead,
+    CheckKey,
+    SaveKey(Secret),
+    RemoveKey,
+    RemoveKeyConfirmed,
+    /// Script-only session overrides (`ai-model`, `ai-ask`).
+    SetModelOverride(Option<Model>),
+    SetAskOverride(Option<bool>),
+}
 
-pub enum Msg {}
+/// Which keychain operation a [`Msg::Key`] answers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyOp {
+    Check,
+    Save,
+    Remove,
+}
+
+pub enum Msg {
+    Prepared {
+        target: Target,
+        id: u64,
+        result: Result<Prepared, Failure>,
+    },
+    Finished {
+        target: Target,
+        id: u64,
+        feature: Feature,
+        result: Result<Box<Done>, Failure>,
+    },
+    Key {
+        op: KeyOp,
+        result: Result<KeyStatus, String>,
+        curl: Option<std::path::PathBuf>,
+    },
+}
 
 impl Msg {
     /// One line for the activity log (`Err` when the work failed).
     pub fn summary(&self) -> Result<String, String> {
-        match *self {}
+        match self {
+            Msg::Prepared { result, .. } => match result {
+                Ok(p) => {
+                    let chars = p.prompt.chars();
+                    let mut s = format!(
+                        "{} characters, about {} tokens",
+                        format_count(chars),
+                        format_count(gitvis_core::devops::ai::estimate_tokens(chars) as usize)
+                    );
+                    if !p.redactions.is_empty() {
+                        s.push_str(&format!("; redacted {}", p.redactions.summary()));
+                    }
+                    for (what, detail) in &p.sources {
+                        s.push_str(&format!("\n{what}: {detail}"));
+                    }
+                    Ok(s)
+                }
+                Err(f) => Err(f.message()),
+            },
+            Msg::Finished {
+                result, feature, ..
+            } => match result {
+                Ok(d) => {
+                    let a = &d.answer;
+                    let model = Model::parse(&a.model);
+                    let c = model
+                        .map(|m| gitvis_core::devops::ai::cost(m, &a.usage))
+                        .unwrap_or(0.0);
+                    let mut s = format!(
+                        "{}: {} · {} in · {} out · cache write {} / read {} · {} · {}",
+                        feature.label(),
+                        a.model,
+                        format_count(a.usage.input_tokens as usize),
+                        format_count(a.usage.output_tokens as usize),
+                        format_count(a.usage.cache_creation_input_tokens as usize),
+                        format_count(a.usage.cache_read_input_tokens as usize),
+                        gitvis_core::devops::ai::dollars(c),
+                        a.stop_reason.as_deref().unwrap_or("no stop reason"),
+                    );
+                    for f in &a.fallbacks {
+                        s.push_str(&format!("\n{} declined; continued on {}", f.from, f.to));
+                    }
+                    if a.refused() {
+                        Err(format!(
+                            "{s}\nClaude declined ({})",
+                            a.refusal_category.as_deref().unwrap_or("no category")
+                        ))
+                    } else {
+                        Ok(s)
+                    }
+                }
+                Err(f) => Err(f.message()),
+            },
+            Msg::Key { op, result, .. } => match result {
+                Ok(k) => Ok(match (op, k.source()) {
+                    (KeyOp::Remove, _) => "Removed the stored key".to_owned(),
+                    (KeyOp::Save, _) => "Stored the key in the keychain".to_owned(),
+                    (KeyOp::Check, Some(s)) => format!("Key found in {}", s.label()),
+                    (KeyOp::Check, None) => "No key stored or in the environment".to_owned(),
+                }),
+                Err(e) => Err(e.clone()),
+            },
+        }
     }
 }
 
+fn format_count(n: usize) -> String {
+    crate::format::count(n)
+}
+
+/// Size budgets offered in the settings, in KB.
+pub const BUDGETS_KB: [u32; 5] = [16, 32, 64, 128, 256];
+
 /// App-wide configuration (`Settings::ext.ai`): model, effort, whether a key
 /// is stored (the key itself is only in the OS keychain).
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
-pub struct Prefs {}
-
-pub fn apply(_cx: &mut Ctx, _repo: &mut RepoState, act: Act) {
-    match act {}
+pub struct Prefs {
+    pub model: Model,
+    pub effort_commit: Effort,
+    pub effort_pr: Effort,
+    pub effort_ci: Effort,
+    pub effort_summary: Effort,
+    pub effort_commit_explain: Effort,
+    /// Show what is sent and ask before every request.
+    pub ask: bool,
+    /// Most of a diff sent, in KB.
+    pub diff_kb: u32,
+    /// Most of a CI log sent, in KB.
+    pub log_kb: u32,
 }
 
-pub fn on_msg(_cx: &mut Ctx, _repo: &mut RepoState, msg: Msg) {
-    match msg {}
+impl Default for Prefs {
+    fn default() -> Self {
+        Self {
+            model: Model::default(),
+            effort_commit: Feature::CommitMessage.default_effort(),
+            effort_pr: Feature::PrDescription.default_effort(),
+            effort_ci: Feature::ExplainFailure.default_effort(),
+            effort_summary: Feature::SummarisePr.default_effort(),
+            effort_commit_explain: Feature::ExplainCommit.default_effort(),
+            ask: true,
+            diff_kb: 64,
+            log_kb: 48,
+        }
+    }
 }
 
-/// A console run of this repository ended.
+impl Prefs {
+    pub fn effort(&self, f: Feature) -> Effort {
+        match f {
+            Feature::CommitMessage => self.effort_commit,
+            Feature::PrDescription => self.effort_pr,
+            Feature::ExplainFailure => self.effort_ci,
+            Feature::SummarisePr => self.effort_summary,
+            Feature::ExplainCommit => self.effort_commit_explain,
+        }
+    }
+
+    pub fn effort_mut(&mut self, f: Feature) -> &mut Effort {
+        match f {
+            Feature::CommitMessage => &mut self.effort_commit,
+            Feature::PrDescription => &mut self.effort_pr,
+            Feature::ExplainFailure => &mut self.effort_ci,
+            Feature::SummarisePr => &mut self.effort_summary,
+            Feature::ExplainCommit => &mut self.effort_commit_explain,
+        }
+    }
+
+    /// The model in use (a script override wins).
+    pub fn model_now(&self) -> Model {
+        session::with(|s| s.model_override).unwrap_or(self.model)
+    }
+
+    pub fn ask_now(&self) -> bool {
+        session::with(|s| s.ask_override).unwrap_or(self.ask)
+    }
+
+    pub fn diff_budget(&self) -> usize {
+        self.diff_kb.clamp(4, 1024) as usize * 1024
+    }
+
+    pub fn log_budget(&self) -> usize {
+        self.log_kb.clamp(4, 1024) as usize * 1024
+    }
+}
+
+pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
+    control::apply(cx, repo, act);
+}
+
+pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
+    control::on_msg(cx, repo, msg);
+}
+
+/// A console run of this repository ended (requests do not use the
+/// console: their text streams into the area's own state).
 pub fn on_console_done(_cx: &mut Ctx, _repo: &mut RepoState, _run: &ConsoleRun) {}
 
 /// `GITVIS_SCRIPT` commands this area understands.
-pub fn script(_cmd: &str, _arg: &str) -> Option<Vec<Action>> {
-    None
+///
+/// - `ai-commit`: write the commit message (stops at the confirmation when
+///   "Ask before sending" is on); `ai-send` sends the request waiting
+///   there (the dialog stays on screen: scripts cannot close it).
+/// - `ai-pr` (new pull request form), `ai-explain [RUN JOB]` (the job in
+///   the log viewer without ids), `ai-summary [N]` (the selected pull
+///   request without a number), `ai-commit-explain SHA|head`.
+/// - `ai-model NAME` / `ai-ask on|off`: session-only overrides for tests.
+/// - `ai-stop`, `ai-dismiss`, `ai-settings [usage]`, `ai-check-key`.
+pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
+    let arg = arg.trim();
+    let mut nums = arg.split_whitespace().map(|s| s.parse::<u64>().ok());
+    Some(match cmd {
+        "ai-commit" => vec![Act::Start(Target::Wip).into()],
+        "ai-send" => vec![Act::SendPending.into()],
+        "ai-pr" => vec![Act::Start(Target::NewPr).into()],
+        "ai-explain" => match (nums.next().flatten(), nums.next().flatten()) {
+            (Some(run), Some(job)) => vec![Act::Start(Target::Job { run, job }).into()],
+            _ => vec![Act::ExplainShownJob.into()],
+        },
+        "ai-summary" => match nums.next().flatten() {
+            Some(n) => vec![Act::Start(Target::Pr(n)).into()],
+            None => vec![Act::SummariseSelected.into()],
+        },
+        "ai-commit-explain" => {
+            if arg.is_empty() || arg.eq_ignore_ascii_case("head") {
+                vec![Act::ExplainHead.into()]
+            } else {
+                vec![Act::Start(Target::Commit(arg.to_owned())).into()]
+            }
+        }
+        "ai-model" => vec![Act::SetModelOverride(Some(Model::parse(arg)?)).into()],
+        "ai-ask" => vec![
+            Act::SetAskOverride(match arg {
+                "on" => Some(true),
+                "off" => Some(false),
+                _ => None,
+            })
+            .into(),
+        ],
+        "ai-stop" => vec![
+            Act::Cancel(Target::Wip).into(),
+            Act::Cancel(Target::NewPr).into(),
+        ],
+        "ai-dismiss" => vec![Act::Dismiss(Target::Wip).into()],
+        "ai-check-key" => vec![Act::CheckKey.into()],
+        "ai-settings" => {
+            if arg == "usage" {
+                session::with(|s| s.scroll_to_usage = true);
+            }
+            vec![
+                Action::DevOps(crate::devops::DevOpsAction::SetSettingsSection(
+                    crate::devops::settings_page::Section::Ai,
+                )),
+                Action::ShowPage(Page::Settings),
+            ]
+        }
+        _ => return None,
+    })
 }
 
 /// The AI section of the Settings page.
 pub fn settings_section(
     ui: &mut egui::Ui,
-    _settings: &mut Settings,
-    _repo: Option<&RepoState>,
-    _actions: &mut Vec<Action>,
+    settings: &mut Settings,
+    repo: Option<&RepoState>,
+    actions: &mut Vec<Action>,
 ) {
-    crate::views::kit::scroll_page(ui, "AI assist_stub", |ui| {
-        crate::views::kit::empty_state(
-            ui,
-            crate::views::icons::Icon::Info,
-            "AI assist",
-            "Coming in this branch.",
-            None,
-        );
-    });
+    settings::show(ui, settings, repo, actions);
 }
 
-pub fn hook_commit_menu(_ui: &mut egui::Ui, _h: &HookCx, _c: &Commit, _actions: &mut Vec<Action>) {}
-
-pub fn hook_commit_panel(_ui: &mut egui::Ui, _h: &HookCx, _c: &Commit, _actions: &mut Vec<Action>) {
+pub fn hook_commit_menu(ui: &mut egui::Ui, h: &HookCx, c: &Commit, actions: &mut Vec<Action>) {
+    view::commit_menu(ui, h, c, actions);
 }
 
-pub fn hook_wip_message_tools(_ui: &mut egui::Ui, _h: &HookCx, _actions: &mut Vec<Action>) {}
+pub fn hook_commit_panel(ui: &mut egui::Ui, h: &HookCx, c: &Commit, actions: &mut Vec<Action>) {
+    view::commit_panel(ui, h, c, actions);
+}
+
+pub fn hook_wip_message_tools(ui: &mut egui::Ui, h: &HookCx, actions: &mut Vec<Action>) {
+    view::wip_tools(ui, h, actions);
+}
 
 pub fn hook_log_viewer_tools(
-    _ui: &mut egui::Ui,
-    _h: &crate::devops::hooks::LogHookCx,
-    _run: u64,
-    _job: u64,
-    _actions: &mut Vec<Action>,
+    ui: &mut egui::Ui,
+    h: &crate::devops::hooks::LogHookCx,
+    run: u64,
+    job: u64,
+    actions: &mut Vec<Action>,
 ) {
+    view::log_tools(ui, h, run, job, actions);
 }
 
-pub fn hook_pr_tools(_ui: &mut egui::Ui, _h: &HookCx, _number: u64, _actions: &mut Vec<Action>) {}
+pub fn hook_pr_tools(ui: &mut egui::Ui, h: &HookCx, number: u64, actions: &mut Vec<Action>) {
+    view::pr_tools(ui, h, number, actions);
+}
 
-pub fn hook_new_pr_tools(_ui: &mut egui::Ui, _h: &HookCx, _actions: &mut Vec<Action>) {}
+pub fn hook_new_pr_tools(ui: &mut egui::Ui, h: &HookCx, actions: &mut Vec<Action>) {
+    view::new_pr_tools(ui, h, actions);
+}
+
+/// Keychain status for the views (checked on first need).
+pub(crate) fn key_status() -> session::KeyState {
+    session::with(|s| s.key.clone())
+}
+
+/// The check the Settings section asks for when it first shows.
+pub(crate) fn key_unknown() -> bool {
+    matches!(key_status(), session::KeyState::Unknown)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefs_defaults_and_old_settings() {
+        let p = Prefs::default();
+        assert_eq!(p.model, Model::Opus55);
+        assert!(p.ask);
+        assert_eq!(p.effort(Feature::CommitMessage), Effort::Low);
+        assert_eq!(p.effort(Feature::PrDescription), Effort::Medium);
+        assert_eq!(p.effort(Feature::ExplainFailure), Effort::Medium);
+        assert_eq!(p.effort(Feature::SummarisePr), Effort::High);
+        // Settings saved before this area existed, or by a newer version.
+        let p: Prefs = serde_json::from_str("{}").unwrap();
+        assert!(p.ask);
+        assert_eq!(p.diff_kb, 64);
+        let p: Prefs = serde_json::from_str(r#"{"model":"claude-x","ask":false}"#).unwrap();
+        assert_eq!(p.model, Model::Opus55);
+        assert!(!p.ask);
+        // Nothing secret is serialised.
+        let s = serde_json::to_string(&Prefs::default()).unwrap();
+        assert!(!s.contains("key"), "{s}");
+    }
+
+    #[test]
+    fn secrets_do_not_debug_print() {
+        let a = Act::SaveKey(Secret("sk-ant-api03-real".into()));
+        let d = format!("{a:?}");
+        assert!(!d.contains("sk-ant"), "{d}");
+    }
+
+    #[test]
+    fn script_commands() {
+        assert!(script("ai-commit", "").is_some());
+        assert!(script("ai-model", "sonnet").is_some());
+        assert!(script("ai-model", "gpt").is_none());
+        assert!(script("ai-explain", "12 34").is_some());
+        assert!(script("ai-summary", "").is_some());
+        assert!(script("ai-commit-explain", "head").is_some());
+        assert!(script("nope", "").is_none());
+    }
+}
