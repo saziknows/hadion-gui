@@ -359,7 +359,7 @@ pub fn advise(sig: &Sig, setup: &Setup, email: &str) -> Option<Advice> {
         .any(|k| sig.key.eq_ignore_ascii_case(k) || sig.fingerprint.ends_with(k));
     match sig.status {
         Status::Good | Status::Unsigned => None,
-        Status::CantCheck if ssh && !setup.allowed_signers_exists => Some(Advice {
+        Status::CantCheck | Status::Untrusted if ssh && !setup.allowed_signers_exists => Some(Advice {
             title: "SSH signatures need an allowed-signers file".into(),
             body: match &setup.allowed_signers {
                 Some(p) => format!(
