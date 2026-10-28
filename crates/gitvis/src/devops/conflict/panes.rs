@@ -183,6 +183,7 @@ pub fn show(ui: &mut Ui, st: &mut State, actions: &mut Vec<Action>) {
     let Some(s) = st.current_mut() else { return };
     let path = s.path().to_owned();
     let base_from_stages = s.hunks().iter().any(|h| h.base_from_stages);
+    let added = s.load.entry.kind == gitvis_core::devops::conflict::ConflictKind::BothAdded;
     let any_base = s.hunks().iter().any(|h| h.base.is_some());
     let layout = s.layout(show_base, dark);
     let unresolved = s.unresolved();
@@ -253,7 +254,9 @@ pub fn show(ui: &mut Ui, st: &mut State, actions: &mut Vec<Action>) {
             ),
             Col::Base => (
                 "Base".to_owned(),
-                if !any_base {
+                if added {
+                    "None: both sides added the file".to_owned()
+                } else if !any_base {
                     "Common ancestor: not known for these conflicts".to_owned()
                 } else if base_from_stages {
                     "Common ancestor, from the index stages".to_owned()

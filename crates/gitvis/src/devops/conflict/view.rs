@@ -157,6 +157,10 @@ fn header(ui: &mut Ui, st: &mut State, busy: bool, actions: &mut Vec<Action>) {
             // Progress.
             let status = match s {
                 _ if !known => "Reading the conflicts…".to_owned(),
+                Some(s) if conflicted && s.is_text() && s.hunk_count() == 0 => format!(
+                    "No conflict markers left in this file; {} still conflicted",
+                    format::plural(others + 1, "file", "files")
+                ),
                 Some(s) if conflicted && s.is_text() => {
                     let (done, total) = st.progress(s);
                     format!(
@@ -257,6 +261,7 @@ fn header(ui: &mut Ui, st: &mut State, busy: bool, actions: &mut Vec<Action>) {
     if let Some(s) = st.current()
         && conflicted
         && s.is_text()
+        && s.hunk_count() > 0
         && st.whole.is_none()
     {
         toolbar(ui, st, busy, actions);
@@ -283,7 +288,10 @@ fn meta_line(s: &super::Session) -> String {
     let hunks = s.hunks();
     let staged = hunks.iter().filter(|h| h.base_from_stages).count();
     let known = hunks.iter().filter(|h| h.base.is_some()).count();
-    if staged > 0 {
+    let added = s.load.entry.kind == gitvis_core::devops::conflict::ConflictKind::BothAdded;
+    if added {
+        parts.push("no common ancestor (added on both sides)".into());
+    } else if staged > 0 {
         parts.push(format!(
             "base from the index stages for {staged} of {}",
             hunks.len()
