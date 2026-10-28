@@ -58,6 +58,32 @@ pub fn show(
     }
 }
 
+/// Space a tab takes besides its name: padding, the close button, the gap.
+const TAB_CHROME: f32 = 54.0;
+/// The shortest a cut tab name gets.
+const TAB_NAME_MIN: f32 = 56.0;
+
+/// The longest a tab name may be drawn so all tabs fit `room`: names
+/// shorter than the cap keep their width, the longer ones share the rest.
+fn tab_name_cap(widths: &[f32], room: f32) -> f32 {
+    let n = widths.len() as f32;
+    let fits = |cap: f32| widths.iter().map(|w| w.min(cap)).sum::<f32>() + n * TAB_CHROME <= room;
+    let widest = widths.iter().copied().fold(0.0, f32::max);
+    if fits(widest) {
+        return f32::INFINITY;
+    }
+    let (mut lo, mut hi) = (TAB_NAME_MIN, widest);
+    for _ in 0..24 {
+        let mid = (lo + hi) / 2.0;
+        if fits(mid) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
 fn tabs(
     ui: &mut Ui,
     repos: &[RepoState],
@@ -70,81 +96,53 @@ fn tabs(
     ui.horizontal(|ui| {
         ui.set_height(TAB_H);
         ui.add_space(6.0);
-        for (i, repo) in repos.iter().enumerate() {
-            let is_active = i == active;
-            let font = if is_active {
-                FontId::new(size::BODY - 0.5, theme::medium())
-            } else {
-                FontId::proportional(size::BODY - 0.5)
-            };
-            // Measured in the active (medium) weight for every tab, so the
-            // strip does not shift when the active tab changes.
-            let label_w = ui
-                .painter()
-                .layout_no_wrap(
-                    repo.name.clone(),
-                    FontId::new(size::BODY - 0.5, theme::medium()),
-                    Color32::WHITE,
-                )
-                .size()
-                .x;
-            let w = label_w + 52.0;
-            let (rect, resp) = ui.allocate_exact_size(vec2(w, TAB_H), Sense::click());
-            // From the pointer position, not `resp.hovered()`: the close
-            // button drawn on top of the tab takes the hover, which used to
-            // hide the button again on the next frame (flicker).
-            let hovered = ui.rect_contains_pointer(rect);
-            let tab_rect = Rect::from_min_max(pos2(rect.left(), rect.top() + 6.0), rect.max);
-            let corners = CornerRadius {
-                nw: 8,
-                ne: 8,
-                sw: 0,
-                se: 0,
-            };
-            let painter = ui.painter();
-            if is_active {
-                painter.rect_filled(tab_rect, corners, p.panel);
-            } else if hovered {
-                painter.rect_filled(tab_rect, corners, p.hover.gamma_multiply(0.6));
-            }
-            let text_color = if is_active {
-                p.text_strong
-            } else if hovered {
-                p.text
-            } else {
-                p.text_2
-            };
-            painter.text(
-                pos2(rect.left() + 16.0, tab_rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                &repo.name,
-                font,
-                text_color,
-            );
-            let right_center = pos2(rect.right() - 20.0, tab_rect.center().y);
-            if repo.loading || repo.is_busy() {
-                kit::overlay(
-                    ui,
-                    Rect::from_center_size(right_center, vec2(12.0, 12.0)),
-                    egui::Spinner::new().size(11.0).color(p.text_3),
-                );
-            } else if hovered || is_active {
-                let close = kit::overlay(
-                    ui,
-                    Rect::from_center_size(right_center, vec2(26.0, 26.0)),
-                    IconButton::icon(Icon::Close).compact(),
-                );
-                if close.on_hover_text("Close (Ctrl+W)").clicked() {
-                    actions.push(Action::CloseRepo(i));
+        // Measured in the active (medium) weight for every tab, so the
+        // strip does not shift when the active tab changes.
+        let name_font = FontId::new(size::BODY - 0.5, theme::medium());
+        let widths: Vec<f32> = repos
+            .iter()
+            .map(|r| {
+                ui.painter()
+                    .layout_no_wrap(r.name.clone(), name_font.clone(), Color32::WHITE)
+                    .size()
+                    .x
+            })
+            .collect();
+        let cloning_w = cloning.map_or(0.0, |name| {
+            8.0 + 11.0 + 6.0 + text_w(ui, &format!("Cloning {name}…"), size::SMALL)
+        });
+        // Many or long names share the strip (names are cut with an
+        // ellipsis); when even that does not fit, the tabs scroll sideways
+        // and the active one is kept in view. They used to run off the
+        // window, active tab and + button included.
+        let room = (ui.available_width() - cloning_w - 6.0 - 26.0 - 8.0).max(TAB_CHROME);
+        let cap = tab_name_cap(&widths, room);
+        let need: f32 = widths.iter().map(|w| w.min(cap) + TAB_CHROME).sum();
+        let mut draw = |ui: &mut Ui, scroll: bool| {
+            for (i, repo) in repos.iter().enumerate() {
+                let resp = tab(ui, repo, i, i == active, widths[i].min(cap), actions);
+                if scroll && i == active {
+                    let id = egui::Id::unique("repo_tabs_shown");
+                    if ui.data(|d| d.get_temp::<usize>(id)) != Some(active) {
+                        resp.scroll_to_me(None);
+                        ui.data_mut(|d| d.insert_temp(id, active));
+                    }
                 }
             }
-            if resp.clicked() {
-                actions.push(Action::Activate(i));
-            }
-            if resp.middle_clicked() {
-                actions.push(Action::CloseRepo(i));
-            }
-            ui.add_space(2.0);
+        };
+        if need <= room + 0.5 {
+            draw(ui, false);
+        } else {
+            egui::ScrollArea::horizontal()
+                .id_salt("repo_tabs")
+                .max_width(room)
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        draw(ui, true);
+                    });
+                });
         }
         if let Some(name) = cloning {
             ui.add_space(8.0);
@@ -164,17 +162,113 @@ fn tabs(
         egui::Popup::menu(&plus)
             .id(egui::Id::unique("open_menu"))
             .show(|ui| {
-                ui.set_min_width(240.0);
-                if ui.button("Open repository…        Ctrl+O").clicked() {
+                crate::views::menus::begin(ui, 240.0);
+                if crate::views::menus::entry_with_hint(
+                    ui,
+                    "Open repository…",
+                    "Ctrl+O",
+                    None,
+                    false,
+                )
+                .clicked()
+                {
                     actions.push(Action::PickRepo);
                     ui.close();
                 }
-                if ui.button("Clone repository…   Ctrl+Shift+O").clicked() {
+                if crate::views::menus::entry_with_hint(
+                    ui,
+                    "Clone repository…",
+                    "Ctrl+Shift+O",
+                    None,
+                    false,
+                )
+                .clicked()
+                {
                     actions.push(Action::CloneDialog);
                     ui.close();
                 }
             });
     });
+}
+
+/// One repository tab, its name cut to `name_w`.
+fn tab(
+    ui: &mut Ui,
+    repo: &RepoState,
+    i: usize,
+    is_active: bool,
+    name_w: f32,
+    actions: &mut Vec<Action>,
+) -> egui::Response {
+    let p = *pal(ui);
+    let font = if is_active {
+        FontId::new(size::BODY - 0.5, theme::medium())
+    } else {
+        FontId::proportional(size::BODY - 0.5)
+    };
+    let w = name_w + TAB_CHROME - 2.0;
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, TAB_H), Sense::click());
+    // From the pointer position, not `resp.hovered()`: the close
+    // button drawn on top of the tab takes the hover, which used to
+    // hide the button again on the next frame (flicker).
+    let hovered = ui.rect_contains_pointer(rect);
+    let tab_rect = Rect::from_min_max(pos2(rect.left(), rect.top() + 6.0), rect.max);
+    let corners = CornerRadius {
+        nw: 8,
+        ne: 8,
+        sw: 0,
+        se: 0,
+    };
+    let painter = ui.painter();
+    if is_active {
+        painter.rect_filled(tab_rect, corners, p.panel);
+    } else if hovered {
+        painter.rect_filled(tab_rect, corners, p.hover.gamma_multiply(0.6));
+    }
+    let text_color = if is_active {
+        p.text_strong
+    } else if hovered {
+        p.text
+    } else {
+        p.text_2
+    };
+    let g = crate::views::truncated(painter, &repo.name, font, text_color, name_w + 1.0);
+    let cut = g.elided;
+    painter.galley(
+        pos2(rect.left() + 16.0, tab_rect.center().y - g.size().y / 2.0),
+        g,
+        text_color,
+    );
+    let right_center = pos2(rect.right() - 20.0, tab_rect.center().y);
+    if repo.loading || repo.is_busy() {
+        kit::overlay(
+            ui,
+            Rect::from_center_size(right_center, vec2(12.0, 12.0)),
+            egui::Spinner::new().size(11.0).color(p.text_3),
+        );
+    } else if hovered || is_active {
+        let close = kit::overlay(
+            ui,
+            Rect::from_center_size(right_center, vec2(26.0, 26.0)),
+            IconButton::icon(Icon::Close).compact(),
+        );
+        if close.on_hover_text("Close (Ctrl+W)").clicked() {
+            actions.push(Action::CloseRepo(i));
+        }
+    }
+    if resp.clicked() {
+        actions.push(Action::Activate(i));
+    }
+    if resp.middle_clicked() {
+        actions.push(Action::CloseRepo(i));
+    }
+    ui.add_space(2.0);
+    // A cut name gets its full text on hover.
+    if cut {
+        resp.on_hover_text(&repo.name)
+    } else {
+        resp
+    }
 }
 
 /// How much of the toolbar's left side is drawn in full, from everything

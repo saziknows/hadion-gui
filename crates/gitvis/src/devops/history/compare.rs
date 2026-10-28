@@ -242,7 +242,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
     let cmp = match &c.result {
         None => {
             empty(ui, &mut |ui| {
-                kit::empty_state(
+                widgets::empty_state(
                     ui,
                     Icon::Merge,
                     "Pick two revisions",
@@ -252,7 +252,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                 if !snap_suggest.is_empty() {
                     ui.add_space(12.0);
                     ui.vertical_centered(|ui| {
-                        ui.set_max_width(520.0);
+                        ui.set_max_width(ui.available_width().min(520.0));
                         ui.horizontal_wrapped(|ui| {
                             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
                             for (label, a, b) in &snap_suggest {
@@ -727,7 +727,7 @@ fn file_note(f: &numstat::FileStat) -> Option<String> {
 fn file_detail(ui: &mut Ui, c: &Compare, cmp: &Comparison, actions: &mut Vec<Action>) {
     let Some(f) = c.selected.and_then(|i| cmp.files.get(i)) else {
         if cmp.files.is_empty() {
-            kit::empty_state(
+            widgets::empty_state(
                 ui,
                 Icon::Check,
                 "Same content",
@@ -735,7 +735,7 @@ fn file_detail(ui: &mut Ui, c: &Compare, cmp: &Comparison, actions: &mut Vec<Act
                 None,
             );
         } else {
-            kit::empty_state(
+            widgets::empty_state(
                 ui,
                 Icon::List,
                 "Pick a file",
@@ -959,7 +959,7 @@ fn commit_detail(
         list.get(i).map(|c| (side, c))
     });
     let Some((side, c)) = found else {
-        kit::empty_state(
+        widgets::empty_state(
             ui,
             Icon::Graph,
             "Commits on each side",

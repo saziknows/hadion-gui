@@ -311,7 +311,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
 
     if fd.binary {
         code_background(ui, &p);
-        kit::empty_state(
+        crate::devops::history::empty_state(
             ui,
             Icon::Info,
             "Binary file",
@@ -322,7 +322,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
     }
     if fd.too_large {
         code_background(ui, &p);
-        kit::empty_state(
+        crate::devops::history::empty_state(
             ui,
             Icon::Warning,
             "Diff too large",
@@ -343,7 +343,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
         } else {
             ("No changes", "")
         };
-        kit::empty_state(ui, Icon::Check, title, body, None);
+        crate::devops::history::empty_state(ui, Icon::Check, title, body, None);
         return;
     }
 

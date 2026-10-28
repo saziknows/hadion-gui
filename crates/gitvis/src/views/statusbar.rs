@@ -6,7 +6,7 @@ use egui::{Align, Frame, Layout, Margin, RichText, Sense, Stroke, Ui};
 use gitvis_core::Head;
 
 use crate::format;
-use crate::state::{Action, ActivityEntry, RepoState, Settings};
+use crate::state::{Action, ActivityEntry, ActivityKind, RepoState, Settings};
 use crate::theme::{pal, size};
 use crate::views::icons::{self, Icon};
 
@@ -142,28 +142,42 @@ pub fn show(
                         ui.add(egui::Spinner::new().size(11.0).color(p.text_3));
                         ui.label(text("Reading repository…".into()));
                     } else if let Some(e) = last {
+                        // A failed git operation is red; a background read or
+                        // API call that came back empty-handed (a 404 for a
+                        // repository GitHub does not know, a scan that could
+                        // not run) is amber: worth a look, not an alarm.
                         let (c, icon) = if e.ok {
                             (p.text_3, Icon::Check)
-                        } else {
+                        } else if e.kind == ActivityKind::Op {
                             (p.danger, Icon::Error)
+                        } else {
+                            (p.warning, Icon::Warning)
                         };
+                        // Cut to what the left side leaves (a long label ran
+                        // over the working-tree state in a narrow window).
+                        let room = (ui.available_width() - 150.0).max(80.0);
                         let resp = ui
-                            .add(
-                                egui::Label::new(
-                                    RichText::new(format!(
-                                        "{}  {}",
-                                        e.label,
-                                        format::millis(e.elapsed_ms)
-                                    ))
-                                    .size(size::SMALL - 0.5)
-                                    .color(if e.ok {
-                                        p.text_2
-                                    } else {
-                                        p.danger
-                                    }),
+                            .scope(|ui| {
+                                ui.set_max_width(room.min(ui.available_width()));
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(format!(
+                                            "{}  {}",
+                                            e.label,
+                                            format::millis(e.elapsed_ms)
+                                        ))
+                                        .size(size::SMALL - 0.5)
+                                        .color(if e.ok {
+                                            p.text_2
+                                        } else {
+                                            c
+                                        }),
+                                    )
+                                    .sense(Sense::click())
+                                    .truncate(),
                                 )
-                                .sense(Sense::click()),
-                            )
+                            })
+                            .inner
                             .on_hover_text(format!(
                                 "Last activity at {}. Click to open the activity log (Ctrl+L)",
                                 e.at

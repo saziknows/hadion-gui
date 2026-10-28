@@ -132,6 +132,9 @@ pub fn show(ui: &mut Ui, settings: &Settings, actions: &mut Vec<Action>) {
                 let paths: Vec<String> = recent.iter().map(|p| p.display().to_string()).collect();
                 let missing: Vec<bool> = recent.iter().map(|p| !p.exists()).collect();
                 let missing_badge = [("Missing".to_owned(), Tone::Danger)];
+                // Rows edge to edge: `show_rows` (inside `kit::list`) adds
+                // the caller's spacing to the row pitch.
+                ui.spacing_mut().item_spacing.y = 0.0;
                 kit::list(
                     ui,
                     "welcome_recent",

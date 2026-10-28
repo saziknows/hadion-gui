@@ -1022,6 +1022,17 @@ fn github_section(
         return;
     }
     if let Some(err) = error {
+        // The first line of the error ("Not Found (HTTP 404)") and what it
+        // usually means; the full text (with GitHub's documentation link,
+        // which used to wrap across the pane) is one click away.
+        let first = err.lines().next().unwrap_or(err).trim();
+        let hint = if err.contains("HTTP 404") {
+            "GitHub does not know this repository under that name, or this account cannot see it."
+        } else if err.contains("HTTP 401") || err.contains("HTTP 403") {
+            "Sign in again with gh auth login, or check the token's access."
+        } else {
+            ""
+        };
         Frame::NONE
             .inner_margin(Margin {
                 left: TEXT_X as i8,
@@ -1030,10 +1041,40 @@ fn github_section(
                 bottom: 6,
             })
             .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 3.0;
                 ui.add(
-                    egui::Label::new(egui::RichText::new(err).size(size::SMALL).color(p.warning))
-                        .wrap(),
+                    egui::Label::new(
+                        egui::RichText::new("Could not load pull requests and runs")
+                            .size(size::SMALL)
+                            .color(p.text),
+                    )
+                    .wrap(),
                 );
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(first)
+                            .size(size::SMALL)
+                            .color(p.warning),
+                    )
+                    .wrap(),
+                );
+                if !hint.is_empty() {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(hint).size(size::SMALL).color(p.text_2),
+                        )
+                        .wrap(),
+                    );
+                }
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 12.0;
+                    if kit::link(ui, "Try again").clicked() {
+                        actions.push(Action::RefreshGitHub);
+                    }
+                    if kit::link(ui, "Copy the error").clicked() {
+                        actions.push(Action::Copy(err.to_owned()));
+                    }
+                });
             });
         return;
     }

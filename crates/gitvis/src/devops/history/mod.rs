@@ -41,6 +41,7 @@ use crate::devops::hooks::HookCx;
 pub use filter::{filter_bar, toolbar_button, toolbar_label};
 pub use picks::PickEvent;
 pub use sigs::{badge_tip as signature_tip, paint_badge as paint_signature};
+pub use widgets::empty_state;
 
 /// The three views of the Compare page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Hash)]

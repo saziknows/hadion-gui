@@ -79,7 +79,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
         };
         let n = snap.row_count();
         if n == 0 {
-            kit::empty_state(
+            crate::devops::history::empty_state(
                 ui,
                 Icon::Graph,
                 "No commits yet",

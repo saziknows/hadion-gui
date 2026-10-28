@@ -571,6 +571,21 @@ fn header_row(
     let band = Rect::from_min_max(pos2(left, y), pos2(right, y + HEADER_H));
     painter.rect_filled(band, 0, if focused { p.selection } else { p.panel });
     painter.hline(band.x_range(), band.top() + 0.5, Stroke::new(1.0, p.border));
+    // Each cell fits its pane: labels give way first, then the buttons
+    // shorten ("Take ours" to "Ours", Edit and Both to icons), so nothing
+    // overlaps in a narrow window.
+    let text_w =
+        |s: &str, font: FontId| painter.layout_no_wrap(s.to_owned(), font, p.text).size().x;
+    // A compact IconButton: 9 points of padding a side, a 14 point icon
+    // and a 7 point gap; 26 square without a label.
+    let button_w = |label: Option<&str>, icon: bool| -> f32 {
+        match label {
+            Some(l) => {
+                18.0 + if icon { 21.0 } else { 0.0 } + text_w(l, FontId::new(size::SMALL, medium()))
+            }
+            None => 26.0,
+        }
+    };
     for (i, (col, r)) in geo.cols.iter().enumerate() {
         let cell = Rect::from_min_max(pos2(r.left(), y), pos2(r.right(), y + HEADER_H));
         let inner = cell.shrink2(vec2(8.0, 4.0));
@@ -579,65 +594,86 @@ fn header_row(
                 .max_rect(inner)
                 .layout(Layout::right_to_left(Align::Center)),
         );
+        child.set_clip_rect(inner.intersect(ui.clip_rect()));
         child.spacing_mut().item_spacing.x = 4.0;
-        if i == 0 {
-            // "Conflict 2 of 5" at the start of the bar.
-            let label = format!("Conflict {} of {total}", k + 1);
-            let g = truncated(
-                &painter,
-                &label,
-                FontId::new(size::SMALL, semibold()),
-                p.text_strong,
-                (inner.width() - 96.0).max(20.0),
-            );
-            painter.galley(
-                pos2(inner.left() + 4.0, inner.center().y - g.size().y / 2.0),
-                g,
-                p.text_strong,
-            );
-        }
+        // The label at the left of a cell, in what its buttons leave: whole
+        // or not at all ("Confl…" says nothing the toolbar does not).
+        let label = |text: &str, font: FontId, color: Color32, buttons: f32| {
+            let room = inner.width() - buttons - 12.0;
+            let g = painter.layout_no_wrap(text.to_owned(), font, color);
+            if g.size().x <= room {
+                painter.galley(
+                    pos2(inner.left() + 4.0, inner.center().y - g.size().y / 2.0),
+                    g,
+                    color,
+                );
+            }
+        };
+        let take = |full: &'static str, short: &'static str, w: f32| -> &'static str {
+            if w >= button_w(Some(full), false) + 4.0 {
+                full
+            } else {
+                short
+            }
+        };
         match col {
             Col::Ours => {
-                if IconButton::text("Take ours")
+                let t = take("Take ours", "Ours", inner.width());
+                if IconButton::text(t)
                     .compact()
                     .selected(res == Resolution::Ours)
                     .enabled(!editing)
                     .show(&mut child)
+                    .on_hover_text("Take our side for this conflict")
                     .clicked()
                 {
                     actions.push(Act::Resolve(k, Resolution::Ours).into());
                 }
+                if i == 0 {
+                    // "Conflict 2 of 5" at the start of the bar.
+                    label(
+                        &format!("Conflict {} of {total}", k + 1),
+                        FontId::new(size::SMALL, semibold()),
+                        p.text_strong,
+                        button_w(Some(t), false),
+                    );
+                }
             }
             Col::Theirs => {
-                if IconButton::text("Take theirs")
+                let t = take("Take theirs", "Theirs", inner.width());
+                if IconButton::text(t)
                     .compact()
                     .selected(res == Resolution::Theirs)
                     .enabled(!editing)
                     .show(&mut child)
+                    .on_hover_text("Take their side for this conflict")
                     .clicked()
                 {
                     actions.push(Act::Resolve(k, Resolution::Theirs).into());
                 }
-                let g = truncated(
-                    &painter,
+                label(
                     &format!("line {} in the file", h.start_line + 1),
                     FontId::proportional(size::SMALL),
                     p.text_3,
-                    (inner.width() - 104.0).max(20.0),
-                );
-                painter.galley(
-                    pos2(inner.left() + 4.0, inner.center().y - g.size().y / 2.0),
-                    g,
-                    p.text_3,
+                    button_w(Some(t), false),
                 );
             }
             Col::Base => {
                 let known = h.base.is_some();
-                let b = IconButton::text("Take base")
+                let t = take("Take base", "Base", inner.width());
+                let b = IconButton::text(t)
                     .compact()
                     .selected(res == Resolution::Base)
                     .enabled(known && !editing)
                     .show(&mut child);
+                if i == 0 {
+                    label(
+                        &format!("Conflict {} of {total}", k + 1),
+                        FontId::new(size::SMALL, semibold()),
+                        p.text_strong,
+                        button_w(Some(t), false),
+                    );
+                }
                 let b = if known {
                     b
                 } else {
@@ -650,24 +686,66 @@ fn header_row(
                 }
             }
             Col::Result => {
+                let (text, tone) = if editing {
+                    ("Editing".to_owned(), Tone::Accent)
+                } else if resolved {
+                    (res.label().to_owned(), Tone::Success)
+                } else if matches!(res, Resolution::Custom(_)) {
+                    ("Edited, markers left".to_owned(), Tone::Warning)
+                } else {
+                    ("Unresolved".to_owned(), Tone::Warning)
+                };
+                let badge_w = kit::badge_width(&painter, &text) + 8.0;
+                // Buttons with labels when they fit beside the status,
+                // icons when not; the status goes when even icons need
+                // the room (the result's tint still tells it).
+                let undo = !editing && res != Resolution::Unresolved;
+                let labelled_w = if editing {
+                    button_w(Some("Apply"), false) + button_w(Some("Cancel"), false) + 4.0
+                } else {
+                    button_w(Some("Edit"), true)
+                        + button_w(Some("Both"), true)
+                        + 4.0
+                        + if undo { 30.0 } else { 0.0 }
+                };
+                let icons_w = if editing {
+                    56.0
+                } else {
+                    56.0 + if undo { 30.0 } else { 0.0 }
+                };
+                let labelled = inner.width() >= labelled_w + badge_w;
+                let show_badge =
+                    inner.width() >= badge_w + if labelled { labelled_w } else { icons_w };
                 if editing {
-                    if IconButton::text("Apply")
+                    let apply = if labelled {
+                        IconButton::text("Apply")
+                    } else {
+                        IconButton::icon(Icon::Check)
+                    };
+                    if apply
                         .primary(true)
                         .compact()
                         .show(&mut child)
+                        .on_hover_text("Apply the edit")
                         .clicked()
                     {
                         actions.push(Act::EditApply.into());
                     }
-                    if IconButton::text("Cancel")
+                    let cancel = if labelled {
+                        IconButton::text("Cancel")
+                    } else {
+                        IconButton::icon(Icon::Close)
+                    };
+                    if cancel
                         .compact()
                         .show(&mut child)
+                        .on_hover_text("Cancel the edit")
                         .clicked()
                     {
                         actions.push(Act::EditCancel.into());
                     }
                 } else {
-                    if res != Resolution::Unresolved
+                    if undo
                         && IconButton::icon(Icon::Undo)
                             .compact()
                             .show(&mut child)
@@ -676,20 +754,30 @@ fn header_row(
                     {
                         actions.push(Act::Resolve(k, Resolution::Unresolved).into());
                     }
-                    let edit = IconButton::new(Icon::Edit, "Edit")
-                        .compact()
-                        .enabled(s.load.utf8)
-                        .show(&mut child);
+                    let edit = if labelled {
+                        IconButton::new(Icon::Edit, "Edit")
+                    } else {
+                        IconButton::icon(Icon::Edit)
+                    }
+                    .compact()
+                    .enabled(s.load.utf8)
+                    .show(&mut child)
+                    .on_hover_text("Edit this conflict's result");
                     if edit.clicked() {
                         actions.push(Act::EditHunk(k).into());
                     }
-                    let both = IconButton::new(Icon::ChevronDown, "Both")
-                        .compact()
-                        .selected(matches!(
-                            res,
-                            Resolution::OursThenTheirs | Resolution::TheirsThenOurs
-                        ))
-                        .show(&mut child);
+                    let both = if labelled {
+                        IconButton::new(Icon::ChevronDown, "Both")
+                    } else {
+                        IconButton::icon(Icon::Merge)
+                    }
+                    .compact()
+                    .selected(matches!(
+                        res,
+                        Resolution::OursThenTheirs | Resolution::TheirsThenOurs
+                    ))
+                    .show(&mut child)
+                    .on_hover_text("Both sides: ours then theirs, or theirs then ours");
                     egui::Popup::menu(&both)
                         .id(egui::Id::unique(("conflict_both", k)))
                         .show(|ui| {
@@ -708,25 +796,26 @@ fn header_row(
                             );
                         });
                 }
-                let (text, tone) = if editing {
-                    ("Editing".to_owned(), Tone::Accent)
-                } else if resolved {
-                    (res.label().to_owned(), Tone::Success)
-                } else if matches!(res, Resolution::Custom(_)) {
-                    ("Edited, markers left".to_owned(), Tone::Warning)
-                } else {
-                    ("Unresolved".to_owned(), Tone::Warning)
-                };
-                let dark = ui.visuals().dark_mode;
-                kit::paint_badge(
-                    &painter,
-                    p,
-                    dark,
-                    inner.left() + 4.0 + kit::badge_width(&painter, &text),
-                    inner.center().y,
-                    &text,
-                    tone,
-                );
+                if show_badge {
+                    let dark = ui.visuals().dark_mode;
+                    kit::paint_badge(
+                        &painter,
+                        p,
+                        dark,
+                        inner.left() + 4.0 + kit::badge_width(&painter, &text),
+                        inner.center().y,
+                        &text,
+                        tone,
+                    );
+                }
+                if i == 0 {
+                    label(
+                        &format!("Conflict {} of {total}", k + 1),
+                        FontId::new(size::SMALL, semibold()),
+                        p.text_strong,
+                        inner.width(),
+                    );
+                }
             }
         }
     }

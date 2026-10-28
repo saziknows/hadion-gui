@@ -437,7 +437,7 @@ fn body_view(ui: &mut Ui, st: &mut State, v: &GlobalView, body: Rect, actions: &
             .unwrap_or_default();
         let dir = st.start_dir();
         if shells.is_empty() && st.shells.ready().is_some() {
-            if kit::empty_state(
+            if crate::devops::history::empty_state(
                 ui,
                 Icon::Terminal,
                 "No shell found",
@@ -452,7 +452,7 @@ fn body_view(ui: &mut Ui, st: &mut State, v: &GlobalView, body: Rect, actions: &
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| native_path(&dir));
-        kit::empty_state(
+        crate::devops::history::empty_state(
             ui,
             Icon::Terminal,
             "No terminal open",

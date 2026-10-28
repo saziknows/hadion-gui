@@ -1,5 +1,10 @@
-//! Toasts: short notices stacked in the bottom-right corner, above the
-//! status bar. A click dismisses one.
+//! Toasts: short notices stacked in the bottom-left corner, next to the
+//! rail and above the status bar. A click dismisses one.
+//!
+//! Bottom-left, not bottom-right: on the History page the bottom-right is
+//! the WIP panel's Commit button (and the diff's stage buttons), which a
+//! 12-second error toast used to cover. At most [`VISIBLE`] show at once;
+//! everything they say is in the activity log too.
 
 use egui::{Align2, CornerRadius, Frame, Label, Margin, Rect, RichText, Sense, Stroke, pos2, vec2};
 
@@ -11,6 +16,9 @@ const WIDTH: f32 = 340.0;
 /// Space kept free at the bottom: the status bar (about 33 points) plus a
 /// gap, so a toast never covers it.
 const BOTTOM: f32 = 46.0;
+/// Toasts shown at once (the newest); a burst no longer stacks up the
+/// window.
+const VISIBLE: usize = 3;
 
 pub fn show(ctx: &egui::Context, toasts: &mut Vec<Toast>) {
     toasts.retain(|t| t.created.elapsed().as_secs_f32() < t.ttl_secs());
@@ -20,17 +28,21 @@ pub fn show(ctx: &egui::Context, toasts: &mut Vec<Toast>) {
     ctx.request_repaint_after(std::time::Duration::from_millis(500));
     let p = *palette(ctx.global_style().visuals.dark_mode);
     let shadow = ctx.global_style().visuals.popup_shadow;
+    let first = toasts.len().saturating_sub(VISIBLE);
 
     let mut dismiss: Option<usize> = None;
     egui::Area::new(egui::Id::unique("toasts"))
-        .anchor(Align2::RIGHT_BOTTOM, vec2(-16.0, -BOTTOM))
+        .anchor(
+            Align2::LEFT_BOTTOM,
+            vec2(crate::views::rail::WIDTH + 12.0, -BOTTOM),
+        )
         .order(egui::Order::Foreground)
         .interactable(true)
         .show(ctx, |ui| {
             ui.set_width(WIDTH);
             ui.spacing_mut().item_spacing.y = 8.0;
             // Oldest first, so the newest sits next to the corner.
-            for (i, t) in toasts.iter().enumerate() {
+            for (i, t) in toasts.iter().enumerate().skip(first) {
                 let tone = match t.kind {
                     ToastKind::Info => Tone::Accent,
                     ToastKind::Success => Tone::Success,

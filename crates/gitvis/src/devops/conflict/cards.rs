@@ -30,7 +30,8 @@ fn page(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
                     bottom: 28,
                 })
                 .show(ui, |ui| {
-                    ui.set_max_width(kit::DETAIL_MAX);
+                    // Never wider than the pane: `set_max_width` can also widen.
+                    ui.set_max_width(ui.available_width().min(kit::DETAIL_MAX));
                     ui.spacing_mut().item_spacing.y = 8.0;
                     add(ui)
                 });
@@ -239,7 +240,7 @@ pub fn no_markers(ui: &mut Ui, st: &mut State, busy: bool, actions: &mut Vec<Act
     let Some(s) = st.current() else { return };
     let path = s.path().to_owned();
     page(ui, "conflict_no_markers", |ui| {
-        if kit::empty_state(
+        if crate::devops::history::empty_state(
             ui,
             Icon::Info,
             "No conflict markers left",
@@ -302,7 +303,7 @@ pub fn resolved(
                 None,
             ),
         };
-        let clicked = kit::empty_state(
+        let clicked = crate::devops::history::empty_state(
             ui,
             Icon::Check,
             &title,
@@ -325,7 +326,7 @@ pub fn resolved(
         if let Some(n) = notice {
             ui.add_space(space::L);
             ui.vertical_centered(|ui| {
-                ui.set_max_width(520.0);
+                ui.set_max_width(ui.available_width().min(520.0));
                 kit::callout(ui, Tone::Warning, "", &n);
             });
         }
