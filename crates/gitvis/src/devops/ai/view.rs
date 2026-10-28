@@ -11,10 +11,11 @@ use egui::{
     Stroke, Ui, vec2,
 };
 use gitvis_core::Commit;
+use gitvis_core::devops::ai::cli::{self, CliErrorKind};
 use gitvis_core::devops::ai::output::{self, Flaky};
-use gitvis_core::devops::ai::{Failure, Feature, Model, dollars};
+use gitvis_core::devops::ai::{CliModel, Failure, Feature, Model, Provider, dollars};
 
-use super::{Act, Ask, Phase, Prefs, State, Target, control};
+use super::{Act, Ask, Phase, Prefs, State, Target, control, session};
 use crate::devops::DevOpsAction;
 use crate::devops::hooks::{HookCx, LogHookCx};
 use crate::state::{Action, Page, Selection};
@@ -22,13 +23,34 @@ use crate::theme::{Tone, medium, pal, radius, semibold, size, space};
 use crate::views::icons::{Icon, IconButton};
 use crate::views::{form, kit, menus};
 
-/// `Opus 5.5 · low effort`.
+/// Where requests go now: `Some(true)` Claude Code, `Some(false)` the API,
+/// `None` not known yet (Auto before Claude Code has been looked at).
+pub(super) fn goes_cli(prefs: &Prefs) -> Option<bool> {
+    match prefs.provider_now() {
+        Provider::ClaudeCode => Some(true),
+        Provider::Api => Some(false),
+        Provider::Auto => session::with(|s| s.cli.status().map(cli::Status::plan_ready)),
+    }
+}
+
+/// `Claude Code · low effort`, `Opus 5.5 · low effort`, `Auto`.
 fn caption(prefs: &Prefs, f: Feature) -> String {
-    format!(
-        "{} · {} effort",
-        prefs.model_now().short(),
-        prefs.effort(f).as_str()
-    )
+    match goes_cli(prefs) {
+        Some(true) => match prefs.cli_model_now() {
+            CliModel::Default => format!("Claude Code · {} effort", prefs.cli_effort(f).as_str()),
+            m => format!(
+                "Claude Code · {} · {} effort",
+                m.label(),
+                prefs.cli_effort(f).as_str()
+            ),
+        },
+        Some(false) => format!(
+            "{} · {} effort",
+            prefs.model_now().short(),
+            prefs.effort(f).as_str()
+        ),
+        None => "Auto: Claude Code or the API".to_owned(),
+    }
 }
 
 fn open_settings(actions: &mut Vec<Action>) {
@@ -38,36 +60,48 @@ fn open_settings(actions: &mut Vec<Action>) {
     actions.push(Action::ShowPage(Page::Settings));
 }
 
-/// `Claude Opus 5.5 · 1,204 in · 96 out · cache 0 / 800 · $0.0042 · 3.1 s`.
+/// Two lines: who answered and how (`Claude Opus 5.5 · through Claude
+/// Code (Claude Max plan)`), then the numbers (`518 tokens in, 62 out ·
+/// 5.9 s · covered by your plan`).
 fn usage_line(a: &Ask) -> String {
     let Some(r) = a.reply() else {
         return String::new();
     };
     let ans = &r.done.answer;
     let model = if ans.model.is_empty() {
-        a.model.label().to_owned()
+        a.engine()
     } else {
         Model::label_of(&ans.model)
     };
+    let who = match &r.done.cli {
+        Some(run) => format!("{model} · through Claude Code ({})", run.account),
+        None => format!("{model} · through the Claude API"),
+    };
     let u = &ans.usage;
-    let mut s = format!(
-        "{model} · {} in · {} out",
+    let mut numbers = format!(
+        "{} tokens in, {} out",
         crate::format::count(u.input_tokens as usize),
         crate::format::count(u.output_tokens as usize)
     );
     if u.cache_creation_input_tokens + u.cache_read_input_tokens > 0 {
-        s.push_str(&format!(
-            " · cache write {} / read {}",
+        numbers.push_str(&format!(
+            " · cache: {} written, {} read",
             crate::format::count(u.cache_creation_input_tokens as usize),
             crate::format::count(u.cache_read_input_tokens as usize)
         ));
     }
-    s.push_str(&format!(
-        " · about {} · {}",
-        dollars(r.cost),
-        crate::format::millis(r.done.elapsed_ms)
-    ));
-    s
+    numbers.push_str(&format!(" · {}", crate::format::millis(r.done.elapsed_ms)));
+    match &r.done.cli {
+        Some(run) => numbers.push_str(&format!(
+            " · covered by your plan{}",
+            run.cost_estimate
+                .filter(|c| *c > 0.0)
+                .map(|c| format!(" (Claude Code's list-price estimate: {})", dollars(c)))
+                .unwrap_or_default()
+        )),
+        None => numbers.push_str(&format!(" · about {}", dollars(r.cost))),
+    }
+    format!("{who}\n{numbers}")
 }
 
 /// "Claude Opus 5.5 declined; continued on Claude Opus 5" lines.
@@ -96,8 +130,9 @@ fn note(ui: &mut Ui, text: &str) {
     ui.add(Label::new(RichText::new(text).size(size::SMALL).color(c)).wrap());
 }
 
-/// Live text of a running request, and whether the model is still thinking.
-fn live_text(a: &Ask) -> Option<(String, bool, u64)> {
+/// Live text of a running request, whether the model is still thinking,
+/// the seconds so far and a note (Claude Code retrying after a limit).
+fn live_text(a: &Ask) -> Option<(String, bool, u64, Option<String>)> {
     let Phase::Running { live, .. } = &a.phase else {
         return None;
     };
@@ -106,6 +141,7 @@ fn live_text(a: &Ask) -> Option<(String, bool, u64)> {
         l.answer.text.clone(),
         l.answer.text.is_empty(),
         l.started.elapsed().as_secs(),
+        l.note.clone(),
     ))
 }
 
@@ -115,6 +151,7 @@ fn live_text(a: &Ask) -> Option<(String, bool, u64)> {
 fn progress_row(ui: &mut Ui, a: &Ask, short: bool, actions: &mut Vec<Action>) -> String {
     let p = *pal(ui);
     ui.ctx().request_repaint_after(Duration::from_millis(120));
+    let mut tip: Option<String> = None;
     let (text, phase) = match &a.phase {
         Phase::Preparing => (
             String::new(),
@@ -133,9 +170,14 @@ fn progress_row(ui: &mut Ui, a: &Ask, short: bool, actions: &mut Vec<Action>) ->
             },
         ),
         Phase::Running { .. } => {
-            let (text, thinking, secs) = live_text(a).unwrap_or_default();
-            let who = a.model.short();
+            let (text, thinking, secs, note) = live_text(a).unwrap_or_default();
+            let who = a.engine();
+            if short {
+                tip = note.clone();
+            }
             let phase = match (thinking, short) {
+                _ if note.is_some() && short => format!("Retrying · {secs} s"),
+                _ if note.is_some() => format!("{} · {secs} s", note.unwrap_or_default()),
                 (true, true) => format!("Thinking · {secs} s"),
                 (true, false) => format!("{who} is thinking · {secs} s"),
                 (false, true) => format!(
@@ -190,8 +232,11 @@ fn progress_row(ui: &mut Ui, a: &Ask, short: bool, actions: &mut Vec<Action>) ->
                 let resp = ui.add(
                     Label::new(RichText::new(&phase).size(size::SMALL).color(p.text_2)).truncate(),
                 );
-                // In the narrow panel the text so far is only in the tooltip.
-                if short && !text.is_empty() {
+                // In the narrow panel the retry note and the text so far are
+                // only in the tooltip.
+                if let Some(t) = tip.take() {
+                    resp.on_hover_text(t);
+                } else if short && !text.is_empty() {
                     let tail: String = {
                         let chars: Vec<char> = text.chars().collect();
                         chars[chars.len().saturating_sub(400)..].iter().collect()
@@ -218,6 +263,10 @@ fn details_button(ui: &mut Ui, text: &str) {
 /// panel): a one-line title, the text behind a Details button.
 fn failure(ui: &mut Ui, a: &Ask, f: &Failure, compact: bool, actions: &mut Vec<Action>) {
     let t = a.target.clone();
+    let cli_title = match f {
+        Failure::ClaudeCode(e) => e.kind.title(),
+        _ => "",
+    };
     let short_api = match f {
         Failure::Api(e) => {
             let mut s = if e.kind.is_empty() {
@@ -241,12 +290,35 @@ fn failure(ui: &mut Ui, a: &Ask, f: &Failure, compact: bool, actions: &mut Vec<A
         Failure::Api(_) if compact => (Tone::Danger, short_api.as_str()),
         Failure::Api(_) => (Tone::Danger, "The Claude API returned an error"),
         Failure::Incomplete(_) => (Tone::Danger, "The answer was cut off"),
+        Failure::NoClaudeCode => (Tone::Warning, "Claude Code is not installed"),
+        Failure::NoProvider(_) => (Tone::Warning, "Set up Claude Code or an API key"),
+        Failure::ClaudeCode(e) => (
+            match e.kind {
+                CliErrorKind::NotSignedIn
+                | CliErrorKind::LoginExpired
+                | CliErrorKind::SessionLimit
+                | CliErrorKind::WeeklyLimit
+                | CliErrorKind::TooOld
+                | CliErrorKind::ModelNotFound => Tone::Warning,
+                _ => Tone::Danger,
+            },
+            cli_title,
+        ),
     };
     let mut body = match f {
         Failure::Cancelled => "Nothing was filled in.".to_owned(),
         Failure::NoCurl => {
             "gitvis sends requests with curl, which reads the key from standard input so it never appears on a command line. curl ships with Windows 10 and 11 (C:\\Windows\\System32\\curl.exe) and with Git for Windows; otherwise: winget install cURL.cURL".to_owned()
         }
+        Failure::NoClaudeCode => format!(
+            "gitvis looks for claude.exe in ~/.local/bin, on PATH and next to an npm claude.cmd. Install it with one of:\n{}\nthen sign in (`{}` in a terminal), or choose the Claude API in Settings → AI assist.",
+            cli::INSTALL_HINTS
+                .iter()
+                .map(|(how, cmd)| format!("{how}: {cmd}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            cli::SIGN_IN
+        ),
         other => other.message(),
     };
     if let Failure::Api(e) = f
@@ -254,6 +326,12 @@ fn failure(ui: &mut Ui, a: &Ask, f: &Failure, compact: bool, actions: &mut Vec<A
     {
         body.push('\n');
         body.push_str(e.hint());
+    }
+    if let Failure::ClaudeCode(e) = f
+        && !e.kind.next_step().is_empty()
+    {
+        body.push('\n');
+        body.push_str(e.kind.next_step());
     }
     let wait = control::retry_wait(a);
     let shown = if compact { "" } else { body.as_str() };
@@ -288,6 +366,73 @@ fn failure(ui: &mut Ui, a: &Ask, f: &Failure, compact: bool, actions: &mut Vec<A
                         .clicked()
                     {
                         actions.push(Act::Start(t.clone()).into());
+                    }
+                }
+                Failure::NoClaudeCode | Failure::NoProvider(_) => {
+                    if IconButton::new(Icon::Gear, "Settings")
+                        .compact()
+                        .show(ui)
+                        .clicked()
+                    {
+                        open_settings(actions);
+                    }
+                    if IconButton::new(Icon::Rerun, "Check again")
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Look for Claude Code and its sign-in again, then ask")
+                        .clicked()
+                    {
+                        actions.push(Act::Start(t.clone()).into());
+                    }
+                }
+                Failure::ClaudeCode(e)
+                    if e.kind.needs_sign_in() || e.kind == CliErrorKind::TooOld =>
+                {
+                    let cmd = if e.kind == CliErrorKind::TooOld {
+                        "claude update"
+                    } else {
+                        cli::SIGN_IN
+                    };
+                    if IconButton::new(Icon::Copy, &format!("Copy `{cmd}`"))
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Run it in a terminal (gitvis never runs it for you)")
+                        .clicked()
+                    {
+                        actions.push(Action::Copy(cmd.to_owned()));
+                    }
+                    if IconButton::new(Icon::Terminal, "Terminal")
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Open the terminal panel, to paste and run it there")
+                        .clicked()
+                    {
+                        actions.push(Action::ToggleTerminal);
+                    }
+                    if IconButton::new(Icon::Rerun, "Check again")
+                        .compact()
+                        .show(ui)
+                        .clicked()
+                    {
+                        actions.push(Act::Start(t.clone()).into());
+                    }
+                }
+                Failure::ClaudeCode(e)
+                    if matches!(
+                        e.kind,
+                        CliErrorKind::SessionLimit
+                            | CliErrorKind::WeeklyLimit
+                            | CliErrorKind::ModelNotFound
+                            | CliErrorKind::CreditTooLow
+                            | CliErrorKind::ToolsEnabled
+                    ) =>
+                {
+                    if IconButton::new(Icon::Gear, "Settings")
+                        .compact()
+                        .show(ui)
+                        .clicked()
+                    {
+                        open_settings(actions);
                     }
                 }
                 Failure::Api(e) if e.kind == "authentication_error" => {
@@ -747,20 +892,25 @@ fn fill_status(ui: &mut Ui, a: &Ask, done_text: &str, compact: bool, actions: &m
     }
 }
 
-/// `Opus 5.5 · about $0.0042 · 2 redacted` (details in the tooltip).
+/// `Opus 5.5 · about $0.0042 · 2 redacted`, `Claude Code · your plan`
+/// (details in the tooltip).
 fn short_usage(a: &Ask) -> String {
     let Some(r) = a.reply() else {
         return String::new();
     };
     let ans = &r.done.answer;
     let model = if ans.model.is_empty() {
-        a.model.short().to_owned()
+        a.engine()
     } else {
         Model::label_of(&ans.model)
             .trim_start_matches("Claude ")
             .to_owned()
     };
-    let mut s = format!("{model} · about {}", dollars(r.cost));
+    let mut s = if r.done.cli.is_some() {
+        "Claude Code · your plan".to_owned()
+    } else {
+        format!("{model} · about {}", dollars(r.cost))
+    };
     if let Some(p) = &a.prepared {
         let n = p.redactions.values() + p.redactions.withheld.len();
         if n > 0 {
@@ -856,7 +1006,7 @@ Redacted before sending: {}",
         },
     );
     if let Some(a) = ask.filter(|a| !a.applied) {
-        let what = format!("Message written by {}", a.model.label());
+        let what = format!("Message written by {}", a.engine());
         fill_status(ui, a, &what, true, actions);
     } else if let Some(a) = ask
         && let Some(r) = a.reply()
@@ -911,7 +1061,7 @@ pub fn new_pr_tools(ui: &mut Ui, h: &HookCx, actions: &mut Vec<Action>) {
             );
             if let Some(a) = ask {
                 ui.add_space(4.0);
-                let what = format!("Title and description written by {}", a.model.label());
+                let what = format!("Title and description written by {}", a.engine());
                 fill_status(ui, a, &what, false, actions);
             }
         });
@@ -1076,7 +1226,7 @@ pub fn pr_tools(ui: &mut Ui, h: &HookCx, number: u64, actions: &mut Vec<Action>)
             );
         }
         Some(a) => {
-            let badges = vec![(a.model.short().to_owned(), Tone::Neutral)];
+            let badges = vec![(a.engine(), Tone::Neutral)];
             result_card(ui, st, a, "Claude's summary", actions, &badges);
         }
     }
@@ -1200,7 +1350,7 @@ fn explain_window(ctx: &egui::Context, a: &Ask, job: u64, actions: &mut Vec<Acti
                             .family(semibold())
                             .color(p.text_strong),
                     );
-                    kit::badge(ui, a.model.short(), Tone::Neutral);
+                    kit::badge(ui, &a.engine(), Tone::Neutral);
                     if let Some(f) = flaky {
                         let tone = match f {
                             Flaky::Yes => Tone::Warning,

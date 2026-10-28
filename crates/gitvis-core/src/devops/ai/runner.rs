@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use super::cli::{CliError, CliRun};
 use super::model::{Effort, Model};
 use super::request::{self, Prompt};
 use super::sse::{self, Answer, ApiError, SseParser};
@@ -162,6 +163,9 @@ pub struct Live {
     pub bytes: usize,
     /// Response lines that were not SSE (an HTTP error body).
     pub other: Vec<String>,
+    /// What is happening besides the text: Claude Code retrying after a
+    /// rate limit, for instance.
+    pub note: Option<String>,
 }
 
 impl Default for Live {
@@ -172,6 +176,7 @@ impl Default for Live {
             first_text: None,
             bytes: 0,
             other: Vec::new(),
+            note: None,
         }
     }
 }
@@ -195,6 +200,12 @@ pub enum Failure {
     Api(ApiError),
     /// The stream ended before `message_stop`.
     Incomplete(String),
+    /// Claude Code was asked for but is not installed.
+    NoClaudeCode,
+    /// Claude Code answered with an error (not signed in, a plan limit, …).
+    ClaudeCode(CliError),
+    /// "Auto": neither Claude Code with a plan nor an API key is ready.
+    NoProvider(String),
 }
 
 impl Failure {
@@ -213,7 +224,29 @@ impl Failure {
                 s
             }
             Failure::Incomplete(e) => e.clone(),
+            Failure::NoClaudeCode => format!(
+                "Claude Code is not installed (or not on PATH). Install it with one of: {}",
+                super::cli::INSTALL_HINTS
+                    .iter()
+                    .map(|(_, c)| *c)
+                    .collect::<Vec<_>>()
+                    .join("  ·  ")
+            ),
+            Failure::ClaudeCode(e) => e.summary(),
+            Failure::NoProvider(why) => why.clone(),
         }
+    }
+
+    /// Nothing was sent (a missing key or tool, a failed git read).
+    pub fn before_sending(&self) -> bool {
+        matches!(
+            self,
+            Failure::NoKey
+                | Failure::NoCurl
+                | Failure::Prepare(_)
+                | Failure::NoClaudeCode
+                | Failure::NoProvider(_)
+        )
     }
 }
 
@@ -276,13 +309,31 @@ pub fn sweep_stale(dir: &Path, age: std::time::Duration) -> usize {
     removed
 }
 
+/// Which way a request went.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Via {
+    /// The Claude API with a key from here.
+    Api(KeySource),
+    /// The owner's Claude Code (their subscription, unless it is signed in
+    /// with an API key).
+    ClaudeCode,
+}
+
+impl Via {
+    pub fn is_api(self) -> bool {
+        matches!(self, Via::Api(_))
+    }
+}
+
 /// A finished request.
 #[derive(Clone, Debug)]
 pub struct Done {
     pub answer: Answer,
     pub elapsed_ms: u64,
-    pub source: KeySource,
+    pub via: Via,
     pub request_bytes: usize,
+    /// What Claude Code reported besides the answer.
+    pub cli: Option<CliRun>,
 }
 
 /// Send `prompt` and follow the stream into `live`. Blocks until the
@@ -448,8 +499,9 @@ pub fn send_with(
     Ok(Done {
         answer: l.answer.clone(),
         elapsed_ms: started.elapsed().as_millis() as u64,
-        source,
+        via: Via::Api(source),
         request_bytes: body.len(),
+        cli: None,
     })
 }
 

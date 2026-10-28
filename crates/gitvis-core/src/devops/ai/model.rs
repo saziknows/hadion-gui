@@ -170,7 +170,8 @@ impl From<Model> for String {
     }
 }
 
-/// How hard the model thinks (`output_config.effort`).
+/// How hard the model thinks (`output_config.effort` for the API,
+/// `--effort` for Claude Code).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub enum Effort {
@@ -178,16 +179,31 @@ pub enum Effort {
     #[default]
     Medium,
     High,
+    /// Claude Code only (`--effort xhigh`).
+    XHigh,
+    /// Claude Code only (`--effort max`).
+    Max,
 }
 
 impl Effort {
+    /// The levels offered for API requests.
     pub const ALL: [Effort; 3] = [Effort::Low, Effort::Medium, Effort::High];
+    /// The levels Claude Code's `--effort` takes.
+    pub const CLI: [Effort; 5] = [
+        Effort::Low,
+        Effort::Medium,
+        Effort::High,
+        Effort::XHigh,
+        Effort::Max,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Effort::Low => "low",
             Effort::Medium => "medium",
             Effort::High => "high",
+            Effort::XHigh => "xhigh",
+            Effort::Max => "max",
         }
     }
 
@@ -196,11 +212,29 @@ impl Effort {
             Effort::Low => "Low",
             Effort::Medium => "Medium",
             Effort::High => "High",
+            Effort::XHigh => "Extra high",
+            Effort::Max => "Max",
+        }
+    }
+
+    /// The short label for segmented controls (`X-high`).
+    pub fn short(self) -> &'static str {
+        match self {
+            Effort::XHigh => "X-high",
+            e => e.label(),
+        }
+    }
+
+    /// The level sent to the API, which gitvis offers up to `high`.
+    pub fn for_api(self) -> Effort {
+        match self {
+            Effort::XHigh | Effort::Max => Effort::High,
+            e => e,
         }
     }
 
     pub fn parse(s: &str) -> Option<Effort> {
-        Effort::ALL
+        Effort::CLI
             .into_iter()
             .find(|e| e.as_str() == s.trim().to_ascii_lowercase())
     }
@@ -215,6 +249,130 @@ impl From<String> for Effort {
 impl From<Effort> for String {
     fn from(e: Effort) -> Self {
         e.as_str().to_owned()
+    }
+}
+
+/// How gitvis reaches Claude.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum Provider {
+    /// Claude Code when it is signed in with a Claude plan, otherwise the
+    /// API key.
+    #[default]
+    Auto,
+    /// The owner's Claude Code CLI (their subscription).
+    ClaudeCode,
+    /// The Claude API with an API key (billed per token).
+    Api,
+}
+
+impl Provider {
+    pub const ALL: [Provider; 3] = [Provider::Auto, Provider::ClaudeCode, Provider::Api];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Provider::Auto => "auto",
+            Provider::ClaudeCode => "claude-code",
+            Provider::Api => "api",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Provider::Auto => "Auto",
+            Provider::ClaudeCode => "Claude Code",
+            Provider::Api => "Claude API",
+        }
+    }
+
+    /// `auto`, `claude-code` / `cli` / `code`, `api`.
+    pub fn parse(s: &str) -> Option<Provider> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Provider::Auto),
+            "claude-code" | "claude code" | "cli" | "code" | "claudecode" => {
+                Some(Provider::ClaudeCode)
+            }
+            "api" | "claude-api" | "key" => Some(Provider::Api),
+            _ => None,
+        }
+    }
+}
+
+impl From<String> for Provider {
+    fn from(s: String) -> Self {
+        Provider::parse(&s).unwrap_or_default()
+    }
+}
+
+impl From<Provider> for String {
+    fn from(p: Provider) -> Self {
+        p.as_str().to_owned()
+    }
+}
+
+/// The model Claude Code is asked for (`--model`). Names, not versions:
+/// Claude Code maps each to the model it currently means.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(from = "String", into = "String")]
+pub enum CliModel {
+    /// No `--model`: whatever the owner's Claude Code uses.
+    #[default]
+    Default,
+    Opus,
+    Sonnet,
+    Haiku,
+    Fable,
+}
+
+impl CliModel {
+    pub const ALL: [CliModel; 5] = [
+        CliModel::Default,
+        CliModel::Opus,
+        CliModel::Sonnet,
+        CliModel::Haiku,
+        CliModel::Fable,
+    ];
+
+    /// The `--model` value, `None` for Claude Code's default.
+    pub fn arg(self) -> Option<&'static str> {
+        match self {
+            CliModel::Default => None,
+            CliModel::Opus => Some("opus"),
+            CliModel::Sonnet => Some("sonnet"),
+            CliModel::Haiku => Some("haiku"),
+            CliModel::Fable => Some("fable"),
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            CliModel::Default => "Default",
+            CliModel::Opus => "Opus",
+            CliModel::Sonnet => "Sonnet",
+            CliModel::Haiku => "Haiku",
+            CliModel::Fable => "Fable",
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        self.arg().unwrap_or("default")
+    }
+
+    pub fn parse(s: &str) -> Option<CliModel> {
+        let s = s.trim().to_ascii_lowercase();
+        CliModel::ALL.into_iter().find(|m| m.as_str() == s)
+    }
+}
+
+impl From<String> for CliModel {
+    fn from(s: String) -> Self {
+        CliModel::parse(&s).unwrap_or_default()
+    }
+}
+
+impl From<CliModel> for String {
+    fn from(m: CliModel) -> Self {
+        m.as_str().to_owned()
     }
 }
 
@@ -243,6 +401,17 @@ impl Feature {
             Feature::PrDescription => "Pull request description",
             Feature::ExplainFailure => "CI failure explanation",
             Feature::SummarisePr => "Pull request summary",
+            Feature::ExplainCommit => "Commit explanation",
+        }
+    }
+
+    /// A short label for tables: `PR description`.
+    pub fn short(self) -> &'static str {
+        match self {
+            Feature::CommitMessage => "Commit message",
+            Feature::PrDescription => "PR description",
+            Feature::ExplainFailure => "CI failure",
+            Feature::SummarisePr => "PR summary",
             Feature::ExplainCommit => "Commit explanation",
         }
     }
@@ -371,6 +540,36 @@ mod tests {
             serde_json::to_string(&Model::Sonnet55).unwrap(),
             r#""claude-sonnet-5-5""#
         );
+    }
+
+    #[test]
+    fn providers_and_cli_models() {
+        assert_eq!(Provider::default(), Provider::Auto);
+        for p in Provider::ALL {
+            assert_eq!(Provider::parse(p.as_str()), Some(p));
+            let json = serde_json::to_string(&p).unwrap();
+            assert_eq!(serde_json::from_str::<Provider>(&json).unwrap(), p);
+        }
+        assert_eq!(Provider::parse("cli"), Some(Provider::ClaudeCode));
+        assert_eq!(
+            serde_json::from_str::<Provider>("\"carrier-pigeon\"").unwrap(),
+            Provider::Auto
+        );
+        assert_eq!(CliModel::Default.arg(), None);
+        assert_eq!(CliModel::Opus.arg(), Some("opus"));
+        for m in CliModel::ALL {
+            let json = serde_json::to_string(&m).unwrap();
+            assert_eq!(serde_json::from_str::<CliModel>(&json).unwrap(), m);
+        }
+        assert_eq!(
+            serde_json::from_str::<CliModel>("\"gpt\"").unwrap(),
+            CliModel::Default
+        );
+        assert_eq!(Effort::parse("xhigh"), Some(Effort::XHigh));
+        assert_eq!(Effort::Max.for_api(), Effort::High);
+        assert_eq!(Effort::Low.for_api(), Effort::Low);
+        assert_eq!(Effort::ALL.len(), 3);
+        assert_eq!(Effort::CLI.len(), 5);
     }
 
     #[test]
