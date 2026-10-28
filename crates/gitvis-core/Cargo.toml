@@ -2,6 +2,9 @@
 name = "gitvis-core"
 version.workspace = true
 edition.workspace = true
+description = "The no-UI core of gitvis: repository snapshots, graph layout, diffs, git operations, scanners and DevOps integrations"
+license.workspace = true
+repository.workspace = true
 publish.workspace = true
 
 [dependencies]

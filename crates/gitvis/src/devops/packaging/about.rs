@@ -14,6 +14,8 @@ use crate::views::form;
 use crate::views::icons::{Icon, IconButton};
 use crate::views::kit::{self, Col};
 
+const MIT: &str = include_str!("../../../../../LICENSE-MIT");
+const APACHE: &str = include_str!("../../../../../LICENSE-APACHE");
 const INTER_OFL: &str = include_str!("../../../assets/fonts/Inter-OFL.txt");
 const JETBRAINS_OFL: &str = include_str!("../../../assets/fonts/JetBrainsMono-OFL.txt");
 
@@ -59,7 +61,8 @@ const CRATES: &[(&str, &str, &str)] = &[
 pub struct State {
     /// The update log's most recent attempt.
     last_update: Vec<String>,
-    /// The font licence shown in full (0 Inter, 1 JetBrains Mono).
+    /// The licence shown in full (0 MIT, 1 Apache-2.0, 2 Inter, 3 JetBrains
+    /// Mono).
     licence_open: Option<usize>,
 }
 
@@ -252,22 +255,41 @@ pub fn show(
 
         kit::section(ui, "Licences", None);
         form::card(ui, Tone::Neutral, |ui| {
-            kit::subtitle(ui, "gitvis");
+            ui.horizontal(|ui| {
+                kit::subtitle(ui, "gitvis");
+                kit::badge(ui, "MIT OR Apache-2.0", Tone::Accent);
+            });
             kit::secondary(
                 ui,
-                "The repository has no LICENSE file yet, so no licence is granted beyond the owner's. Add one at the repository root and the installer and release zip pick it up.",
+                "Copyright (c) 2026 Dylan Westraadt. You may use, change and redistribute gitvis under either licence, at your option.",
             );
             ui.add_space(space::S);
-            for (i, (name, version_note, url, text)) in [
+            for (i, (name, badge, note, url, text)) in [
+                (
+                    "MIT License",
+                    "MIT",
+                    "LICENSE-MIT, beside gitvis in the installer and the zip.",
+                    "https://opensource.org/license/mit",
+                    MIT,
+                ),
+                (
+                    "Apache License 2.0",
+                    "Apache-2.0",
+                    "LICENSE-APACHE, beside gitvis in the installer and the zip.",
+                    "https://www.apache.org/licenses/LICENSE-2.0",
+                    APACHE,
+                ),
                 (
                     "Inter",
-                    "variable font, weights 400 / 500 / 600",
+                    "SIL Open Font License 1.1",
+                    "Bundled in the executable (variable font, weights 400 / 500 / 600); the licence file ships beside gitvis in the installer and the zip.",
                     "https://rsms.me/inter/",
                     INTER_OFL,
                 ),
                 (
                     "JetBrains Mono",
-                    "variable font",
+                    "SIL Open Font License 1.1",
+                    "Bundled in the executable (variable font); the licence file ships beside gitvis in the installer and the zip.",
                     "https://www.jetbrains.com/lp/mono/",
                     JETBRAINS_OFL,
                 ),
@@ -277,7 +299,7 @@ pub fn show(
             {
                 ui.horizontal(|ui| {
                     kit::subtitle(ui, name);
-                    kit::badge(ui, "SIL Open Font License 1.1", Tone::Neutral);
+                    kit::badge(ui, badge, Tone::Neutral);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let open = st.licence_open == Some(i);
                         if IconButton::new(
@@ -303,12 +325,7 @@ pub fn show(
                         }
                     });
                 });
-                kit::secondary(
-                    ui,
-                    &format!(
-                        "Bundled in the executable ({version_note}); the licence file ships beside gitvis in the installer and the zip."
-                    ),
-                );
+                kit::secondary(ui, note);
                 if st.licence_open == Some(i) {
                     kit::code_block(ui, text.trim(), actions);
                 }
@@ -316,7 +333,10 @@ pub fn show(
             }
         });
         ui.add_space(space::S);
-        kit::secondary(ui, "Main Rust crates compiled into gitvis:");
+        kit::secondary(
+            ui,
+            "Main Rust crates compiled into gitvis. Every crate, with its licence texts, is listed in THIRD-PARTY-LICENSES.txt in the licenses folder beside the executable.",
+        );
         let rows: Vec<Vec<String>> = CRATES
             .iter()
             .map(|(c, l, u)| vec![(*c).to_owned(), (*l).to_owned(), (*u).to_owned()])
