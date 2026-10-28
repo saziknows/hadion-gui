@@ -1779,6 +1779,16 @@ mod tests {
             acts("config-filter", "github").as_slice(),
             [Act::SetConfigTab(ConfigTab::All), Act::SetFilter(f)] if f == "github"
         ));
+        assert!(matches!(
+            acts("config-key", "pull.ff local").as_slice(),
+            [Act::SetConfigTab(ConfigTab::Common), Act::EditKey(f)] if f.scope == Scope::Local && f.key == "pull.ff"
+        ));
+        assert!(matches!(
+            acts("config-key", "remote.origin.url").as_slice(),
+            [Act::SetConfigTab(ConfigTab::All), Act::EditKey(_)]
+        ));
+        assert!(matches!(acts("id-scroll", "640").as_slice(), [Act::Scroll(y)] if *y == 640.0));
+        assert!(script("id-scroll", "x").is_none());
         assert!(script("config-tab", "nope").is_none());
         assert!(script("config-edit", "").is_none());
         assert!(script("gh-switch", "").is_none());

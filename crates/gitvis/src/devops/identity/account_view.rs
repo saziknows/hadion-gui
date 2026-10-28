@@ -492,13 +492,13 @@ fn credentials(
             Tone::Neutral,
             "gh is not git's credential helper for github.com",
             &format!(
-                "git asks {} for github.com credentials. gh auth setup-git makes gh answer instead, with the account you signed in with; it writes two credential entries to {}.",
+                "{} gh auth setup-git makes gh answer instead, with the account you signed in with; it writes two credential entries to {}.",
                 c.helpers
                     .iter()
                     .rev()
                     .find(|e| e.subsection().is_none() && !e.value_text().is_empty())
-                    .map(|e| e.value_text().to_owned())
-                    .unwrap_or_else(|| "nobody".to_owned()),
+                    .map(|e| format!("git asks {} for github.com credentials.", e.value_text()))
+                    .unwrap_or_else(|| "git has no credential helper for github.com.".to_owned()),
                 cfg.global_file
                     .as_deref()
                     .map(|f| tilde(f, home.as_deref()))

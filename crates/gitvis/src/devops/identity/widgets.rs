@@ -187,7 +187,10 @@ pub fn page(ui: &mut Ui, id: &str, scroll: &mut Option<f32>, add: impl FnOnce(&m
                         bottom: 32,
                     })
                     .show(ui, |ui| {
-                        ui.set_max_width(kit::DETAIL_MAX + 120.0);
+                        // set_max_width can widen a Ui past the viewport:
+                        // cap at what is there.
+                        let w = ui.available_width().min(kit::DETAIL_MAX + 120.0);
+                        ui.set_max_width(w);
                         ui.spacing_mut().item_spacing.y = 8.0;
                         add(ui)
                     });
