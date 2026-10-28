@@ -264,6 +264,8 @@ pub struct DiffShow {
     /// `(hunk, line)`; `line == u32::MAX` is the hunk header.
     pub rows: Vec<(u32, u32)>,
     pub longest: usize,
+    /// The theme the colours were made for (they are dropped in the other).
+    pub dark: bool,
 }
 
 impl DiffShow {
@@ -287,6 +289,7 @@ impl DiffShow {
             },
             rows,
             longest: longest.min(MAX_CHARS),
+            dark,
         }
     }
 }
@@ -298,6 +301,8 @@ pub struct TextDoc {
     pub spans: Vec<Vec<Span>>,
     pub language: Option<String>,
     pub longest: usize,
+    /// The theme the colours were made for.
+    pub dark: bool,
 }
 
 impl TextDoc {
@@ -319,6 +324,7 @@ impl TextDoc {
             lines,
             spans,
             language: crate::highlight::language_for(path),
+            dark,
         }
     }
 }
@@ -514,6 +520,7 @@ pub fn diff_view(ui: &mut Ui, id: &str, d: &DiffShow) {
                         .spans
                         .get(hi as usize)
                         .and_then(|s| s.get(li as usize))
+                        .filter(|_| d.dark == dark)
                         .map(Vec::as_slice)
                         .unwrap_or(&[]);
                     let base = if line.kind == LineKind::NoNewline {
@@ -570,7 +577,12 @@ pub fn text_view(ui: &mut Ui, id: &str, doc: &TextDoc, mark: Option<u32>, scroll
                     num_font.clone(),
                     p.text_3,
                 );
-                let spans = doc.spans.get(i).map(Vec::as_slice).unwrap_or(&[]);
+                let spans = doc
+                    .spans
+                    .get(i)
+                    .filter(|_| doc.dark == dark)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
                 let g = code_galley(&painter, &doc.lines[i], spans, &font, p.text, dark);
                 painter.galley(
                     pos2(rect.left() + gutter + 4.0, mid - g.size().y / 2.0),

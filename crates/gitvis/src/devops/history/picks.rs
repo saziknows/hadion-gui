@@ -56,14 +56,22 @@ pub struct Picks {
 
 /// Recompute what the panel shows and read the totals.
 fn changed(cx: &mut Ctx, repo: &mut RepoState) {
+    derive(cx, repo, true);
+}
+
+/// Recompute the panel's numbers; read the line totals again only when
+/// `totals` (the picks changed, not just the snapshot).
+fn derive(cx: &mut Ctx, repo: &mut RepoState, totals: bool) {
     let Some(snap) = repo.snapshot.as_ref() else {
         return;
     };
     let pk = &mut repo.devops.history.picks;
     pk.set = repo.multi.iter().copied().collect();
     pk.ordered = core::oldest_first(&repo.multi, &snap.index_of);
-    pk.totals = None;
-    pk.loading = false;
+    if totals {
+        pk.totals = None;
+        pk.loading = false;
+    }
     if repo.multi.len() < 2 {
         return;
     }
@@ -90,6 +98,9 @@ fn changed(cx: &mut Ctx, repo: &mut RepoState) {
         times.iter().copied().min().unwrap_or(0),
         times.iter().copied().max().unwrap_or(0),
     );
+    if !totals {
+        return;
+    }
     pk.seq += 1;
     pk.loading = true;
     let seq = pk.seq;
@@ -127,11 +138,14 @@ pub fn on_snapshot(cx: &mut Ctx, repo: &mut RepoState) {
     };
     let before = repo.multi.len();
     repo.multi.retain(|id| snap.index_of.contains_key(id));
-    if repo.multi.len() != before {
+    let dropped = repo.multi.len() != before;
+    if dropped {
         collapse(cx, repo);
     }
+    // Commit indices and HEAD may have moved; the totals only change
+    // with the picks.
     if !repo.multi.is_empty() || !repo.devops.history.picks.set.is_empty() {
-        changed(cx, repo);
+        derive(cx, repo, dropped);
     }
 }
 
@@ -415,22 +429,30 @@ pub fn panel(ui: &mut Ui, h: &HookCx, picked: &[Oid], actions: &mut Vec<Action>)
         Some(Err(_)) => ("?".into(), "?".into()),
         None => ("…".into(), "…".into()),
     };
-    crate::views::insights::stats(
-        ui,
-        &[
-            Stat::new("Files", files),
-            Stat::new("Lines", lines),
-            Stat::new("Authors", format::count(pk.authors)),
-            Stat::new(
-                "Span",
-                if pk.span.1 > pk.span.0 {
-                    format::duration(pk.span.1 - pk.span.0)
-                } else {
-                    "same time".into()
-                },
-            ),
-        ],
-    );
+    let span = if pk.span.1 > pk.span.0 {
+        format::duration(pk.span.1 - pk.span.0)
+    } else {
+        "same time".into()
+    };
+    if ui.available_width() >= 400.0 {
+        crate::views::insights::stats(
+            ui,
+            &[
+                Stat::new("Files", files),
+                Stat::new("Lines", lines),
+                Stat::new("Authors", format::count(pk.authors)),
+                Stat::new("Span", span),
+            ],
+        );
+    } else {
+        // A narrow panel: one line per number instead of stacked tiles.
+        kit::kv(ui, 80.0, |kv| {
+            kv.text("Files", files);
+            kv.text("Lines", lines);
+            kv.text("Authors", format::count(pk.authors));
+            kv.text("Span", span);
+        });
+    }
     if let Some(Ok(t)) = &pk.totals
         && t.capped
     {
@@ -513,7 +535,12 @@ pub fn panel(ui: &mut Ui, h: &HookCx, picked: &[Oid], actions: &mut Vec<Action>)
             RebaseAction::Reword,
             RebaseAction::Drop,
         ] {
-            if IconButton::text(a.label())
+            let icon = match a {
+                RebaseAction::Squash => Icon::Merge,
+                RebaseAction::Reword => Icon::Edit,
+                RebaseAction::Drop => Icon::Trash,
+            };
+            if IconButton::new(icon, a.label())
                 .compact()
                 .enabled(block_rb.is_none())
                 .show(ui)
@@ -564,7 +591,10 @@ pub fn panel(ui: &mut Ui, h: &HookCx, picked: &[Oid], actions: &mut Vec<Action>)
             };
             let mut sub = format!("{}  ·  {}", c.short, c.author);
             if let Some((f, a, d)) = per.and_then(|m| m.get(&id.to_string())) {
-                sub.push_str(&format!("  ·  {f} files +{a} \u{2212}{d}"));
+                sub.push_str(&format!(
+                    "  ·  {} +{a} \u{2212}{d}",
+                    format::plural(*f, "file", "files")
+                ));
             }
             let meta = format::relative(c.time, now);
             let badges: Vec<(String, Tone)> = if c.parent_ids.len() > 1 {

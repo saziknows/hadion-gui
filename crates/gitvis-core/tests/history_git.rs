@@ -26,10 +26,8 @@ impl Fixture {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "gitvis-hist-{name}-{}-{nanos}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("gitvis-hist-{name}-{}-{nanos}", std::process::id()));
         let work = root.join("work");
         std::fs::create_dir_all(&work).unwrap();
         let f = Fixture { root, work };
@@ -136,7 +134,10 @@ fn compare_two_and_three_dots() {
     assert!(matches!(renamed.change, Change::Renamed(s) if s > 50));
     assert_eq!(renamed.old_path.as_deref(), Some("src/old name.rs"));
     assert_eq!((renamed.added, renamed.deleted), (1, 1));
-    assert!(cmds.iter().any(|c| c.contains("rev-list --left-right --count")));
+    assert!(
+        cmds.iter()
+            .any(|c| c.contains("rev-list --left-right --count"))
+    );
 
     let three = compare::run(
         dir(&f),
@@ -343,7 +344,11 @@ fn picked_commits_cherry_pick_patches_and_marks() {
     let mut plan = Plan::new(loaded.commits);
     let marks = multi::rebase_marks(&[c1, c3], multi::RebaseAction::Squash);
     assert!(multi::apply_marks(&mut plan, &marks).is_empty());
-    let subjects: Vec<&str> = plan.rows.iter().map(|r| r.commit.subject.as_str()).collect();
+    let subjects: Vec<&str> = plan
+        .rows
+        .iter()
+        .map(|r| r.commit.subject.as_str())
+        .collect();
     assert_eq!(subjects, vec!["topic one", "topic three", "topic two"]);
     assert_eq!(plan.rows[1].step, Step::Squash);
 }
@@ -365,11 +370,24 @@ fn ssh_signatures() {
     let f = Fixture::new("sig");
     let key = f.root.join("key");
     let out = Command::new("ssh-keygen")
-        .args(["-q", "-t", "ed25519", "-N", "", "-C", "test@example.com", "-f"])
+        .args([
+            "-q",
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-C",
+            "test@example.com",
+            "-f",
+        ])
         .arg(&key)
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let unsigned = f.commit("a.txt", "a\n", "unsigned");
     let pubkey = key.with_extension("pub");
     // Repo-local configuration only.
@@ -387,8 +405,13 @@ fn ssh_signatures() {
         .output()
         .map(|o| !o.stdout.is_empty())
         .unwrap_or(false);
-    let v = signature::verify(dir(&f), &[unsigned.clone(), signed.clone()], false, &mut cmds)
-        .unwrap();
+    let v = signature::verify(
+        dir(&f),
+        &[unsigned.clone(), signed.clone()],
+        false,
+        &mut cmds,
+    )
+    .unwrap();
     assert_eq!(v.sigs[0].1.status, Status::Unsigned);
     assert_eq!(v.sigs[1].1.kind, Some(Kind::Ssh));
     if !global {
@@ -406,8 +429,13 @@ fn ssh_signatures() {
     ]);
     let v = signature::verify(dir(&f), std::slice::from_ref(&signed), false, &mut cmds).unwrap();
     assert_eq!(v.sigs[0].1.status, Status::Untrusted);
-    let v = signature::verify(dir(&f), &[unsigned.clone(), signed.clone()], false, &mut cmds)
-        .unwrap();
+    let v = signature::verify(
+        dir(&f),
+        &[unsigned.clone(), signed.clone()],
+        false,
+        &mut cmds,
+    )
+    .unwrap();
     let setup = signature::setup(dir(&f), &mut cmds);
     assert_eq!(setup.format, "ssh");
     assert!(!setup.allowed_signers_exists);
@@ -434,7 +462,16 @@ fn ssh_signatures() {
     // The file lists only someone else's key: good but untrusted.
     let other = f.root.join("other");
     let out = Command::new("ssh-keygen")
-        .args(["-q", "-t", "ed25519", "-N", "", "-C", "other@example.com", "-f"])
+        .args([
+            "-q",
+            "-t",
+            "ed25519",
+            "-N",
+            "",
+            "-C",
+            "other@example.com",
+            "-f",
+        ])
         .arg(&other)
         .output()
         .unwrap();
@@ -445,7 +482,11 @@ fn ssh_signatures() {
     let s = &v.sigs[0].1;
     assert_eq!(s.status, Status::Untrusted);
     assert_eq!(s.status.badge(), Some("Untrusted"));
-    let a = signature::advise(s, &signature::setup(dir(&f), &mut cmds), "test@example.com")
-        .unwrap();
-    assert!(a.title.contains("not in your allowed signers"), "{}", a.title);
+    let a =
+        signature::advise(s, &signature::setup(dir(&f), &mut cmds), "test@example.com").unwrap();
+    assert!(
+        a.title.contains("not in your allowed signers"),
+        "{}",
+        a.title
+    );
 }

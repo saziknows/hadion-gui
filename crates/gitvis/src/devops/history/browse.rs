@@ -43,6 +43,34 @@ pub struct Browse {
     pub content: Option<(String, Option<Result<ContentShow, String>>)>,
     /// Select this file once the tree is loaded.
     pub select_after: Option<String>,
+    /// The flattened rows and what they were made from (tree, search,
+    /// open folders), so a large tree is not walked every frame.
+    rows_cache: Option<(u64, std::rc::Rc<Vec<(usize, usize)>>)>,
+}
+
+impl Browse {
+    fn rows(&mut self) -> std::rc::Rc<Vec<(usize, usize)>> {
+        use std::hash::{Hash, Hasher};
+        let Some(Ok(tree)) = &self.tree else {
+            return Default::default();
+        };
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        tree.sha.hash(&mut h);
+        tree.entries.len().hash(&mut h);
+        self.query.hash(&mut h);
+        let mut open: Vec<&String> = self.expanded.iter().collect();
+        open.sort();
+        open.hash(&mut h);
+        let key = h.finish();
+        if let Some((k, rows)) = &self.rows_cache
+            && *k == key
+        {
+            return rows.clone();
+        }
+        let rows = std::rc::Rc::new(tree.rows(&self.expanded, &self.query));
+        self.rows_cache = Some((key, rows.clone()));
+        rows
+    }
 }
 
 fn load(cx: &mut Ctx, repo: &mut RepoState, rev: String) {
@@ -250,6 +278,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
             bottom: 10,
         })
         .show(ui, |ui| {
+            ui.spacing_mut().interact_size.y = crate::views::form::INPUT_H;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 ui.label(RichText::new("Revision").size(size::SMALL).color(p.text_2));
@@ -297,6 +326,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         });
         return;
     }
+    let rows = b.rows();
     let tree = match &b.tree {
         None => {
             empty(ui, &mut |ui| {
@@ -328,7 +358,6 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         }
         Some(Ok(t)) => t,
     };
-    let rows = tree.rows(&b.expanded, &b.query);
     let selected = b.selected.clone();
     egui::Panel::left("hist_browse_tree")
         .resizable(true)

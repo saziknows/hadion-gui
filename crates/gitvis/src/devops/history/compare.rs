@@ -380,6 +380,7 @@ fn revision_bar(ui: &mut Ui, c: &mut Compare, suggestions: &[String], actions: &
         })
         .show(ui, |ui| {
             let mut submit = false;
+            ui.spacing_mut().interact_size.y = crate::views::form::INPUT_H;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 ui.label(RichText::new("A").size(size::SMALL).color(p.text_2));
@@ -393,7 +394,7 @@ fn revision_bar(ui: &mut Ui, c: &mut Compare, suggestions: &[String], actions: &
                     false,
                 );
                 submit |= widgets::submitted(ui, &ra) || picked_a;
-                if IconButton::icon(Icon::Rerun)
+                if IconButton::text("Swap")
                     .compact()
                     .enabled(!c.worktree)
                     .show(ui)
@@ -887,7 +888,14 @@ fn commit_detail(
     in_graph: &std::collections::HashSet<String>,
     actions: &mut Vec<Action>,
 ) {
-    let Some((side, i)) = sel else {
+    let found = sel.and_then(|(side, i)| {
+        let list = match side {
+            Side::A => &cmp.only_a,
+            Side::B => &cmp.only_b,
+        };
+        list.get(i).map(|c| (side, c))
+    });
+    let Some((side, c)) = found else {
         kit::empty_state(
             ui,
             Icon::Graph,
@@ -897,11 +905,6 @@ fn commit_detail(
         );
         return;
     };
-    let list = match side {
-        Side::A => &cmp.only_a,
-        Side::B => &cmp.only_b,
-    };
-    let Some(c) = list.get(i) else { return };
     let now = format::now_secs();
     crate::views::insights::detail_title(
         ui,

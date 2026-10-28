@@ -154,7 +154,12 @@ fn authors(repo: &mut RepoState) {
 }
 
 pub fn on_snapshot(cx: &mut Ctx, repo: &mut RepoState) {
-    authors(repo);
+    // The author suggestions are only needed while the bar is open.
+    if repo.devops.history.filter.open {
+        authors(repo);
+    } else {
+        repo.devops.history.filter.authors.clear();
+    }
     let f = &repo.devops.history.filter;
     let rerun = f.spec.needs_git()
         && !f.querying
@@ -188,6 +193,9 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         Act::ToggleFilterBar => {
             let f = &mut repo.devops.history.filter;
             f.open = !f.open;
+            if f.open {
+                authors(repo);
+            }
         }
         Act::FilterEdited => recompute(repo),
         Act::FilterApply => {
@@ -223,6 +231,9 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 query(cx, repo);
             }
             recompute(repo);
+            if repo.devops.history.filter.authors.is_empty() {
+                authors(repo);
+            }
             if repo.page != crate::state::Page::Graph {
                 cx.action(Action::ShowPage(crate::state::Page::Graph));
             }
@@ -294,6 +305,7 @@ pub fn filter_bar(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
             ui.set_min_width(ui.available_width());
             let mut edited = false;
             let mut apply = false;
+            ui.spacing_mut().interact_size.y = form::INPUT_H;
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
                 let label = |ui: &mut Ui, t: &str| {

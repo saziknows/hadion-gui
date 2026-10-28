@@ -259,7 +259,14 @@ pub fn commit_panel(ui: &mut Ui, h: &HookCx, c: &Commit, actions: &mut Vec<Actio
             kv.text("Kind", k.label());
         }
         if sig.signer.is_empty() {
-            kv.muted("Signer", "unknown (not checked)");
+            kv.muted(
+                "Signer",
+                if sig.status == Status::Untrusted {
+                    "not identified: no trusted key matches"
+                } else {
+                    "unknown (not checked)"
+                },
+            );
         } else {
             kv.text("Signer", sig.signer.as_str());
         }

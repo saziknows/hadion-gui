@@ -32,6 +32,8 @@ pub struct BlameShow {
     pub oids: Vec<Option<Oid>>,
     pub longest: usize,
     pub language: Option<String>,
+    /// The theme the colours were made for.
+    pub dark: bool,
 }
 
 #[derive(Default)]
@@ -96,6 +98,7 @@ fn run(cx: &mut Ctx, repo: &mut RepoState, rev: String, path: String, line: Opti
                         .min(1500),
                     language: crate::highlight::language_for(&path),
                     spans,
+                    dark,
                     blame,
                 }
             });
@@ -191,6 +194,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
             bottom: 10,
         })
         .show(ui, |ui| {
+            ui.spacing_mut().interact_size.y = crate::views::form::INPUT_H;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 if !v.back.is_empty()
@@ -548,7 +552,12 @@ fn lines(
                 num_font.clone(),
                 p.text_3,
             );
-            let spans = show.spans.get(i).map(Vec::as_slice).unwrap_or(&[]);
+            let spans = show
+                .spans
+                .get(i)
+                .filter(|_| show.dark == dark)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
             let g = widgets::code_galley(&painter, &line.text, spans, &font, p.text, dark);
             painter.galley(
                 pos2(rect.left() + code_x, mid - g.size().y / 2.0),
