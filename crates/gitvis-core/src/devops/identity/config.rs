@@ -904,6 +904,16 @@ pub const COMMON: [Common; 20] = [
 mod tests {
     use super::*;
 
+    /// An absolute path on the platform running the test: `C:/x` on
+    /// Windows, `/x` elsewhere (`C:/x` is relative on Linux).
+    fn abs(p: &str) -> String {
+        if cfg!(windows) {
+            format!("C:{p}")
+        } else {
+            p.to_owned()
+        }
+    }
+
     fn sample() -> Vec<u8> {
         let mut v = Vec::new();
         for (scope, origin, kv) in [
@@ -948,6 +958,8 @@ mod tests {
             ("command", "command line:", "color.ui\nalways"),
             ("local", "file:.git/config", "core.sparse"),
         ] {
+            // git prints absolute origins, so the drive goes off-Windows.
+            let origin = origin.replacen("file:C:", &format!("file:{}", abs("")), 1);
             v.extend_from_slice(scope.as_bytes());
             v.push(0);
             v.extend_from_slice(origin.as_bytes());
@@ -968,7 +980,7 @@ mod tests {
         assert_eq!(e[0].value.as_deref(), Some("true"));
         assert_eq!(
             e[0].file.as_deref(),
-            Some(Path::new("C:/Program Files/Git/etc/gitconfig"))
+            Some(Path::new(&abs("/Program Files/Git/etc/gitconfig")))
         );
         // Relative origins are resolved against where git ran.
         assert_eq!(

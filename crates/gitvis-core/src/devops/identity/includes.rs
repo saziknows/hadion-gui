@@ -813,6 +813,16 @@ mod tests {
     use super::*;
     use crate::devops::identity::config::Origin;
 
+    /// An absolute path on the platform running the test: `C:/x` on
+    /// Windows, `/x` elsewhere (`C:/x` is relative on Linux).
+    fn abs(p: &str) -> String {
+        if cfg!(windows) {
+            format!("C:{p}")
+        } else {
+            p.to_owned()
+        }
+    }
+
     fn entry(scope: Scope, file: &str, key: &str, value: &str) -> Entry {
         Entry {
             scope,
@@ -863,7 +873,7 @@ mod tests {
                 "includeif.onbranch:oss/**.path",
                 "oss.inc",
             ),
-            entry(Scope::Global, g, "include.path", "C:/shared/common.inc"),
+            entry(Scope::Global, g, "include.path", &abs("/shared/common.inc")),
         ];
         let r = rules(&entries, Some(home));
         assert_eq!(r.len(), 3);
@@ -872,7 +882,7 @@ mod tests {
         // Relative to the including file.
         assert_eq!(r[1].target, Path::new("C:/Users/me").join("oss.inc"));
         assert_eq!(r[2].condition, Condition::Always);
-        assert_eq!(r[2].target, PathBuf::from("C:/shared/common.inc"));
+        assert_eq!(r[2].target, PathBuf::from(abs("/shared/common.inc")));
         assert!(!r[0].exists);
         assert!(r[0].warnings().iter().any(|w| w.contains("does not exist")));
     }
