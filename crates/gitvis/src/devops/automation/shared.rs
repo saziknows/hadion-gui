@@ -15,7 +15,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Instant;
 
-use gitvis_core::Oid;
 use gitvis_core::devops::automation::groups::{Batch, RepoResult, RepoStatus};
 use gitvis_core::devops::automation::links::Tracker;
 use gitvis_core::devops::automation::lookup::IssueInfo;
@@ -118,12 +117,7 @@ pub struct ReleaseRt {
 pub struct Shared {
     pub groups: GroupsRt,
     pub release: HashMap<PathBuf, ReleaseRt>,
-    /// Full commit messages for the commit panel (`None` while loading).
-    pub messages: HashMap<(PathBuf, Oid), Option<String>>,
     pub lookups: HashMap<(Tracker, String), Lookup>,
-    /// `(workdir, branch, key)` → the HEAD at which "Add KEY" was used: the
-    /// chip stays hidden until the next commit.
-    pub added: HashMap<(PathBuf, String, String), Option<Oid>>,
     /// Script: the next automation page drawn scrolls to its end.
     pub scroll_end: bool,
 }
@@ -141,6 +135,3 @@ pub fn lock() -> MutexGuard<'static, Shared> {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
 }
-
-/// Cached messages kept at most.
-pub const MAX_MESSAGES: usize = 400;

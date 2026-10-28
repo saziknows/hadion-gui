@@ -357,6 +357,9 @@ pub fn local_branch(ui: &mut Ui, cx: &MenuCtx, b: &BranchInfo, actions: &mut Vec
     }
     separator(ui);
     visibility_items(ui, cx, &b.full, actions);
+    if let Some(h) = cx.hook {
+        crate::devops::history::hook_ref_menu(ui, h, &b.name, actions);
+    }
 }
 
 pub fn remote_branch(ui: &mut Ui, cx: &MenuCtx, rb: &RemoteBranch, actions: &mut Vec<Action>) {
@@ -401,6 +404,9 @@ pub fn remote_branch(ui: &mut Ui, cx: &MenuCtx, rb: &RemoteBranch, actions: &mut
     }
     separator(ui);
     visibility_items(ui, cx, &rb.full, actions);
+    if let Some(h) = cx.hook {
+        crate::devops::history::hook_ref_menu(ui, h, &rb.name, actions);
+    }
 }
 
 pub fn tag(ui: &mut Ui, cx: &MenuCtx, t: &TagInfo, actions: &mut Vec<Action>) {
@@ -457,6 +463,9 @@ pub fn tag(ui: &mut Ui, cx: &MenuCtx, t: &TagInfo, actions: &mut Vec<Action>) {
         actions,
         Action::ToggleHidden(t.full.clone()),
     );
+    if let Some(h) = cx.hook {
+        crate::devops::history::hook_ref_menu(ui, h, &t.name, actions);
+    }
 }
 
 pub fn stash(ui: &mut Ui, s: &StashInfo, actions: &mut Vec<Action>) {

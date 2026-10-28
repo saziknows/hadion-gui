@@ -16,7 +16,7 @@ use gitvis_core::devops::automation::links::{
 use gitvis_core::devops::automation::lookup::{self, IssueInfo, JIRA_TOKEN, LINEAR_KEY};
 use gitvis_core::devops::keychain;
 
-use super::shared::{self, Lookup, MAX_MESSAGES};
+use super::shared::{self, Lookup};
 use super::{Act, Msg, Secret};
 use crate::devops::ctx::Ctx;
 use crate::devops::global::GlobalCx;
@@ -106,42 +106,6 @@ pub fn apply(cx: &mut Ctx, st: &mut LinksUi, g: &mut GlobalCx, act: Act) {
             shared::lock()
                 .lookups
                 .retain(|_, l| !matches!(l, Lookup::Failed(_)));
-        }
-        Act::LoadMessage { dir, oid } => {
-            {
-                let mut s = shared::lock();
-                if s.messages.contains_key(&(dir.clone(), oid)) {
-                    return;
-                }
-                if s.messages.len() > MAX_MESSAGES {
-                    s.messages.clear();
-                }
-                s.messages.insert((dir.clone(), oid), None);
-            }
-            let d = dir.clone();
-            cx.read("Read a commit message for issue keys", move |_wd, log| {
-                let id = oid.to_string();
-                log.command(format!(
-                    "git log -1 --format=%B {id}    (in {})",
-                    d.display()
-                ));
-                let result = gitvis_core::cli::run(&d, &["log", "-1", "--format=%B", &id], None)
-                    .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-                    .map_err(|e| e.to_string());
-                Msg::Message {
-                    dir: d,
-                    oid,
-                    result,
-                }
-            });
-        }
-        Act::KeyAdded {
-            dir,
-            branch,
-            key,
-            head,
-        } => {
-            shared::lock().added.insert((dir, branch, key), head);
         }
         Act::LinksTest(text) => st.try_text = text,
         Act::SetJira { base, keys } => {
@@ -357,11 +321,6 @@ pub fn on_msg(_cx: &mut Ctx, st: &mut LinksUi, _g: &mut GlobalCx, msg: Msg) {
                 );
             }
         }
-        Msg::Message { dir, oid, result } => {
-            shared::lock()
-                .messages
-                .insert((dir, oid), Some(result.unwrap_or_default()));
-        }
         _ => {}
     }
 }
@@ -447,22 +406,11 @@ pub fn hook_commit_panel(ui: &mut Ui, h: &HookCx, c: &Commit, actions: &mut Vec<
     if !prefs.any() {
         return;
     }
-    let key = (h.workdir.to_path_buf(), c.id);
-    let message = shared::lock().messages.get(&key).cloned();
-    let message = match message {
-        Some(Some(m)) => m,
-        Some(None) => c.summary.clone(),
-        None => {
-            actions.push(
-                Act::LoadMessage {
-                    dir: key.0.clone(),
-                    oid: c.id,
-                }
-                .into(),
-            );
-            c.summary.clone()
-        }
-    };
+    // The full message once the panel's details have loaded.
+    let message = h
+        .details
+        .get(&c.id)
+        .map_or_else(|| c.summary.clone(), |d| d.message.clone());
     let branches: Vec<String> = h
         .snap
         .refs
@@ -535,19 +483,12 @@ pub fn hook_wip(ui: &mut Ui, h: &HookCx, actions: &mut Vec<Action>) {
     let Some(branch) = h.snap.head.branch() else {
         return;
     };
-    let head = h.snap.head.target();
-    let dir = h.workdir.to_path_buf();
-    let found: Vec<Link> = {
-        let s = shared::lock();
-        links::find(branch, prefs, Source::Branch)
-            .into_iter()
-            .filter(|l| {
-                s.added
-                    .get(&(dir.clone(), branch.to_owned(), l.key.clone()))
-                    .is_none_or(|at| *at != head)
-            })
-            .collect()
-    };
+    // Keys the message already mentions need no button.
+    let message = h.commit_message.to_ascii_uppercase();
+    let found: Vec<Link> = links::find(branch, prefs, Source::Branch)
+        .into_iter()
+        .filter(|l| !message.contains(&l.key.to_ascii_uppercase()))
+        .collect();
     if found.is_empty() {
         return;
     }
@@ -570,15 +511,6 @@ pub fn hook_wip(ui: &mut Ui, h: &HookCx, actions: &mut Vec<Action>) {
                 .clicked()
             {
                 actions.push(Action::AddToCommitMessage { text, at_start });
-                actions.push(
-                    Act::KeyAdded {
-                        dir: dir.clone(),
-                        branch: branch.to_owned(),
-                        key: l.key.clone(),
-                        head,
-                    }
-                    .into(),
-                );
             }
         }
     });

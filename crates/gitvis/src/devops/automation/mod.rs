@@ -22,12 +22,12 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use gitvis_core::Commit;
 use gitvis_core::devops::automation::groups::{Batch, Group, RepoResult, RepoStatus};
 use gitvis_core::devops::automation::links::{LinkPrefs, Tracker};
 use gitvis_core::devops::automation::lookup::IssueInfo;
 use gitvis_core::devops::automation::notify::RunWatch;
 use gitvis_core::devops::automation::release::Discovered;
-use gitvis_core::{Commit, Oid};
 
 use crate::devops::ctx::Ctx;
 use crate::devops::global::{GlobalCx, GlobalView};
@@ -117,16 +117,6 @@ pub enum Act {
     RemoveSecret(&'static str),
     Lookup(Vec<(Tracker, String)>),
     RetryLookups,
-    LoadMessage {
-        dir: PathBuf,
-        oid: Oid,
-    },
-    KeyAdded {
-        dir: PathBuf,
-        branch: String,
-        key: String,
-        head: Option<Oid>,
-    },
     LinksTest(String),
     /// Script: set up Jira (`base`, project keys).
     SetJira {
@@ -221,11 +211,6 @@ pub enum Msg {
         stored: Result<bool, String>,
     },
     Looked(Vec<(Tracker, String, Result<IssueInfo, String>)>),
-    Message {
-        dir: PathBuf,
-        oid: Oid,
-        result: Result<String, String>,
-    },
     Status(Vec<(PathBuf, Result<RepoStatus, String>)>),
     BatchDone {
         group: String,
@@ -287,14 +272,6 @@ impl Msg {
                     Ok(text)
                 }
             }
-            Msg::Message { result, oid, .. } => match result {
-                Ok(m) => Ok(format!(
-                    "Message of {}: {} lines",
-                    gitvis_core::repo::short_id(*oid),
-                    m.lines().count()
-                )),
-                Err(e) => Err(e.clone()),
-            },
             Msg::Status(v) => {
                 let bad = v.iter().filter(|(_, r)| r.is_err()).count();
                 Ok(format!(
@@ -412,8 +389,6 @@ pub fn apply(cx: &mut Ctx, st: &mut State, g: &mut GlobalCx, act: Act) {
         | Act::RemoveSecret(_)
         | Act::Lookup(_)
         | Act::RetryLookups
-        | Act::LoadMessage { .. }
-        | Act::KeyAdded { .. }
         | Act::LinksTest(_)
         | Act::SetJira { .. }
         | Act::SetLinear { .. }
@@ -435,7 +410,7 @@ pub fn apply(cx: &mut Ctx, st: &mut State, g: &mut GlobalCx, act: Act) {
 pub fn on_msg(cx: &mut Ctx, st: &mut State, g: &mut GlobalCx, msg: Msg) {
     match msg {
         Msg::Polled(_) | Msg::Delivered(_) => notifications::on_msg(cx, &mut st.notify, g, msg),
-        Msg::Secrets { .. } | Msg::SecretSaved { .. } | Msg::Looked(_) | Msg::Message { .. } => {
+        Msg::Secrets { .. } | Msg::SecretSaved { .. } | Msg::Looked(_) => {
             integrations::on_msg(cx, &mut st.links, g, msg)
         }
         Msg::Status(_) | Msg::BatchDone { .. } => groups::on_msg(cx, g, msg),

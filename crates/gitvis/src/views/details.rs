@@ -61,6 +61,8 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
     let Some(snap) = snapshot.as_ref() else {
         return;
     };
+    // A copy: the message box below edits the message itself.
+    let message_now = commit_message.clone();
     let hook = HookCx {
         repo: *repo_id,
         workdir: workdir.as_path(),
@@ -70,6 +72,8 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
         github: github_remote.as_ref(),
         github_data: github.as_ref(),
         busy: busy.is_some(),
+        commit_message: &message_now,
+        details: &*details,
     };
     // Several commits picked in the graph: their own panel.
     if !multi.is_empty() && hooks::multi_selection(ui, &hook, multi, actions) {
@@ -357,7 +361,7 @@ fn commit_panel(
                 ui.horizontal(|ui| {
                     icons::show(ui, Icon::Check, 13.0, p.success);
                     ui.label(RichText::new(format!("{kind} signature present")).color(p.text))
-                        .on_hover_text("The commit object carries a signature. gitvis does not verify it; run `git verify-commit` for that.");
+                        .on_hover_text("The commit object carries a signature; whether it verifies is shown below, under Signature.");
                 });
             }),
             None => kv.muted("Signature", "not signed"),

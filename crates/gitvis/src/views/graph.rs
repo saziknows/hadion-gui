@@ -78,6 +78,8 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
             github: repo.github_remote.as_ref(),
             github_data: repo.github.as_ref(),
             busy: repo.busy.is_some(),
+            commit_message: &repo.commit_message,
+            details: &repo.details,
         };
         let mut cx = RowCtx {
             snap,

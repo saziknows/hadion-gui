@@ -881,7 +881,8 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         "workflow" => vec![page, tab(Tab::Workflows), s(ScriptCmd::Workflow(n()?))],
         "dispatch" => vec![page, tab(Tab::Workflows), s(ScriptCmd::Dispatch(n()?))],
         "select-runs" => vec![page, tab(Tab::Runs), s(ScriptCmd::SelectRuns(n()?))],
-        "compare" => vec![page, s(ScriptCmd::Compare)],
+        // `compare A B` is the history area's.
+        "compare" if arg.trim().is_empty() => vec![page, s(ScriptCmd::Compare)],
         "compare-plan" => vec![page, s(ScriptCmd::ComparePlan)],
         "analyse-jobs" | "analyze-jobs" => vec![page, s(ScriptCmd::AnalyseJobs)],
         "validate" => vec![page, tab(Tab::Validate), Act::Validate.into()],

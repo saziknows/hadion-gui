@@ -21,6 +21,7 @@
 // Fields the areas read as they are filled in; removed at integration.
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use egui::Ui;
@@ -43,6 +44,10 @@ pub struct HookCx<'a> {
     pub github_data: Option<&'a GitHubData>,
     /// An operation is running in this repository.
     pub busy: bool,
+    /// The commit message being written in the WIP panel.
+    pub commit_message: &'a str,
+    /// Commit details loaded so far (the selected commit's, at least).
+    pub details: &'a HashMap<gitvis_core::Oid, gitvis_core::CommitDetails>,
 }
 
 impl<'a> HookCx<'a> {
@@ -58,6 +63,8 @@ impl<'a> HookCx<'a> {
             github: repo.github_remote.as_ref(),
             github_data: repo.github.as_ref(),
             busy: repo.busy.is_some(),
+            commit_message: &repo.commit_message,
+            details: &repo.details,
         })
     }
 }

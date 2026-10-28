@@ -738,10 +738,8 @@ pub fn hook_multi_selection(
     picks::panel(ui, h, picked, actions)
 }
 
-/// Items for a branch or tag context menu (`name` as shown). Not called
-/// yet: `views/menus.rs` has no hook in those menus (see the integration
-/// notes); the commit menu offers the same comparisons meanwhile.
-#[allow(dead_code)]
+/// Items for a branch or tag context menu (`name` as shown), at the end of
+/// the graph's and the sidebar's ref menus.
 pub fn hook_ref_menu(ui: &mut egui::Ui, h: &HookCx, name: &str, actions: &mut Vec<Action>) {
     use crate::views::menus;
     menus::separator(ui);

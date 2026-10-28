@@ -2627,7 +2627,18 @@ impl GitVis {
         let has_remote =
             repo.is_some_and(|r| r.github_remote.is_some() || r.forge_remote.is_some());
         let has_repo = !self.repos.is_empty();
+        let palette = devops::palette::is_open(&self.globals.palette);
         ctx.input_mut(|i| {
+            if i.consume_key(Modifiers::COMMAND, Key::K)
+                || i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::P)
+            {
+                actions.push(Action::TogglePalette);
+            }
+            // The palette has the keyboard: nothing acts behind it (Ctrl+Z
+            // would undo a git operation while typing).
+            if palette {
+                return;
+            }
             if i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::O) {
                 actions.push(Action::CloneDialog);
             }
@@ -2673,11 +2684,6 @@ impl GitVis {
             }
             if i.consume_key(Modifiers::COMMAND, Key::O) {
                 actions.push(Action::PickRepo);
-            }
-            if i.consume_key(Modifiers::COMMAND, Key::K)
-                || i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::P)
-            {
-                actions.push(Action::TogglePalette);
             }
             if i.consume_key(Modifiers::COMMAND, Key::Backtick) {
                 actions.push(Action::ToggleTerminal);
@@ -3747,7 +3753,9 @@ impl GitVis {
                 self.apply(ctx, Action::ShowPage(Page::Review));
                 self.apply(ctx, devops::review::Act::OpenPr(number).into());
             }
-            Action::DevOps(a) if has_repo => self.devops_apply(ctx, i, a),
+            // App-wide areas (palette, terminal, settings) also work on the
+            // welcome screen; `devops_ctx` then has no repository.
+            Action::DevOps(a) if has_repo || a.is_global() => self.devops_apply(ctx, i, a),
             Action::TogglePalette => devops::palette::toggle(&mut self.globals.palette),
             Action::AddToCommitMessage { text, at_start } if has_repo => {
                 let m = &mut self.repos[i].commit_message;
