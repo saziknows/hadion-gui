@@ -2622,6 +2622,8 @@ impl GitVis {
         let file_open = repo.is_some_and(|r| r.file.is_some());
         let page = repo.map(|r| r.page).unwrap_or_default();
         let on_github = page != Page::Graph;
+        // The conflict editor replaces the graph and owns the arrow keys.
+        let conflict_open = repo.is_some_and(devops::conflict::is_open);
         let has_remote =
             repo.is_some_and(|r| r.github_remote.is_some() || r.forge_remote.is_some());
         let has_repo = !self.repos.is_empty();
@@ -2703,10 +2705,13 @@ impl GitVis {
                 actions.push(Action::Undo);
             }
             if has_repo && !text_focused && !has_dialog {
-                if !on_github && i.consume_key(Modifiers::NONE, Key::ArrowDown) {
+                // egui matches NONE even with Alt held; Alt+↑/↓ belong to the
+                // conflict editor.
+                let arrows = !on_github && !conflict_open && !i.modifiers.alt;
+                if arrows && i.consume_key(Modifiers::NONE, Key::ArrowDown) {
                     actions.push(Action::MoveSelection(1));
                 }
-                if !on_github && i.consume_key(Modifiers::NONE, Key::ArrowUp) {
+                if arrows && i.consume_key(Modifiers::NONE, Key::ArrowUp) {
                     actions.push(Action::MoveSelection(-1));
                 }
                 if file_open && i.consume_key(Modifiers::NONE, Key::Escape) {
