@@ -1,0 +1,70 @@
+# On a version tag (v0.2.0, v0.3.0-rc.1): build the release on Windows,
+# package it with scripts/package.ps1 and attach the zip (plus the
+# installer when Inno Setup is on the runner) and SHA256SUMS to the GitHub
+# release, creating the release when the tag has none yet. This is the
+# contract the in-app updater reads: gitvis-<version>-windows-x86_64.zip
+# and SHA256SUMS on a release tagged v<version>.
+#
+# Actions are pinned to full commit SHAs (verified against the tags on
+# 2026-10-27 with `gh api repos/<action>/git/ref/tags/<tag>`).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Build and upload (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      # Create the release and upload its assets; nothing else.
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      GITVIS_BUILD_COMMIT: ${{ github.sha }}
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Cache cargo registry
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: release-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: The tag matches the version in Cargo.toml
+        shell: pwsh
+        run: |
+          $m = [regex]::Match((Get-Content Cargo.toml -Raw), '(?ms)^\[workspace\.package\][^\[]*?^version\s*=\s*"([^"]+)"')
+          if (-not $m.Success) { throw 'No version in Cargo.toml' }
+          if ("v$($m.Groups[1].Value)" -ne $env:TAG) {
+            throw "Tag $env:TAG does not match Cargo.toml version $($m.Groups[1].Value)"
+          }
+      - name: Build and package
+        shell: pwsh
+        run: ./scripts/package.ps1 -Profile release
+      - name: Upload to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $files = @(Get-ChildItem dist -File | Where-Object { $_.Name -like 'gitvis-*.zip' -or $_.Name -like 'gitvis-*-setup.exe' -or $_.Name -eq 'SHA256SUMS' } | ForEach-Object { $_.FullName })
+          if ($files.Count -lt 2) { throw "Nothing to upload: $($files -join ', ')" }
+          gh release view $env:TAG --json tagName *> $null
+          if ($LASTEXITCODE -ne 0) {
+            $pre = @()
+            if ($env:TAG -match '-') { $pre = @('--prerelease') }
+            gh release create $env:TAG --verify-tag --generate-notes --title "gitvis $env:TAG" @pre
+            if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
+          }
+          gh release upload $env:TAG @files --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed' }
+          Get-Content dist/SHA256SUMS
