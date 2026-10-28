@@ -6,11 +6,11 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
+use gitvis_core::RefKind;
 use gitvis_core::devops::palette::sources::{
     self as core, CommitEntry, IssueEntry, PrEntry, RefEntry, RepoEntry, RunEntry, TaskEntry,
 };
 use gitvis_core::devops::palette::{Item, Scope};
-use gitvis_core::RefKind;
 use gitvis_core::github::Outcome;
 
 use super::commands::{self, Catalog};
@@ -117,12 +117,14 @@ fn stamp(s: Src, cx: &Cx, files: &HashMap<RepoId, FileList>, catalog: u64) -> u6
     (s as u8, repo.map(|r| r.id)).hash(&mut h);
     match s {
         Src::Commands => catalog.hash(&mut h),
-        Src::Tasks => repo
-            .map(|r| r.devops.workbench.tasks.at)
-            .hash(&mut h),
+        Src::Tasks => repo.map(|r| r.devops.workbench.tasks.at).hash(&mut h),
         Src::Repos => {
             for r in cx.repos {
-                (&r.workdir, r.snapshot.as_ref().and_then(|s| s.head.branch())).hash(&mut h);
+                (
+                    &r.workdir,
+                    r.snapshot.as_ref().and_then(|s| s.head.branch()),
+                )
+                    .hash(&mut h);
             }
             cx.active.hash(&mut h);
             cx.settings.recent.hash(&mut h);

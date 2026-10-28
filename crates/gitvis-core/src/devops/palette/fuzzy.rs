@@ -622,7 +622,10 @@ mod tests {
         assert_eq!(idx("sr", "search_results"), vec![0, 7]);
         assert_eq!(idx("gp", "git push"), vec![0, 4]);
         // Two tokens: union of both alignments, sorted.
-        assert_eq!(idx("push orig", "Push to origin"), vec![0, 1, 2, 3, 8, 9, 10, 11]);
+        assert_eq!(
+            idx("push orig", "Push to origin"),
+            vec![0, 1, 2, 3, 8, 9, 10, 11]
+        );
         // Indices are character indices, not bytes.
         assert_eq!(idx("é", "café"), vec![3]);
         assert_eq!(idx("ü", "ÜBER"), vec![0]);
@@ -644,7 +647,10 @@ mod tests {
         };
         assert!(ok("palette", "Command palette: fuzzy matcher"));
         assert!(ok("palette", "xpalettex"));
-        assert!(!ok("palette", "Govern page: alerts, SBOM, images, protection"));
+        assert!(!ok(
+            "palette",
+            "Govern page: alerts, SBOM, images, protection"
+        ));
         assert!(ok("push", "Unpushed commits"));
         assert!(!ok("push", "Exposure › Supply chain"));
         assert!(ok("fh", "file history"));

@@ -350,7 +350,10 @@ pub fn catalog(cx: &Cx) -> Catalog {
                 )
                 .hint(t.hint())
                 .kw("tab tools workbench")
-                .run(vec![show(Page::Workbench), workbench::Act::SetTab(t).into()]),
+                .run(vec![
+                    show(Page::Workbench),
+                    workbench::Act::SetTab(t).into(),
+                ]),
             );
         }
         for s in SECTIONS {
@@ -565,7 +568,10 @@ pub fn catalog(cx: &Cx) -> Catalog {
         if has_remotes && let Some(b) = current {
             let behind = match b.behind {
                 0 => String::new(),
-                n => format!(" · {n} behind {}", b.upstream.as_deref().unwrap_or("upstream")),
+                n => format!(
+                    " · {n} behind {}",
+                    b.upstream.as_deref().unwrap_or("upstream")
+                ),
             };
             for pp in [PullPref::Merge, PullPref::FastForwardOnly, PullPref::Rebase] {
                 let default = pp == s.pull;
@@ -575,17 +581,22 @@ pub fn catalog(cx: &Cx) -> Catalog {
                     PullPref::Rebase => "git:pull-rebase",
                 };
                 c.push(
-                    Command::new(if default { "git:pull" } else { id }, pp.label(), GIT, Icon::Pull)
-                        .hint(&format!(
-                            "{}{behind}",
-                            if default {
-                                "The default pull"
-                            } else {
-                                "Once, without changing the default"
-                            }
-                        ))
-                        .kw("update download merge rebase")
-                        .run(vec![Action::Run(GitOp::Pull { mode: pp.mode() })]),
+                    Command::new(
+                        if default { "git:pull" } else { id },
+                        pp.label(),
+                        GIT,
+                        Icon::Pull,
+                    )
+                    .hint(&format!(
+                        "{}{behind}",
+                        if default {
+                            "The default pull"
+                        } else {
+                            "Once, without changing the default"
+                        }
+                    ))
+                    .kw("update download merge rebase")
+                    .run(vec![Action::Run(GitOp::Pull { mode: pp.mode() })]),
                 );
             }
         }
@@ -641,7 +652,10 @@ pub fn catalog(cx: &Cx) -> Catalog {
                 Command::new("git:wip", "Show the uncommitted changes", GIT, Icon::Edit)
                     .hint("Select the working tree in the graph")
                     .kw("wip working tree status commit")
-                    .run(vec![show(Page::Graph), Action::Select(crate::state::Selection::Wip)]),
+                    .run(vec![
+                        show(Page::Graph),
+                        Action::Select(crate::state::Selection::Wip),
+                    ]),
             );
         }
         if let Some(st) = snap.stashes.first() {
@@ -738,10 +752,15 @@ pub fn catalog(cx: &Cx) -> Catalog {
         );
         if cx.head_branch().is_some() {
             c.push(
-                Command::new("review:new-pr", "New pull request…", "Review", Icon::PullRequest)
-                    .hint("From the current branch")
-                    .kw("create open pr")
-                    .run(vec![show(Page::Review), review::Act::NewPr.into()]),
+                Command::new(
+                    "review:new-pr",
+                    "New pull request…",
+                    "Review",
+                    Icon::PullRequest,
+                )
+                .hint("From the current branch")
+                .kw("create open pr")
+                .run(vec![show(Page::Review), review::Act::NewPr.into()]),
             );
         }
         c.push(
@@ -751,26 +770,39 @@ pub fn catalog(cx: &Cx) -> Catalog {
                 .run(vec![show(Page::Review), review::Act::NewIssue.into()]),
         );
         c.push(
-            Command::new("review:refresh", "Refresh the pull requests", "Review", Icon::Rerun)
-                .hint("Read the pull request list again")
-                .kw("reload prs")
-                .run(vec![show(Page::Review), review::Act::Refresh.into()]),
+            Command::new(
+                "review:refresh",
+                "Refresh the pull requests",
+                "Review",
+                Icon::Rerun,
+            )
+            .hint("Read the pull request list again")
+            .kw("reload prs")
+            .run(vec![show(Page::Review), review::Act::Refresh.into()]),
         );
         c.push(
             Command::new("ci:dispatch", "Run a workflow…", "Actions", Icon::Play)
                 .hint("Pick a workflow with a manual trigger and its inputs")
                 .kw("dispatch trigger workflow_dispatch start")
-                .run(vec![show(Page::GitHub), ci::Act::SetTab(ci::Tab::Workflows).into()]),
-        );
-        c.push(
-            Command::new("ci:validate", "Validate the workflow files", "Actions", Icon::Check)
-                .hint("Lint .github/workflows locally: syntax, pinning, permissions")
-                .kw("lint check yaml")
                 .run(vec![
                     show(Page::GitHub),
-                    ci::Act::SetTab(ci::Tab::Validate).into(),
-                    ci::Act::Validate.into(),
+                    ci::Act::SetTab(ci::Tab::Workflows).into(),
                 ]),
+        );
+        c.push(
+            Command::new(
+                "ci:validate",
+                "Validate the workflow files",
+                "Actions",
+                Icon::Check,
+            )
+            .hint("Lint .github/workflows locally: syntax, pinning, permissions")
+            .kw("lint check yaml")
+            .run(vec![
+                show(Page::GitHub),
+                ci::Act::SetTab(ci::Tab::Validate).into(),
+                ci::Act::Validate.into(),
+            ]),
         );
         c.push(
             Command::new("ship:new-release", "New release…", "Ship", Icon::Rocket)
@@ -806,10 +838,15 @@ pub fn catalog(cx: &Cx) -> Catalog {
         let mut find = tools(workbench::Tab::Tasks);
         find.push(workbench::Act::DiscoverTasks.into());
         c.push(
-            Command::new("tools:find-tasks", "Find the tasks again", "Tools", Icon::Rerun)
-                .hint("Read package.json, Makefile, Cargo.toml and the others again")
-                .kw("discover rescan")
-                .run(find),
+            Command::new(
+                "tools:find-tasks",
+                "Find the tasks again",
+                "Tools",
+                Icon::Rerun,
+            )
+            .hint("Read package.json, Makefile, Cargo.toml and the others again")
+            .kw("discover rescan")
+            .run(find),
         );
         c.push(
             Command::new("tools:bisect", "Start bisect…", "Tools", Icon::Bug)
@@ -824,10 +861,18 @@ pub fn catalog(cx: &Cx) -> Catalog {
                 .run(tools(workbench::Tab::Rebase)),
         );
         c.push(
-            Command::new("exposure:scan", "Scan for secrets", "Exposure", Icon::Shield)
-                .hint("The working tree, staged changes and HEAD")
-                .kw("security credentials keys leaks")
-                .run(vec![show(Page::Security), Action::ScanSecrets { history: false }]),
+            Command::new(
+                "exposure:scan",
+                "Scan for secrets",
+                "Exposure",
+                Icon::Shield,
+            )
+            .hint("The working tree, staged changes and HEAD")
+            .kw("security credentials keys leaks")
+            .run(vec![
+                show(Page::Security),
+                Action::ScanSecrets { history: false },
+            ]),
         );
         c.push(
             Command::new(
@@ -838,13 +883,21 @@ pub fn catalog(cx: &Cx) -> Catalog {
             )
             .hint("Also every commit of the history depth set on the Exposure page")
             .kw("security credentials keys leaks commits")
-            .run(vec![show(Page::Security), Action::ScanSecrets { history: true }]),
+            .run(vec![
+                show(Page::Security),
+                Action::ScanSecrets { history: true },
+            ]),
         );
         c.push(
-            Command::new("insights:run", "Run the insights analysis", "Insights", Icon::Chart)
-                .hint("Hotspots, ownership, branches, releases and debt from the history")
-                .kw("analyse analyze statistics")
-                .run(vec![show(Page::Insights), Action::RunInsights]),
+            Command::new(
+                "insights:run",
+                "Run the insights analysis",
+                "Insights",
+                Icon::Chart,
+            )
+            .hint("Hotspots, ownership, branches, releases and debt from the history")
+            .kw("analyse analyze statistics")
+            .run(vec![show(Page::Insights), Action::RunInsights]),
         );
         c.push(
             Command::new(
@@ -944,7 +997,10 @@ mod tests {
         assert!(ids.contains(&"app:theme"));
         assert!(ids.contains(&"app:open"));
         assert!(ids.contains(&"app:clone"));
-        assert!(!ids.iter().any(|i| i.starts_with("page:") || i.starts_with("git:")));
+        assert!(
+            !ids.iter()
+                .any(|i| i.starts_with("page:") || i.starts_with("git:"))
+        );
         // Unique ids, everything runs something.
         let mut seen = std::collections::HashSet::new();
         for cmd in &c.cmds {
@@ -966,7 +1022,10 @@ mod tests {
             active: 0,
         };
         let c = catalog(&cx);
-        assert_eq!(c.get("app:theme").unwrap().entry.title, "Switch to the light theme");
+        assert_eq!(
+            c.get("app:theme").unwrap().entry.title,
+            "Switch to the light theme"
+        );
         assert!(c.get("app:safe-on").is_some());
         assert!(c.get("app:safe-off").is_none());
         // No remote: no Review or Actions page, no GitHub actions.
@@ -985,7 +1044,10 @@ mod tests {
         assert_ne!(stamp(&cx), before);
         let c = catalog(&cx);
         assert!(c.get("app:safe-off").is_some());
-        assert_eq!(c.get("app:theme").unwrap().entry.title, "Switch to the dark theme");
+        assert_eq!(
+            c.get("app:theme").unwrap().entry.title,
+            "Switch to the dark theme"
+        );
     }
 
     #[test]

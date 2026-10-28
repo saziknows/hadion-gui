@@ -79,14 +79,7 @@ pub fn entity(key: &str) -> &str {
 }
 
 /// Record a use at `now`.
-pub fn record(
-    uses: &mut Vec<Use>,
-    key: &str,
-    repo: &str,
-    title: &str,
-    subtitle: &str,
-    now: i64,
-) {
+pub fn record(uses: &mut Vec<Use>, key: &str, repo: &str, title: &str, subtitle: &str, now: i64) {
     match uses.iter_mut().find(|u| u.key == key && u.repo == repo) {
         Some(u) => {
             u.score = u.value(now) + 1.0;
@@ -236,7 +229,10 @@ mod tests {
         assert_eq!(uses.len(), MAX_USES);
         assert!(uses.iter().any(|u| u.key == "cmd:keep"));
         // The newest is always kept.
-        assert!(uses.iter().any(|u| u.key == format!("cmd:{}", MAX_USES + 9)));
+        assert!(
+            uses.iter()
+                .any(|u| u.key == format!("cmd:{}", MAX_USES + 9))
+        );
     }
 
     #[test]

@@ -238,11 +238,7 @@ pub fn issue_items(issues: &[IssueEntry]) -> Vec<Item> {
                 sub.push_str(&format!(" · {}", x.labels.join(", ")));
             }
             let mut item = Item::new(Target::Issue(x.number), x.title.clone(), sub)
-                .badge(if x.open {
-                    "Open issue"
-                } else {
-                    "Closed issue"
-                })
+                .badge(if x.open { "Open issue" } else { "Closed issue" })
                 .keywords(&format!("{} {}", x.author, x.labels.join(" ")))
                 .exact(&x.number.to_string(), 1);
             item.order = i as u32;

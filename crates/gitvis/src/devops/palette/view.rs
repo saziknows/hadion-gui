@@ -189,7 +189,8 @@ fn input_row(ui: &mut Ui, st: &mut State) {
                 st.focus = false;
             }
             if st.caret_end {
-                let mut state = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
+                let mut state =
+                    egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
                 let end = CCursor::new(st.query.chars().count());
                 state.cursor.set_char_range(Some(CCursorRange::one(end)));
                 state.store(ui.ctx(), id);
@@ -226,7 +227,8 @@ fn drill_chip(ui: &mut Ui, d: &Drill) {
     );
     let ty = rect.center().y - text.size().y / 2.0;
     let tw = text.size().x;
-    ui.painter().galley(pos2(rect.left() + 26.0, ty), text, p.text_strong);
+    ui.painter()
+        .galley(pos2(rect.left() + 26.0, ty), text, p.text_strong);
     ui.painter().text(
         pos2(rect.left() + 32.0 + tw, rect.center().y),
         Align2::LEFT_CENTER,
@@ -542,11 +544,15 @@ fn status(st: &State, cx: &Cx) -> Option<Status> {
             }
         }
         Scope::Prs => gh_state("pull requests").or_else(|| {
-            let issues = r.devops.review.issues.lists.values().any(|f| f.data.is_some());
+            let issues = r
+                .devops
+                .review
+                .issues
+                .lists
+                .values()
+                .any(|f| f.data.is_some());
             (!issues).then(|| {
-                Status::Note(
-                    "Issues are listed here once the Review page has shown them.".into(),
-                )
+                Status::Note("Issues are listed here once the Review page has shown them.".into())
             })
         }),
         Scope::Runs => gh_state("workflow runs").or_else(|| {
@@ -764,9 +770,11 @@ fn list(ui: &mut Ui, st: &mut State, cx: &Cx, explained: bool, actions: &mut Vec
 
 fn header(ui: &Ui, rect: Rect, text: &str) {
     let p = *pal(ui);
-    let g = ui
-        .painter()
-        .layout_no_wrap(text.to_uppercase(), FontId::new(size::CAPTION, medium()), p.text_3);
+    let g = ui.painter().layout_no_wrap(
+        text.to_uppercase(),
+        FontId::new(size::CAPTION, medium()),
+        p.text_3,
+    );
     ui.painter().galley(
         pos2(rect.left() + 14.0, rect.bottom() - 9.0 - g.size().y),
         g,
@@ -792,14 +800,17 @@ fn entry_row(
     let (icon, icon_color) = match (mode, e.verb) {
         (Mode::Actions, Some(v)) => (verb_icon(v), p.text_2),
         _ => match (&e.item.target, catalog) {
-            (Target::Command(id), c) => (
-                c.get(id).map(|c| c.icon).unwrap_or(Icon::Play),
-                p.text_2,
-            ),
+            (Target::Command(id), c) => (c.get(id).map(|c| c.icon).unwrap_or(Icon::Play), p.text_2),
             _ => kind_icon(&p, &e.item),
         },
     };
-    icons::paint(painter, icon, pos2(rect.left() + 22.0, cy), 15.0, icon_color);
+    icons::paint(
+        painter,
+        icon,
+        pos2(rect.left() + 22.0, cy),
+        15.0,
+        icon_color,
+    );
     let left = rect.left() + 40.0;
     // Right side: a shortcut, or a badge.
     let mut right = rect.right() - 12.0;
@@ -813,7 +824,8 @@ fn entry_row(
             // In a narrowed search every row is the same kind: only
             // badges that say more than the kind are drawn.
             let tone = badge_tone(&e.item);
-            right = kit::paint_badge(painter, &p, dark, right, cy, e.item.badge_text(), tone) - 10.0;
+            right =
+                kit::paint_badge(painter, &p, dark, right, cy, e.item.badge_text(), tone) - 10.0;
         }
     }
     let avail = (right - left).max(40.0);
@@ -880,7 +892,11 @@ fn entry_row(
             p.accent,
             sub_room,
         ));
-        painter.galley(pos2(left + tw + 12.0, cy - sg.size().y / 2.0 + 0.5), sg, p.text_2);
+        painter.galley(
+            pos2(left + tw + 12.0, cy - sg.size().y / 2.0 + 0.5),
+            sg,
+            p.text_2,
+        );
     }
 }
 
@@ -937,7 +953,11 @@ fn highlighted(
 
 /// A keyboard shortcut drawn like a key; returns its left edge.
 fn paint_kbd(painter: &egui::Painter, p: &Palette, right: f32, cy: f32, text: &str) -> f32 {
-    let g = painter.layout_no_wrap(text.to_owned(), FontId::new(size::CAPTION, medium()), p.text_2);
+    let g = painter.layout_no_wrap(
+        text.to_owned(),
+        FontId::new(size::CAPTION, medium()),
+        p.text_2,
+    );
     let w = g.size().x + 12.0;
     let rect = Rect::from_min_size(pos2(right - w, cy - 10.0), vec2(w, 20.0));
     painter.rect(
@@ -1021,10 +1041,7 @@ fn footer(ui: &mut Ui, st: &State, cx: &Cx) {
     let w = ui.available_width();
     let entry = st.results.entry(st.selected);
     let catalog = &st.cache.catalog;
-    let default = entry.and_then(|e| {
-        e.verb
-            .or_else(|| verbs::default_verb(&e.item, cx, catalog))
-    });
+    let default = entry.and_then(|e| e.verb.or_else(|| verbs::default_verb(&e.item, cx, catalog)));
     let more = entry.is_some_and(|e| {
         st.drill.is_none()
             && !matches!(e.item.target, Target::Prefix(_))

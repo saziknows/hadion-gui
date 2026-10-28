@@ -166,9 +166,10 @@ impl Ranker {
             }
             self.last = None;
         } else {
-            let reuse = self.last.as_ref().is_some_and(|l| {
-                l.scope == scope && l.stamps == stamps && query.narrows(&l.query)
-            });
+            let reuse = self
+                .last
+                .as_ref()
+                .is_some_and(|l| l.scope == scope && l.stamps == stamps && query.narrows(&l.query));
             let mut try_item = |s: u16, i: u32, item: &Item, m: &mut Matcher| {
                 if let Some((text, good)) = score_item(m, query, item) {
                     matched.push((s, i));
@@ -279,7 +280,12 @@ mod tests {
         let res = r.rank(&src, Scope::All, &Query::new("push"), &HashMap::new(), 10);
         assert_eq!(
             titles(&res, &src),
-            ["Push", "Push to origin", "Stash and push", "Unpushed commits"]
+            [
+                "Push",
+                "Push to origin",
+                "Stash and push",
+                "Unpushed commits"
+            ]
         );
         assert_eq!(res.matched, 4);
         assert_eq!(res.searched, 5);
@@ -322,7 +328,13 @@ mod tests {
         let mut r = Ranker::new();
         let res = r.rank(&src, Scope::Refs, &Query::new("main"), &HashMap::new(), 10);
         assert_eq!(titles(&res, &src), ["main", "origin/main"]);
-        let res = r.rank(&src, Scope::Commands, &Query::new("main"), &HashMap::new(), 10);
+        let res = r.rank(
+            &src,
+            Scope::Commands,
+            &Query::new("main"),
+            &HashMap::new(),
+            10,
+        );
         assert_eq!(titles(&res, &src), ["Main menu"]);
         let res = r.rank(&src, Scope::All, &Query::new("main"), &HashMap::new(), 10);
         assert_eq!(res.matched, 3);
@@ -348,13 +360,31 @@ mod tests {
         ]);
         let src = [(commits.as_slice(), 1)];
         let mut r = Ranker::new();
-        let res = r.rank(&src, Scope::Commits, &Query::new("deadb"), &HashMap::new(), 10);
+        let res = r.rank(
+            &src,
+            Scope::Commits,
+            &Query::new("deadb"),
+            &HashMap::new(),
+            10,
+        );
         assert_eq!(titles(&res, &src)[0], "Unrelated change");
         // Three characters are not a SHA prefix: only the summary matches.
-        let res = r.rank(&src, Scope::Commits, &Query::new("dea"), &HashMap::new(), 10);
+        let res = r.rank(
+            &src,
+            Scope::Commits,
+            &Query::new("dea"),
+            &HashMap::new(),
+            10,
+        );
         assert_eq!(titles(&res, &src)[0], "Add deadline handling");
         // Authors are keywords.
-        let res = r.rank(&src, Scope::Commits, &Query::new("grace"), &HashMap::new(), 10);
+        let res = r.rank(
+            &src,
+            Scope::Commits,
+            &Query::new("grace"),
+            &HashMap::new(),
+            10,
+        );
         assert_eq!(titles(&res, &src), ["Unrelated change"]);
         let mut m = Matcher::new();
         // Keyword matches are not highlighted in the title.
@@ -387,7 +417,13 @@ mod tests {
         ];
         let src = [(items.as_slice(), 1)];
         let mut r = Ranker::new();
-        let res = r.rank(&src, Scope::All, &Query::new("palette"), &HashMap::new(), 10);
+        let res = r.rank(
+            &src,
+            Scope::All,
+            &Query::new("palette"),
+            &HashMap::new(),
+            10,
+        );
         assert_eq!(titles(&res, &src), ["Command palette"]);
         assert_eq!(res.matched, 1);
         // "pa" alone is a fine match for the second; "pal" is not, but the
@@ -431,13 +467,31 @@ mod tests {
             assert_eq!(a.matched, b.matched);
         }
         // A changed source is searched in full again.
-        let a = inc.rank(&src, Scope::Files, &Query::new("d3 file 123"), &HashMap::new(), 50);
+        let a = inc.rank(
+            &src,
+            Scope::Files,
+            &Query::new("d3 file 123"),
+            &HashMap::new(),
+            50,
+        );
         assert!(a.narrowed);
         let src2 = [(items.as_slice(), 8)];
-        let a = inc.rank(&src2, Scope::Files, &Query::new("d3 file 1234"), &HashMap::new(), 50);
+        let a = inc.rank(
+            &src2,
+            Scope::Files,
+            &Query::new("d3 file 1234"),
+            &HashMap::new(),
+            50,
+        );
         assert!(!a.narrowed);
         // So is another scope.
-        let a = inc.rank(&src2, Scope::All, &Query::new("d3 file 12345"), &HashMap::new(), 50);
+        let a = inc.rank(
+            &src2,
+            Scope::All,
+            &Query::new("d3 file 12345"),
+            &HashMap::new(),
+            50,
+        );
         assert!(!a.narrowed);
     }
 
@@ -446,14 +500,26 @@ mod tests {
         let items = vec![cmd("a", "Crash fix"), cmd("b", "Fix crash")];
         let src = [(items.as_slice(), 1)];
         let mut r = Ranker::new();
-        let res = r.rank(&src, Scope::All, &Query::new("fix crash"), &HashMap::new(), 10);
+        let res = r.rank(
+            &src,
+            Scope::All,
+            &Query::new("fix crash"),
+            &HashMap::new(),
+            10,
+        );
         assert_eq!(titles(&res, &src), ["Fix crash", "Crash fix"]);
         let files = sources::file_items(&[
             "android/res/menu/wallet_search.xml".into(),
             "components/brave_rewards/core/wallet/wallet.h".into(),
         ]);
         let src = [(files.as_slice(), 1)];
-        let res = r.rank(&src, Scope::Files, &Query::new("wallet"), &HashMap::new(), 10);
+        let res = r.rank(
+            &src,
+            Scope::Files,
+            &Query::new("wallet"),
+            &HashMap::new(),
+            10,
+        );
         assert_eq!(
             titles(&res, &src)[0],
             "components/brave_rewards/core/wallet/wallet.h"
@@ -501,7 +567,15 @@ mod tests {
         };
         let mut pick = || words[(next() % words.len() as u64) as usize];
         let paths: Vec<String> = (0..50_000)
-            .map(|i| format!("crates/{}/src/{}/{}_{}_{i}.rs", pick(), pick(), pick(), pick()))
+            .map(|i| {
+                format!(
+                    "crates/{}/src/{}/{}_{}_{i}.rs",
+                    pick(),
+                    pick(),
+                    pick(),
+                    pick()
+                )
+            })
             .collect();
         let commits: Vec<CommitEntry> = (0..50_000)
             .map(|i| CommitEntry {
@@ -525,7 +599,11 @@ mod tests {
         let values = HashMap::new();
         for (label, src, scope) in [
             ("files", vec![(files.as_slice(), 1u64)], Scope::Files),
-            ("commits", vec![(commit_items.as_slice(), 1u64)], Scope::Commits),
+            (
+                "commits",
+                vec![(commit_items.as_slice(), 1u64)],
+                Scope::Commits,
+            ),
             (
                 "everything (100,000)",
                 vec![(files.as_slice(), 1u64), (commit_items.as_slice(), 1u64)],

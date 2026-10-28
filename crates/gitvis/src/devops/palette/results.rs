@@ -104,7 +104,11 @@ impl Results {
         let i = i.min(n - 1);
         (i..n)
             .find(|&j| matches!(self.rows[j], Row::Entry(_)))
-            .or_else(|| (0..i).rev().find(|&j| matches!(self.rows[j], Row::Entry(_))))
+            .or_else(|| {
+                (0..i)
+                    .rev()
+                    .find(|&j| matches!(self.rows[j], Row::Entry(_)))
+            })
             .unwrap_or(0)
     }
 
@@ -116,7 +120,10 @@ impl Results {
         if entries.is_empty() {
             return 0;
         }
-        let pos = entries.iter().position(|&j| j >= from).unwrap_or(entries.len() - 1) as i64;
+        let pos = entries
+            .iter()
+            .position(|&j| j >= from)
+            .unwrap_or(entries.len() - 1) as i64;
         let to = (pos + delta).clamp(0, entries.len() as i64 - 1) as usize;
         entries[to]
     }
@@ -187,9 +194,7 @@ pub fn refresh(st: &mut State, cx: &Cx) {
             .iter()
             .map(|s| (st.cache.items(*s), st.cache.stamp(*s)))
             .collect();
-        let r = st
-            .ranker
-            .rank(&sources, scope, &out.query, &values, LIMIT);
+        let r = st.ranker.rank(&sources, scope, &out.query, &values, LIMIT);
         out.matched = r.matched;
         out.searched = r.searched;
         out.micros = r.micros;
@@ -545,8 +550,8 @@ mod tests {
             repos: &repos,
             active: 0,
         };
-        let item = gitvis_core::devops::palette::sources::file_items(&["src/a.rs".into()])
-            .remove(0);
+        let item =
+            gitvis_core::devops::palette::sources::file_items(&["src/a.rs".into()]).remove(0);
         let mut st = state_with("");
         st.drill = Some(super::super::Drill {
             item,
@@ -561,16 +566,14 @@ mod tests {
             .collect();
         assert_eq!(
             verbs,
-            [
-                Verb::History,
-                Verb::OpenFile,
-                Verb::CopyPath,
-                Verb::Forget
-            ]
+            [Verb::History, Verb::OpenFile, Verb::CopyPath, Verb::Forget]
         );
         st.query = "copy".into();
         refresh(&mut st, &cx);
-        assert_eq!(st.results.entry(0).and_then(|e| e.verb), Some(Verb::CopyPath));
+        assert_eq!(
+            st.results.entry(0).and_then(|e| e.verb),
+            Some(Verb::CopyPath)
+        );
     }
 
     #[test]

@@ -412,7 +412,10 @@ pub fn actions(verb: Verb, item: &Item, cx: &Cx, catalog: &Catalog) -> Vec<Actio
         (Target::Pr(n), Verb::CheckoutPr) => vec![review::Act::Checkout(*n).into()],
         (Target::Run(id), Verb::OpenRun) => vec![
             Action::ShowPage(Page::GitHub),
-            Action::OpenRun { run: *id, job: None },
+            Action::OpenRun {
+                run: *id,
+                job: None,
+            },
         ],
         (t @ (Target::Pr(_) | Target::Issue(_) | Target::Run(_)), Verb::OpenBrowser) => {
             match web_url(t, cx) {
@@ -480,9 +483,40 @@ pub fn same_path(a: &Path, b: &Path) -> bool {
 /// the palette shows it in its folder instead.
 pub fn runs_when_opened(path: &str) -> bool {
     const RUNS: [&str; 34] = [
-        "exe", "com", "bat", "cmd", "ps1", "psm1", "psd1", "vbs", "vbe", "js", "jse", "wsf", "wsh",
-        "msi", "msp", "msc", "scr", "lnk", "reg", "cpl", "hta", "jar", "py", "pyw", "pl", "rb",
-        "sh", "bash", "appref-ms", "application", "gadget", "inf", "scf", "url",
+        "exe",
+        "com",
+        "bat",
+        "cmd",
+        "ps1",
+        "psm1",
+        "psd1",
+        "vbs",
+        "vbe",
+        "js",
+        "jse",
+        "wsf",
+        "wsh",
+        "msi",
+        "msp",
+        "msc",
+        "scr",
+        "lnk",
+        "reg",
+        "cpl",
+        "hta",
+        "jar",
+        "py",
+        "pyw",
+        "pl",
+        "rb",
+        "sh",
+        "bash",
+        "appref-ms",
+        "application",
+        "gadget",
+        "inf",
+        "scf",
+        "url",
     ];
     let ext = PathBuf::from(path)
         .extension()
@@ -547,7 +581,9 @@ mod tests {
                 workbench::Act::FileHistory(p)
             )) if p == "src/a.rs"
         ));
-        assert!(matches!(&actions(Verb::CopyPath, &file, &c, &catalog)[..], [Action::Copy(p)] if p == "src/a.rs"));
+        assert!(
+            matches!(&actions(Verb::CopyPath, &file, &c, &catalog)[..], [Action::Copy(p)] if p == "src/a.rs")
+        );
     }
 
     #[test]
@@ -583,7 +619,10 @@ mod tests {
             web_url(&Target::Run(9), &c).as_deref(),
             Some("https://github.com/o/r/actions/runs/9")
         );
-        assert!(matches!(&actions(Verb::OpenReview, &pr, &c, &catalog)[..], [Action::OpenPr(5)]));
+        assert!(matches!(
+            &actions(Verb::OpenReview, &pr, &c, &catalog)[..],
+            [Action::OpenPr(5)]
+        ));
         // Checking out asks first (through the review area).
         assert!(Verb::CheckoutPr.asks_first(&pr));
     }
@@ -611,9 +650,14 @@ mod tests {
             },
         ]);
         assert_eq!(verbs(&items[0], &c, &catalog)[0], Verb::Switch);
-        assert!(matches!(&actions(Verb::Switch, &items[0], &c, &catalog)[..], [Action::Activate(0)]));
+        assert!(matches!(
+            &actions(Verb::Switch, &items[0], &c, &catalog)[..],
+            [Action::Activate(0)]
+        ));
         assert_eq!(verbs(&items[1], &c, &catalog)[0], Verb::OpenRepo);
-        assert!(matches!(&actions(Verb::OpenRepo, &items[1], &c, &catalog)[..], [Action::OpenRepo(p)] if p == Path::new("C:/b")));
+        assert!(
+            matches!(&actions(Verb::OpenRepo, &items[1], &c, &catalog)[..], [Action::OpenRepo(p)] if p == Path::new("C:/b"))
+        );
     }
 
     #[test]
