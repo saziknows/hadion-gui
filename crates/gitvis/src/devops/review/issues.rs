@@ -122,7 +122,13 @@ fn issue_list(ui: &mut Ui, st: &mut State, now: i64, actions: &mut Vec<Action>) 
                 .size(size::SMALL)
                 .color(pal(ui).text_2),
         );
-        if form::select(ui, "rv_issue_label", &mut label, &options, 220.0) {
+        if form::select(
+            ui,
+            "rv_issue_label",
+            &mut label,
+            &options,
+            ui.available_width().min(220.0),
+        ) {
             actions.push(Act::SetIssueLabel(label.clone()).into());
         }
     });

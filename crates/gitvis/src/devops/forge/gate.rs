@@ -115,9 +115,6 @@ pub fn show(
                         _ => {}
                     }
                     kit::section(ui, "How to fix it", None);
-                    if matches!(state, ToolState::Missing) {
-                        kit::secondary(ui, tool.install_hint());
-                    }
                     kit::secondary(ui, "Run these in a terminal, then check again:");
                     let cmds = ftools::fix_commands(remote, state).join("\n");
                     kit::code_block(ui, &cmds, actions);
@@ -161,10 +158,10 @@ pub fn show(
                     });
                     if remote.kind == ForgeKind::GitLab {
                         ui.add_space(space::S);
-                        kit::muted(
+                        kit::secondary(
                             ui,
                             &format!(
-                                "Public data comes from https://{}/api/v4 without a token: read only, rate limited, and job logs come from the web page of each job. It works only when the project and its pipelines are public.",
+                                "Without signing in, gitvis can read a public project through https://{}/api/v4: read only and rate limited, with job logs taken from each job's web page.",
                                 remote.host
                             ),
                         );
@@ -174,16 +171,56 @@ pub fn show(
     false
 }
 
-/// The line under a page title: who is signed in, or the public mode.
-pub fn mode_line(remote: &ForgeRemote, st: &State) -> (String, Option<(String, Tone)>) {
+/// A slim strip under the page header while public mode is on: what it
+/// means and the way out. (In the header it crowded the title on a narrow
+/// window.)
+pub fn public_strip(ui: &mut Ui, remote: &ForgeRemote, st: &State, actions: &mut Vec<Action>) {
+    if !st.public {
+        return;
+    }
+    let p = *pal(ui);
+    egui::Frame::NONE
+        .fill(
+            p.warning
+                .gamma_multiply(if ui.visuals().dark_mode { 0.10 } else { 0.08 }),
+        )
+        .inner_margin(egui::Margin::symmetric(24, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                icons::show(ui, Icon::Eye, 14.0, p.warning);
+                ui.label(
+                    RichText::new("Public, read only")
+                        .size(size::SMALL)
+                        .family(semibold())
+                        .color(p.text_strong),
+                );
+                ui.label(
+                    RichText::new(format!(
+                        "Reading {} without signing in; changes are off.",
+                        remote.host
+                    ))
+                    .size(size::SMALL)
+                    .color(p.text),
+                );
+                if IconButton::text("Leave public mode")
+                    .compact()
+                    .show(ui)
+                    .clicked()
+                {
+                    actions.push(Act::UsePublic(false).into());
+                }
+            });
+        });
+    kit::hairline(ui);
+}
+
+/// The part of the line under a page title that says who is signed in
+/// (empty in public mode, which [`public_strip`] explains).
+pub fn mode_line(st: &State) -> String {
     if st.public {
-        return (
-            format!("curl https://{}/api/v4/…", remote.host),
-            Some((
-                "Public, read-only, unauthenticated".to_owned(),
-                Tone::Warning,
-            )),
-        );
+        return String::new();
     }
     match &st.tool {
         Some(ToolState::Ready { version, user, via }) => {
@@ -192,8 +229,8 @@ pub fn mode_line(remote: &ForgeRemote, st: &State) -> (String, Option<(String, T
             } else {
                 format!("{user} via {via}")
             };
-            (format!("{who}  ·  {version}"), None)
+            format!("{who}, {version}")
         }
-        _ => (String::new(), None),
+        _ => String::new(),
     }
 }

@@ -260,7 +260,7 @@ fn overview(
     kit::title(ui, "Artifacts");
     kit::secondary(
         ui,
-        "Files uploaded by workflow runs with actions/upload-artifact. They count against the repository's Actions storage until they expire; delete large or stale ones, or download one to look at it.",
+        "Files workflow runs uploaded with actions/upload-artifact. They count against the repository's Actions storage until they expire.",
     );
     let size: u64 = items
         .iter()

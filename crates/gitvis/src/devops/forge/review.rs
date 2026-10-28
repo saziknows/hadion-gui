@@ -223,7 +223,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
 
 fn header(ui: &mut Ui, remote: &ForgeRemote, st: &State, title: &str, actions: &mut Vec<Action>) {
     let now = format::now_secs();
-    let (mode, badge) = gate::mode_line(remote, st);
+    let mode = gate::mode_line(st);
     let mut sub = vec![format!("{} on {}", remote.path, remote.host)];
     if let Some(v) = &st.reviews.data {
         sub.push(format!("{} open", v.len()));
@@ -237,7 +237,10 @@ fn header(ui: &mut Ui, remote: &ForgeRemote, st: &State, title: &str, actions: &
         sub.push(mode);
     }
     let can_write = st.can_write();
-    kit::page_header(ui, title, &sub.join("  ·  "), |ui| {
+    // "New …", the web link and Refresh, with their gaps.
+    let controls_w = 330.0;
+    let (subtitle, _) = crate::views::github::fit_subtitle(ui, title, &sub, controls_w);
+    kit::page_header(ui, title, &subtitle, |ui| {
         if IconButton::new(Icon::Plus, &format!("New {}", remote.kind.review_noun()))
             .primary(true)
             .enabled(can_write)
@@ -267,18 +270,8 @@ fn header(ui: &mut Ui, remote: &ForgeRemote, st: &State, title: &str, actions: &
         } else if IconButton::new(Icon::Fetch, "Refresh").show(ui).clicked() {
             actions.push(Act::RefreshReviews.into());
         }
-        if let Some((text, tone)) = &badge {
-            ui.add_space(6.0);
-            kit::badge(ui, text, *tone);
-            if IconButton::text("Leave public mode")
-                .compact()
-                .show(ui)
-                .clicked()
-            {
-                actions.push(Act::UsePublic(false).into());
-            }
-        }
     });
+    gate::public_strip(ui, remote, st, actions);
 }
 
 fn empty(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
@@ -317,12 +310,15 @@ pub(super) fn detail_pane(
         });
 }
 
+/// The list pane on the left; at most 45% of the page, so the detail keeps
+/// room on a narrow window.
 pub(super) fn list_frame(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
     let p = *pal(ui);
+    let w = ui.available_width();
     egui::Panel::left(id)
         .resizable(true)
-        .default_size(440.0)
-        .size_range(300.0..=760.0)
+        .default_size((w * 0.38).clamp(300.0, 440.0))
+        .size_range(300.0..=(w * 0.45).clamp(300.0, 760.0))
         .frame(Frame::NONE.fill(p.panel).inner_margin(Margin {
             left: 8,
             right: 8,
@@ -486,7 +482,8 @@ fn detail_view(
                 Tone::Neutral,
             );
         }
-        if let Some((t, tone)) = merge_badge(cr) {
+        // A draft's merge status is "Draft" too: one badge is enough.
+        if let Some((t, tone)) = merge_badge(cr).filter(|b| !(cr.draft && b.0 == "Draft")) {
             kit::badge(ui, &t, tone);
         }
         for (t, tone) in vote_badges(cr) {
@@ -524,23 +521,22 @@ fn detail_view(
             actions.push(Act::RefreshReview(cr.number).into());
         }
         if let Some(at) = d.at {
-            kit::muted(ui, &format!("loaded {}", format::relative(at, now)));
+            ui.label(
+                RichText::new(format!("loaded {}", format::relative(at, now)))
+                    .size(size::SMALL)
+                    .color(p.text_3),
+            );
         }
     });
     kit::section(ui, "Facts", None);
     kit::kv(ui, 130.0, |kv| {
-        kv.text(
-            "Author",
-            match cr.created {
-                Some(t) => format!(
-                    "{}  ·  opened {} ({})",
-                    cr.author.display(),
-                    format::relative(t, now),
-                    format::absolute(t)
-                ),
-                None => cr.author.display(),
-            },
-        );
+        kv.text("Author", cr.author.display());
+        if let Some(t) = cr.created {
+            kv.text(
+                "Opened",
+                format!("{} ({})", format::relative(t, now), format::absolute(t)),
+            );
+        }
         kv.text("Branches", format!("{}  →  {}", cr.source, cr.target));
         if !cr.sha.is_empty() {
             kv.text(

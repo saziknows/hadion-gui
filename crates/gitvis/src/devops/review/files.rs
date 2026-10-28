@@ -50,10 +50,13 @@ pub fn show(
     let State { prs, viewed, .. } = &mut repo.devops.review;
     let v = prs.entry(n).or_default();
 
+    // A third of the detail at most by default, half when dragged: on a
+    // narrow window the diff beside it was squeezed to a sliver.
+    let w = ui.available_width();
     egui::Panel::left("rv_files")
         .resizable(true)
-        .default_size(300.0)
-        .size_range(220.0..=560.0)
+        .default_size((w * 0.32).clamp(180.0, 300.0))
+        .size_range(170.0..=(w * 0.5).clamp(170.0, 560.0))
         .frame(Frame::NONE.fill(p.panel).inner_margin(Margin {
             left: 8,
             right: 8,
@@ -329,35 +332,13 @@ fn review_bar(
         .inner_margin(Margin::symmetric(16, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                ui.label(
-                    RichText::new(if head.is_empty() {
-                        "Review".to_owned()
-                    } else {
-                        format!("Reviewing {}", &head[..head.len().min(7)])
-                    })
-                    .size(size::BODY)
-                    .family(medium())
-                    .color(p.text_strong),
-                );
-                if v.pending.is_empty() {
-                    ui.label(
-                        RichText::new("Select a line, or drag over lines, to comment")
-                            .size(size::SMALL)
-                            .color(p.text_2),
-                    );
-                } else {
-                    kit::badge(ui, &format!("{} pending", v.pending.len()), Tone::Warning);
-                }
-                if total > 0 {
-                    ui.label(
-                        RichText::new(format!("{seen} of {total} files viewed"))
-                            .size(size::SMALL)
-                            .color(p.text_3),
-                    );
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // The button first (right to left), then the text in what is
+            // left, cut rather than drawn under the button.
+            ui.allocate_ui_with_layout(
+                vec2(ui.available_width(), 30.0),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
                     if !v.review_open {
                         let label = if v.pending.is_empty() {
                             "Review changes".to_owned()
@@ -368,8 +349,48 @@ fn review_bar(
                             v.review_open = true;
                         }
                     }
-                });
-            });
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        ui.label(
+                            RichText::new(if head.is_empty() {
+                                "Review".to_owned()
+                            } else {
+                                format!("Reviewing {}", &head[..head.len().min(7)])
+                            })
+                            .size(size::BODY)
+                            .family(medium())
+                            .color(p.text_strong),
+                        );
+                        if !v.pending.is_empty() {
+                            kit::badge(ui, &format!("{} pending", v.pending.len()), Tone::Warning);
+                        }
+                        let viewed_text = format!("{seen} of {total} files viewed");
+                        let viewed_w = ui
+                            .painter()
+                            .layout_no_wrap(
+                                viewed_text.clone(),
+                                egui::FontId::proportional(size::SMALL),
+                                p.text_3,
+                            )
+                            .size()
+                            .x;
+                        // Only when it fits: it is also in the file list.
+                        if total > 0 && ui.available_width() > viewed_w + 8.0 {
+                            ui.label(RichText::new(viewed_text).size(size::SMALL).color(p.text_3));
+                        }
+                        if v.pending.is_empty() {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new("Select a line, or drag over lines, to comment")
+                                        .size(size::SMALL)
+                                        .color(p.text_2),
+                                )
+                                .truncate(),
+                            );
+                        }
+                    });
+                },
+            );
             if v.review_open {
                 ui.add_space(space::S);
                 form::card(ui, Tone::Neutral, |ui| {
@@ -488,11 +509,14 @@ fn file_header(
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
                         let (dir, name) = format::split_path(&f.path);
-                        ui.label(
-                            RichText::new(name)
-                                .size(size::TITLE)
-                                .family(semibold())
-                                .color(p.text_strong),
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(name)
+                                    .size(size::TITLE)
+                                    .family(semibold())
+                                    .color(p.text_strong),
+                            )
+                            .truncate(),
                         );
                         if !dir.is_empty() {
                             ui.add(

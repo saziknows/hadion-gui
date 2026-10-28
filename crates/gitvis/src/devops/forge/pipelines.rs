@@ -230,7 +230,7 @@ fn pipeline_running(st: &State, id: u64) -> bool {
 
 fn header(ui: &mut Ui, remote: &ForgeRemote, st: &State, actions: &mut Vec<Action>) {
     let now = format::now_secs();
-    let (mode, badge) = gate::mode_line(remote, st);
+    let mode = gate::mode_line(st);
     let mut sub = vec![format!("{} on {}", remote.path, remote.host)];
     if let Some(v) = &st.pipelines.data {
         sub.push(format::plural(v.len(), "pipeline", "pipelines"));
@@ -244,7 +244,10 @@ fn header(ui: &mut Ui, remote: &ForgeRemote, st: &State, actions: &mut Vec<Actio
         sub.push(mode);
     }
     let can_write = st.can_write();
-    kit::page_header(ui, "Pipelines", &sub.join("  ·  "), |ui| {
+    // "Run pipeline", the web link and Refresh, with their gaps.
+    let controls_w = 300.0;
+    let (subtitle, _) = crate::views::github::fit_subtitle(ui, "Pipelines", &sub, controls_w);
+    kit::page_header(ui, "Pipelines", &subtitle, |ui| {
         if IconButton::new(Icon::Play, "Run pipeline")
             .primary(true)
             .enabled(can_write)
@@ -271,18 +274,8 @@ fn header(ui: &mut Ui, remote: &ForgeRemote, st: &State, actions: &mut Vec<Actio
         } else if IconButton::new(Icon::Fetch, "Refresh").show(ui).clicked() {
             actions.push(Act::RefreshPipelines.into());
         }
-        if let Some((text, tone)) = &badge {
-            ui.add_space(6.0);
-            kit::badge(ui, text, *tone);
-            if IconButton::text("Leave public mode")
-                .compact()
-                .show(ui)
-                .clicked()
-            {
-                actions.push(Act::UsePublic(false).into());
-            }
-        }
     });
+    gate::public_strip(ui, remote, st, actions);
 }
 
 fn list_pane(
@@ -436,14 +429,29 @@ fn pipeline_header(
         format!("{} #{}", pl.name, pl.number)
     };
     kit::title(ui, &title);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
+    // Wrapped, with a long branch name cut: in a plain row a long name ran
+    // off the pane, widened everything under it and squeezed the caption
+    // after it into a tall one-letter-per-line column.
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(6.0, 4.0);
         kit::badge(ui, &pl.status, tone(pl.outcome));
-        kit::badge(ui, &pl.reference, Tone::Neutral);
+        let reference: String = if pl.reference.chars().count() > 48 {
+            pl.reference.chars().take(47).chain(['…']).collect()
+        } else {
+            pl.reference.clone()
+        };
+        let r = kit::badge(ui, &reference, Tone::Neutral);
+        if reference != pl.reference {
+            r.on_hover_text(&pl.reference);
+        }
         if loading {
             ui.add(egui::Spinner::new().size(12.0));
         } else if let Some(at) = at {
-            kit::muted(ui, &format!("loaded {}", format::relative(at, now)));
+            ui.label(
+                RichText::new(format!("loaded {}", format::relative(at, now)))
+                    .size(size::SMALL)
+                    .color(pal(ui).text_3),
+            );
         }
     });
     kit::kv(ui, 130.0, |kv| {

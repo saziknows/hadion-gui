@@ -163,11 +163,16 @@ pub struct State {
     pub marking_all: bool,
     pub fetch: Option<FetchRun>,
     pub fetched: Option<FetchDone>,
+    /// The overview's "Where this comes from" starts open (script
+    /// `home-sources`; a click toggles it either way).
+    pub sources_open: bool,
 }
 
 #[derive(Clone, Debug)]
 pub enum Act {
     SetTab(Tab),
+    /// Script: open the overview's "Where this comes from".
+    OpenSources,
     Refresh,
     /// Switch to a repository's history.
     Activate(usize),
@@ -487,6 +492,7 @@ pub fn apply(cx: &mut Ctx, state: &mut State, repos: &[RepoState], act: Act) {
                 fetch_inbox(cx, state);
             }
         }
+        Act::OpenSources => state.sources_open = true,
         Act::Refresh => fetch_inbox(cx, state),
         Act::Activate(i) => open_target(cx, state, repos, Target::Repo(i)),
         Act::FetchAll => {
@@ -831,6 +837,12 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         "inbox-group" => vec![Act::SetGroup(!matches!(arg.trim(), "off" | "no" | "0")).into()],
         "fetch-all" => vec![home, Act::FetchAll.into()],
         "fetch-all-in" => vec![home, Act::FetchAllIn(PathBuf::from(arg.trim())).into()],
+        // The overview with "Where this comes from" unfolded.
+        "home-sources" => vec![
+            home,
+            Act::SetTab(Tab::Overview).into(),
+            Act::OpenSources.into(),
+        ],
         _ => return None,
     })
 }

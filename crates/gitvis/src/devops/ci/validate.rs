@@ -206,7 +206,35 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
             });
             kit::secondary(
                 ui,
-                "Built-in rules over .github/workflows: YAML syntax, triggers, jobs and steps, needs, expressions, deprecated actions and commands, pull_request_target checkouts, permissions, timeouts, pinning, dispatch inputs, cron and matrix keys. actionlint's findings are added when it is installed.",
+                "Checks the files in .github/workflows with built-in rules, and with actionlint when it is installed.",
+            );
+            crate::views::github::details_section(
+                ui,
+                "ci_lint_rules",
+                "What is checked",
+                false,
+                |ui| {
+                    kit::kv(ui, 110.0, |kv| {
+                        kv.text(
+                            "Structure",
+                            "YAML syntax, triggers, jobs and steps, needs, matrix keys",
+                        );
+                        kv.text(
+                            "Expressions",
+                            "${{ }} expressions and the contexts they use",
+                        );
+                        kv.text(
+                            "Security",
+                            "pull_request_target checkouts, permissions, actions pinned to a SHA",
+                        );
+                        kv.text(
+                            "Upkeep",
+                            "deprecated actions and commands, missing timeouts",
+                        );
+                        kv.text("Inputs", "workflow_dispatch inputs, cron schedules");
+                        kv.text("actionlint", "its findings are added when it is installed");
+                    });
+                },
             );
             let Some(run) = load.ok() else {
                 widgets::loaded(
@@ -260,10 +288,20 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
             );
             widgets::note(
                 ui,
-                &format!(
-                    "{} linted, {} from the cache (unchanged modification time and size), {} ms",
-                    run.linted, run.reused, run.elapsed_ms
-                ),
+                &if run.reused > 0 {
+                    format!(
+                        "{} checked now, {} unchanged since the last check; {} ms",
+                        format::plural(run.linted, "file", "files"),
+                        run.reused,
+                        run.elapsed_ms
+                    )
+                } else {
+                    format!(
+                        "{} checked in {} ms",
+                        format::plural(run.linted, "file", "files"),
+                        run.elapsed_ms
+                    )
+                },
             );
             if let (Some(Ok(n)), v) = (&run.actionlint, &run.actionlint_version) {
                 widgets::note(
@@ -277,8 +315,9 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
             }
             // Filters.
             ui.add_space(space::S);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
+            // Wrapped: on a narrow window the filter went off the right edge.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
                 for (s, label) in [
                     (None, "All"),
                     (Some(Severity::Error), "Errors"),
@@ -290,7 +329,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                 }
                 ui.add_space(8.0);
                 ui.allocate_ui_with_layout(
-                    vec2(260.0, 30.0),
+                    vec2(ui.available_width().clamp(160.0, 260.0), 30.0),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
                         kit::search_box(ui, "ci_lint_filter", lint_filter, "Filter rules or text");

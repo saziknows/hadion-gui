@@ -327,6 +327,52 @@ fn page_head(
     });
 }
 
+/// A section whose body is folded away until its header is clicked: the
+/// header looks like `kit::section`'s caption, with a chevron. For the
+/// depth behind a page ("Where this comes from", "What is checked"), so
+/// the page leads with what matters. `open` is the state before the first
+/// click (a script can ask for it open).
+pub(crate) fn details_section(
+    ui: &mut Ui,
+    id_salt: impl Hash + std::fmt::Debug,
+    title: &str,
+    open: bool,
+    add: impl FnOnce(&mut Ui),
+) {
+    let p = *pal(ui);
+    let id = ui.make_persistent_id(("details_section", id_salt));
+    let mut is_open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(open);
+    ui.add_space(space::XL);
+    let font = FontId::new(size::CAPTION, medium());
+    let g = ui
+        .painter()
+        .layout_no_wrap(title.to_uppercase(), font, p.text_3);
+    let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 26.0, 20.0), Sense::click());
+    let c = if resp.hovered() { p.text } else { p.text_3 };
+    chevron(
+        ui.painter(),
+        pos2(rect.left() + 6.0, rect.center().y),
+        is_open,
+        c,
+    );
+    ui.painter().galley(
+        pos2(rect.left() + 18.0, rect.center().y - g.size().y / 2.0),
+        g,
+        c,
+    );
+    if resp
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+    {
+        is_open = !is_open;
+    }
+    ui.data_mut(|d| d.insert_temp(id, is_open));
+    ui.add_space(space::S - 2.0);
+    if is_open {
+        add(ui);
+    }
+}
+
 /// A page header's subtitle that fits beside `controls_w` points of
 /// controls on the right (`kit::page_header` puts them side by side, and
 /// they overlapped on a narrow window). Parts are dropped from the end;
@@ -906,23 +952,53 @@ fn run_menu(
     }
 }
 
+/// Narrower than this, a title moves above its buttons.
+const TITLE_MIN_W: f32 = 260.0;
+
 /// Title with the outcome icon on the left and `buttons` on the right.
+/// When the buttons would leave the title less than [`TITLE_MIN_W`] (a
+/// failed run's five buttons on a narrow window left it one letter per
+/// line), the buttons go under the title instead. Their width is taken
+/// from the previous frame.
 fn title_row(
     ui: &mut Ui,
+    id_salt: impl Hash + std::fmt::Debug,
     title: &str,
     icon: impl FnOnce(&mut Ui, Rect),
     buttons: impl FnOnce(&mut Ui),
 ) {
-    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        buttons(ui);
-        ui.add_space(space::M);
+    let id = egui::Id::unique(("title_row_buttons", id_salt));
+    let buttons_w: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
+    let heading = |ui: &mut Ui, icon: Box<dyn FnOnce(&mut Ui, Rect) + '_>| {
         ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
             let (r, _) = ui.allocate_exact_size(vec2(20.0, 22.0), Sense::hover());
             icon(ui, r);
             kit::title(ui, title);
         });
+    };
+    if ui.available_width() - buttons_w - space::M < TITLE_MIN_W {
+        heading(ui, Box::new(icon));
+        // Under the title, right-aligned, in the same order as beside it.
+        let w = ui
+            .allocate_ui_with_layout(
+                vec2(ui.available_width(), 28.0),
+                Layout::right_to_left(Align::Center),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    ui.scope(|ui| buttons(ui)).response.rect.width()
+                },
+            )
+            .inner;
+        ui.data_mut(|d| d.insert_temp(id, w));
+        return;
+    }
+    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let w = ui.scope(|ui| buttons(ui)).response.rect.width();
+        ui.data_mut(|d| d.insert_temp(id, w));
+        ui.add_space(space::M);
+        heading(ui, Box::new(icon));
     });
 }
 
@@ -939,6 +1015,7 @@ fn run_header(
     let busy = ci.busy_runs.get(&run.id);
     title_row(
         ui,
+        ("gh_run_title", run.id),
         run_title(run),
         |ui, r| outcome_dot(ui.painter(), outcome, r.center(), 8.0, cx.t),
         |ui| {
@@ -1446,7 +1523,9 @@ fn job_row(ui: &Ui, cx: &Cx, job: &Job, rect: Rect, right: f32, expanded: bool, 
     if !job.labels.is_empty() {
         meta.push(job.labels.join(", "));
     }
-    if let Some(r) = &job.runner {
+    // GitHub names its hosted runners "GitHub Actions 1002946877": noise.
+    // A self-hosted runner's name says where the job ran.
+    if let Some(r) = job.runner.as_ref().filter(|r| !is_hosted_runner_name(r)) {
         meta.push(r.clone());
     }
     if job.attempt > 1 {
@@ -1464,6 +1543,12 @@ fn job_row(ui: &Ui, cx: &Cx, job: &Job, rect: Rect, right: f32, expanded: bool, 
         );
         painter.galley(pos2(mx, mid - g.size().y / 2.0), g, p.text_2);
     }
+}
+
+/// `GitHub Actions 1002946877`: the name GitHub gives each hosted runner.
+fn is_hosted_runner_name(name: &str) -> bool {
+    name.strip_prefix("GitHub Actions ")
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// A step's outcome dot. A step that has not started yet gets a quiet grey
@@ -1763,8 +1848,11 @@ fn log_viewer(
     };
 
     // Toolbar. The controls on the right are laid out first; the job's
-    // name and numbers get what is left and are cut, never overlapped.
+    // name and numbers get what is left and are cut, never overlapped. On a
+    // narrow panel (the log tools leave the name a few letters) the name
+    // gets a row of its own above the controls.
     let log_tools = panel == Panel::Log;
+    let own_row = log_tools && ui.available_width() < 680.0;
     Frame::NONE
         .inner_margin(Margin {
             left: 16,
@@ -1773,6 +1861,13 @@ fn log_viewer(
             bottom: 6,
         })
         .show(ui, |ui| {
+            if own_row {
+                ui.allocate_ui_with_layout(
+                    vec2(ui.available_width(), 24.0),
+                    Layout::left_to_right(Align::Center),
+                    |ui| log_title(ui, &job_name, doc_stats, !filter.trim().is_empty()),
+                );
+            }
             ui.allocate_ui_with_layout(
                 vec2(ui.available_width(), 28.0),
                 Layout::right_to_left(Align::Center),
@@ -1863,7 +1958,8 @@ fn log_viewer(
                             }
                         }
                         ui.add_space(4.0);
-                        let w = (ui.available_width() - 160.0).clamp(110.0, 240.0);
+                        let reserve = if own_row { 0.0 } else { 160.0 };
+                        let w = (ui.available_width() - reserve).clamp(110.0, 240.0);
                         ui.allocate_ui_with_layout(
                             vec2(w, 26.0),
                             Layout::left_to_right(Align::Center),
@@ -1879,10 +1975,12 @@ fn log_viewer(
                             },
                         );
                     }
-                    ui.add_space(space::M);
-                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                        log_title(ui, &job_name, doc_stats, !filter.trim().is_empty());
-                    });
+                    if !own_row {
+                        ui.add_space(space::M);
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            log_title(ui, &job_name, doc_stats, !filter.trim().is_empty());
+                        });
+                    }
                 },
             );
         });
@@ -2248,21 +2346,17 @@ fn log_note(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
 }
 
 /// The left of the log toolbar: the job's name, then the log's size and
-/// error / warning counts when there is room for them (the name is cut
-/// first, the numbers dropped only when even a short name would not fit).
+/// error / warning counts.
 fn log_title(
     ui: &mut Ui,
     job_name: &str,
     stats: Option<(usize, usize, usize, usize, usize)>,
     filtering: bool,
 ) {
-    let p = *pal(ui);
-    ui.spacing_mut().item_spacing.x = 8.0;
-    icons::show(ui, Icon::List, 14.0, p.text_2);
-    let mut parts: Vec<(String, Tone)> = Vec::new();
-    let mut size_text = String::new();
+    let mut badges: Vec<(String, Tone)> = Vec::new();
+    let mut facts = String::new();
     if let Some((lines, errors, warnings, bytes, matched)) = stats {
-        size_text = if filtering {
+        facts = if filtering {
             format!(
                 "{} of {} lines",
                 format::count(matched),
@@ -2272,22 +2366,33 @@ fn log_title(
             format!("{} lines, {}", format::count(lines), format::bytes(bytes))
         };
         if errors > 0 {
-            parts.push((format::plural(errors, "error", "errors"), Tone::Danger));
+            badges.push((format::plural(errors, "error", "errors"), Tone::Danger));
         }
         if warnings > 0 {
-            parts.push((
+            badges.push((
                 format::plural(warnings, "warning", "warnings"),
                 Tone::Warning,
             ));
         }
     }
+    toolbar_title(ui, job_name, &facts, &badges);
+}
+
+/// The left of a log toolbar whose controls were laid out first (right to
+/// left): a list icon, `name`, then `facts` and `badges` when there is room
+/// for them. The name is cut first; the facts are dropped only when even a
+/// short name would not fit, so nothing overlaps the controls.
+pub(crate) fn toolbar_title(ui: &mut Ui, name: &str, facts: &str, badges: &[(String, Tone)]) {
+    let p = *pal(ui);
+    ui.spacing_mut().item_spacing.x = 8.0;
+    icons::show(ui, Icon::List, 14.0, p.text_2);
     let painter = ui.painter().clone();
-    let size_w = if size_text.is_empty() {
+    let facts_w = if facts.is_empty() {
         0.0
     } else {
         painter
             .layout_no_wrap(
-                size_text.clone(),
+                facts.to_owned(),
                 FontId::proportional(size::SMALL),
                 p.text_3,
             )
@@ -2295,14 +2400,14 @@ fn log_title(
             .x
             + 8.0
     };
-    let badges_w: f32 = parts
+    let badges_w: f32 = badges
         .iter()
         .map(|(t, _)| kit::badge_width(&painter, t) + 8.0)
         .sum();
     let avail = ui.available_width();
-    let show_stats = avail - size_w - badges_w >= 120.0;
-    let name_w = if show_stats {
-        avail - size_w - badges_w
+    let show_facts = avail - facts_w - badges_w >= 120.0;
+    let name_w = if show_facts {
+        avail - facts_w - badges_w
     } else {
         avail
     };
@@ -2310,7 +2415,7 @@ fn log_title(
         ui.set_max_width(name_w.max(40.0));
         ui.add(
             Label::new(
-                RichText::new(job_name)
+                RichText::new(name)
                     .size(size::BODY)
                     .family(semibold())
                     .color(p.text_strong),
@@ -2318,11 +2423,11 @@ fn log_title(
             .truncate(),
         );
     });
-    if show_stats {
-        if !size_text.is_empty() {
-            ui.label(caption(&p, size_text));
+    if show_facts {
+        if !facts.is_empty() {
+            ui.label(caption(&p, facts));
         }
-        for (t, tone) in &parts {
+        for (t, tone) in badges {
             kit::badge(ui, t, *tone);
         }
     }

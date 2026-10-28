@@ -21,6 +21,21 @@ pub const ROW3_H: f32 = 74.0;
 /// Longest body shown before "open on GitHub for the rest".
 const MAX_BODY: usize = 12_000;
 
+/// Run `add` (another area's hook row) in a child that cannot widen this
+/// ui. egui grows a ui to fit its widest child (`max_rect |= rect`), so a
+/// row too wide for a narrow window made everything after it wider than
+/// the pane: text ran off the right edge and buttons left the screen.
+/// Here such a row is clipped at the pane's edge instead.
+pub fn contained(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
+    let w = ui.available_width().max(0.0);
+    let rect = Rect::from_min_size(ui.cursor().min, vec2(w, ui.available_height().max(0.0)));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(*ui.layout()));
+    child.shrink_clip_rect(rect);
+    add(&mut child);
+    let h = child.min_rect().height();
+    ui.allocate_rect(Rect::from_min_size(rect.min, vec2(w, h)), Sense::hover());
+}
+
 /// `2026-10-26 16:46 · 1h ago`.
 pub fn when(secs: i64, now: i64) -> String {
     format!(

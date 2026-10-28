@@ -434,19 +434,17 @@ fn detail(ui: &mut Ui, e: &Entry, cx: DetailCx, actions: &mut Vec<Action>) {
             kv.text("Workflow id", kit::mono(id.to_string()));
         }
         if let Some(f) = e.file {
-            kv.text(
-                "Jobs",
-                format!(
-                    "{}: {}",
-                    format::count(f.jobs.len()),
-                    f.jobs
-                        .iter()
-                        .map(|j| j.name.as_str())
-                        .take(12)
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            );
+            // One job per line (a comma-joined list of names was hard to scan).
+            kv.row(&format!("Jobs ({})", f.jobs.len()), |ui| {
+                ui.spacing_mut().item_spacing.y = 3.0;
+                let c = pal(ui).text;
+                for j in f.jobs.iter().take(12) {
+                    ui.add(egui::Label::new(egui::RichText::new(&j.name).color(c)).wrap());
+                }
+                if f.jobs.len() > 12 {
+                    kit::muted(ui, &format!("and {} more", f.jobs.len() - 12));
+                }
+            });
             if !f.schedules.is_empty() {
                 kv.text("Schedule", kit::mono(f.schedules.join("   ")));
             }
@@ -545,13 +543,14 @@ fn detail(ui: &mut Ui, e: &Entry, cx: DetailCx, actions: &mut Vec<Action>) {
 }
 
 fn branch_filter(ui: &mut Ui, branch: &mut String, applied: &str, actions: &mut Vec<Action>) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
+    // Wrapped: on a narrow window the note went off the right edge.
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
         let resp = form::input(
             ui,
             "ci_wf_branch",
             branch,
-            form::InputOpts::new("All branches").width(220.0),
+            form::InputOpts::new("All branches").width(ui.available_width().min(220.0)),
         );
         let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let dirty = branch.trim() != applied;
@@ -637,13 +636,21 @@ fn history_sections(
             kit::Stat::new("Last success", ago(s.last_success)),
         ],
     );
-    widgets::note(
-        ui,
-        &format!(
-            "{} passed · {} failed · {} cancelled · {} skipped · {} running",
-            s.passed, s.failed, s.cancelled, s.skipped, s.running
-        ),
-    );
+    // Only the outcomes that occurred ("0 cancelled · 0 skipped" was noise).
+    let counts: Vec<String> = [
+        (s.passed, "passed"),
+        (s.failed, "failed"),
+        (s.cancelled, "cancelled"),
+        (s.skipped, "skipped"),
+        (s.running, "running"),
+    ]
+    .iter()
+    .filter(|(n, _)| *n > 0)
+    .map(|(n, w)| format!("{n} {w}"))
+    .collect();
+    if !counts.is_empty() {
+        widgets::note(ui, &counts.join(", "));
+    }
 
     kit::section(ui, "Duration trend", Some(h.runs.len()));
     let mut chrono: Vec<&WorkflowRun> = h.runs.iter().collect();

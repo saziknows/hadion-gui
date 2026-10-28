@@ -325,8 +325,21 @@ fn form_view(
     kit::title(ui, "Run a job locally");
     kit::secondary(
         ui,
-        "act reads the workflow file, pulls a runner image and runs the job's steps in Docker on this machine. Nothing is sent to GitHub; secrets come from a dotenv file whose path is passed with --secret-file.",
+        "act runs the job's steps in Docker on this machine, from the workflow file and a runner image. Nothing is sent to GitHub.",
     );
+    crate::views::github::details_section(ui, "ci_act_how", "How it works", false, |ui| {
+        kit::kv(ui, 100.0, |kv| {
+            kv.text(
+                "Workflow",
+                "read from .github/workflows in this working tree",
+            );
+            kv.text("Runner", "a Docker image standing in for GitHub's runner");
+            kv.text(
+                "Secrets",
+                "from a dotenv file (NAME=value per line) passed with --secret-file; only its path is kept",
+            );
+        });
+    });
     ui.add_space(space::S);
     if files.is_empty() {
         kit::muted(ui, "There are no workflow files to run.");

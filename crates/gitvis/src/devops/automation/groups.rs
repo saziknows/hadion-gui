@@ -588,15 +588,22 @@ pub fn page(ui: &mut Ui, repos: &[RepoState], settings: &Settings, actions: &mut
         actions.push(Act::GroupStatus.into());
     }
     let total: usize = groups.iter().map(|g| g.repos.len()).sum();
-    let subtitle = if groups.is_empty() {
-        "Repositories you work on together: open them at once, see them side by side, fetch, pull or branch in all".to_owned()
+    // Short: the "What groups do" note under it explains the rest (the old
+    // sentence repeated it and ran under the buttons on a narrow window).
+    let parts: Vec<String> = if groups.is_empty() {
+        vec!["Repositories you work on together".to_owned()]
     } else {
-        format!(
-            "{} · {} · saved with your settings",
-            format::plural(groups.len(), "group", "groups"),
-            format::plural(total, "repository", "repositories")
-        )
+        vec![
+            format!(
+                "{}, {}",
+                format::plural(groups.len(), "group", "groups"),
+                format::plural(total, "repository", "repositories")
+            ),
+            "saved with your settings".to_owned(),
+        ]
     };
+    // "New group", "Refresh" and their gaps.
+    let (subtitle, _) = crate::views::github::fit_subtitle(ui, "Groups", &parts, 230.0);
     kit::page_header(ui, "Groups", &subtitle, |ui| {
         if IconButton::new(Icon::Plus, "New group")
             .primary(groups.is_empty())

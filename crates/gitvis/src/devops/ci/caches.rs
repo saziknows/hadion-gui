@@ -290,10 +290,7 @@ fn overview(
     actions: &mut Vec<Action>,
 ) {
     kit::title(ui, "Caches");
-    kit::secondary(
-        ui,
-        "Dependency and build caches saved by actions/cache. GitHub keeps up to 10 GB per repository and evicts the least recently used ones beyond that, so stale caches push out useful ones. Caches of pull request refs are only readable by that pull request.",
-    );
+    kit::secondary(ui, "Dependency and build caches saved by actions/cache.");
     let used = usage
         .map(|u| u.active_caches_size_in_bytes)
         .unwrap_or_else(|| items.iter().map(|c| c.size_in_bytes).sum());
@@ -304,8 +301,7 @@ fn overview(
         ui,
         &[
             kit::Stat::new("Caches", format::count(count as usize)),
-            kit::Stat::new("Used", bytes(used)),
-            kit::Stat::new("Of the 10 GB limit", pct(frac)).tone_if(frac > 0.9, Tone::Warning),
+            kit::Stat::new("Used of 10 GB", bytes(used)).tone_if(frac > 0.9, Tone::Warning),
             kit::Stat::new("Refs", format::count(refs.len())),
             kit::Stat::new("Pull request refs", format::count(prs.len())),
         ],
@@ -313,11 +309,30 @@ fn overview(
     widgets::meter(
         ui,
         frac as f32,
-        &format!("{} of 10 GB", bytes(used)),
+        &format!("{} of the 10 GB limit ({})", bytes(used), pct(frac)),
         if frac > 0.9 {
             Tone::Warning
         } else {
             Tone::Neutral
+        },
+    );
+    crate::views::github::details_section(
+        ui,
+        "ci_cache_rules",
+        "How GitHub keeps caches",
+        false,
+        |ui| {
+            kit::kv(ui, 120.0, |kv| {
+                kv.text("Limit", "10 GB per repository");
+                kv.text(
+                    "Over the limit",
+                    "The least recently used caches are evicted first, so stale caches push out useful ones.",
+                );
+                kv.text(
+                    "Pull requests",
+                    "A cache saved on a pull request's ref is readable only by that pull request's runs.",
+                );
+            });
         },
     );
     if (total as usize) > items.len() {
