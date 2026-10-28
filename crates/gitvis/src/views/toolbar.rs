@@ -596,10 +596,12 @@ fn pending_banner(ui: &mut Ui, repo: &RepoState, actions: &mut Vec<Action>) {
     egui::Panel::top("pending")
         .show_separator_line(false)
         .frame(
+            // Opaque: under a top-level panel a translucent fill shows the
+            // window's clear colour, which stays dark in the light theme.
             Frame::NONE
                 .fill(
-                    p.warning
-                        .gamma_multiply(if ui.visuals().dark_mode { 0.12 } else { 0.14 }),
+                    p.chrome
+                        .lerp_to_gamma(p.warning, if ui.visuals().dark_mode { 0.12 } else { 0.14 }),
                 )
                 .inner_margin(Margin::symmetric(14, 6)),
         )

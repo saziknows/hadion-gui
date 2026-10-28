@@ -1005,18 +1005,17 @@ fn wip_panel(
                     }));
                 }
             }
+            // Truncated to what Amend leaves, so a long branch name or
+            // "detached HEAD" never draws over the checkbox.
             let p = *pal(ui);
-            if let Head::Branch { name, .. } = &snap.head {
-                ui.label(
-                    RichText::new(format!("to {name}"))
-                        .size(size::SMALL)
-                        .color(p.text_2),
-                );
-            } else if let Head::Detached(_) = &snap.head {
-                ui.label(
-                    RichText::new("detached HEAD")
-                        .size(size::SMALL)
-                        .color(p.warning),
+            let label = match &snap.head {
+                Head::Branch { name, .. } => Some((format!("to {name}"), p.text_2)),
+                Head::Detached(_) => Some(("detached HEAD".to_owned(), p.warning)),
+                _ => None,
+            };
+            if let Some((text, color)) = label {
+                ui.add(
+                    egui::Label::new(RichText::new(text).size(size::SMALL).color(color)).truncate(),
                 );
             }
         });
