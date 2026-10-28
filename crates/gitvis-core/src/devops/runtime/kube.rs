@@ -2709,10 +2709,7 @@ mod tests {
         assert_eq!(shop.user, "admin@k3d-shop");
         assert_eq!(cfg.context("kind-local").unwrap().server, None);
         assert_eq!(cfg.choose(None).as_deref(), Some("k3d-shopdb"));
-        assert_eq!(
-            cfg.choose(Some("kind-dev")).as_deref(),
-            Some("kind-dev")
-        );
+        assert_eq!(cfg.choose(Some("kind-dev")).as_deref(), Some("kind-dev"));
         assert_eq!(cfg.choose(Some("gone")).as_deref(), Some("k3d-shopdb"));
         assert_eq!(cfg.namespace_for("k3d-shop", None), "shop");
         assert_eq!(cfg.namespace_for("k3d-shopdb", None), "default");

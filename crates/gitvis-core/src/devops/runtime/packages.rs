@@ -399,10 +399,7 @@ mod tests {
             "gh api --method DELETE orgs/brave/packages/container/brave-core%2Fci/versions/77"
         );
         let u = delete_version(OwnerKind::User, "acme", "web", 5);
-        assert_eq!(
-            u.endpoint,
-            "users/acme/packages/container/web/versions/5"
-        );
+        assert_eq!(u.endpoint, "users/acme/packages/container/web/versions/5");
     }
 
     #[test]
