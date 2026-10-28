@@ -181,18 +181,22 @@ impl Session {
         }
     }
 
-    /// Resize the screen now and the pseudo-terminal right after.
-    pub fn resize(&self, rows: u16, cols: u16) {
+    /// Resize the screen now and the pseudo-terminal right after. Never
+    /// waits: returns false when the reader holds the screen (call again).
+    pub fn resize(&self, rows: u16, cols: u16) -> bool {
         let (rows, cols) = (rows.max(2), cols.max(2));
         {
-            let mut t = self.shared.lock();
+            let Some(mut t) = self.try_term() else {
+                return false;
+            };
             if t.screen.size() == (rows, cols) {
-                return;
+                return true;
             }
             t.screen.resize(rows, cols);
         }
         let _ = self.tx.send(Control::Resize(rows, cols));
         self.shared.changed();
+        true
     }
 
     /// End the shell (and with the pseudo-terminal everything it started).
@@ -373,6 +377,26 @@ fn read_loop(mut reader: Box<dyn Read + Send>, shared: Arc<Shared>, tx: Sender<C
         }
         shared.changed();
     }
+    // All output is in: say how the shell ended, after its last line (the
+    // wait thread records the code just before the terminal closes; on
+    // Unix the end of output can come first, so give it a moment).
+    for _ in 0..20 {
+        let code = match &shared.lock().status {
+            Status::Exited { code, .. } => Some(*code),
+            _ => None,
+        };
+        if let Some(code) = code {
+            shared.lock().feed(exit_marker(code).as_bytes());
+            shared.changed();
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+/// The line written under a shell's last output when it ends.
+pub fn exit_marker(code: u32) -> String {
+    format!("\r\n\x1b[0;2m[Process exited with code {code}]\x1b[0m\r\n")
 }
 
 #[cfg(test)]

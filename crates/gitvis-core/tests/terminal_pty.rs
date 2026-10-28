@@ -69,6 +69,13 @@ fn one_shot_command_output_and_exit_code() {
         "{status:?}"
     );
     assert!(wakes.load(Ordering::Relaxed) > 0);
+    // The end is written under the last output, once it is all in.
+    let (text, _) = wait_for(&session, 10, |text, _| {
+        text.contains("Process exited with code 0")
+    });
+    assert!(text.contains("[Process exited with code 0]"), "{text:?}");
+    let marker = text.find("Process exited").unwrap();
+    assert!(text.find("hello-from-pty").unwrap() < marker);
     let t = session.term();
     assert!(t.bytes_in > 0);
     // ConPTY asks for the cursor position first; it was answered.
@@ -98,7 +105,9 @@ fn typed_input_reaches_the_shell() {
     // Once echoed as typed, once as output.
     assert!(text.matches("typed-marker-42").count() >= 2, "{text:?}");
     // Resizing does not break the session.
-    session.resize(30, 120);
+    while !session.resize(30, 120) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
     assert_eq!(session.term().screen.size(), (30, 120));
     session.write(b"exit 3\r".to_vec());
     let (_, status) = wait_for(&session, 20, |_, s| !s.is_alive());
