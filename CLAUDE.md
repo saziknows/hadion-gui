@@ -145,12 +145,25 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   - Settings page (`Page::Settings`, the rail's gear, Ctrl+,): `devops/settings_page.rs` owns the nav and
     Appearance / Behaviour / Safety; other sections call the owning area's `settings_section`.
   - Extension hooks (`devops/hooks.rs`, `HookCx::of(repo, settings)`): commit menu, commit panel, commit
-    file menu, WIP file menu, WIP message tools, multi-selection panel, job log viewer (`LogHookCx`, which
-    carries only the AI state because the CI state is borrowed), pull request conversation, new PR form,
-    status bar. Areas contribute through their `hook_*` functions instead of editing shared views.
+    file menu, branch / remote branch / tag menus (`MenuCtx::hook`, graph and sidebar), WIP file menu,
+    WIP message tools, multi-selection panel, job log viewer (`LogHookCx`, which carries only the AI
+    state because the CI state is borrowed), pull request conversation, new PR form, status bar.
+    Areas contribute through their `hook_*` functions instead of editing shared views. `HookCx` also
+    carries the commit message being written and `RepoState::details` (loaded commit details).
+  - The WIP commit box takes last frame's height (`wip_commit_box_h`), so hook rows never push the
+    Commit button off the panel.
+  - Keyboard ownership: the terminal's `tick` runs before `app.rs::shortcuts` and takes every key
+    while its grid has focus (only Ctrl+` passes); while the palette is open `shortcuts` returns after
+    the palette toggle. App-wide DevOps actions run without an open repository (welcome screen).
+  - Two areas keep process-wide state behind a `Mutex` because the views that need it cannot reach
+    `Globals`: `automation/shared.rs` (groups runtime, release section, lookups, used by the Home and
+    Ship views) and `ai/session.rs` (key status, usage, script overrides; repository areas have no
+    app-wide state). Lock briefly, never inside a background task.
   - Safe mode (`Settings::safe_mode`, `gitvis_core::devops::safety`): refuses remote writes at the lowest
     level (`cli::run_raw` / `run_program`, `proc::run_streaming` / `run_capture`, so also `api_request` and
-    `Gh::cli`), classified by `safety::remote_write(program, args, stdin)`. Task scripts are not covered.
+    `Gh::cli`), classified by `safety::remote_write(program, args, stdin)`. Task scripts and the
+    terminal are not covered; `gh auth switch` / `setup-git` and curl to the Claude API are allowed
+    (local config / sends code but changes nothing remote).
   - `gitvis_core::devops::keychain` keeps API keys and tokens in the OS keychain (service `gitvis`), never
     in settings files or logs; call it from background tasks.
   - ConPTY (Windows pseudo-terminal, `portable-pty`) sends `ESC[6n` first and blocks until the terminal
@@ -158,6 +171,7 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   - Dependencies added to `gitvis-core`: `keyring`, `portable-pty`, `vt100`, `notify-rust`, `sha2`.
   - `Action::AddToCommitMessage { text, at_start }` edits the active repository's commit message for
     app-wide areas (which only read repositories); the Tools page has a Stashes tab drawn by `gitplus`.
+  - All nine round-2 areas were merged into `devops` on 2026-10-28.
 - Per area (core / app files):
   - `review`: core `model`, `graphql` (one list query with mergeability; on a timeout it retries without
     it, since brave-core takes ~7 s per 20 PRs), `rest` (request builders and a `Step` runner that
@@ -191,6 +205,52 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
     requests, mine, mentions, assigned), `forge::{gitlab, azure, cli, trace, tools}` (`glab api`
     with the URL-encoded project path, `az` + azure-devops extension; GitLab job traces parsed into
     nested sections; public gitlab.com projects readable through curl without signing in).
+  - `conflict`: core `markers` (git's rules: merge / diff3 / zdiff3, `conflict-marker-size` via
+    `check-attr`, look-alike lines stay text, CRLF and a missing final newline round-trip; ambiguous
+    splits settled by a diff3 `merge-file` of the stage blobs run with longer markers), `resolve`,
+    `load` (`cat-file --batch`, 8 MB cap, NUL in the first 8,000 bytes = binary), `labels` (merge /
+    rebase (sides reversed) / cherry-pick / revert / am), `actions`; app `session`, `view`, `panes`
+    (one shared scroll), `cards` (non-text conflicts). `scripts/make-conflict-repos.sh DIR` builds
+    merge / diff3 / zdiff3 / rebase test repositories.
+  - `history`: core compare (`diff --raw --numstat -M -z`), tree, blame (`blame -w -M -C
+    --porcelain`), filters (streamed capped `log --all`), signatures (SSH signatures without an
+    allowed-signers file read from the commit object: "can't check", not "unsigned"), cherry-pick /
+    format-patch plans; app `picks` (multi-select), `sigs` (lazy batch verification of visible rows),
+    `widgets`. `cargo test -p gitvis-core --test history_git`.
+  - `gitplus`: core `stash`, `submodules`, `lfs`, `patches`, `githooks`, `secret_hook`, `precommit`,
+    `split`; app tabs on the Tools page (re-exporting `workbench::ui` helpers). `git stash show`
+    mangles `--src-prefix`, so `diff.noprefix` / `diff.mnemonicPrefix` are overridden with `-c`.
+    git ≥ 2.38.1 refuses file-path submodule URLs (`protocol.file.allow`; the tests pass `-c
+    protocol.file.allow=always`). `gitvis hook pre-commit` exits 1 on an undismissed high or
+    critical staged finding; dismissals are synced to `<git dir>/gitvis-dismissed`.
+  - `ai`: curl `--config -` on stdin (headers, key, `@body.json`; the body file is deleted on every
+    outcome and stale ones swept), SSE parser, redaction through the exposure rules, budgets,
+    prices (estimates), refusal / `max_tokens` / fallback handling; the answer streams into an
+    `Arc<Mutex<Live>>` the views read. `GITVIS_AI_KEYCHAIN_NAME` (only `gitvis-test-…`), a fake
+    curl first on PATH; `--test ai_curl` (Windows) and `--test ai_inputs`.
+  - `palette`: core `fuzzy` (alignment + quality filter), `frecency`, `scope`, `item`, `sources`,
+    `rank` (narrowing search while the query grows), `files`; app `commands`, `verbs`, `sources`
+    (cached by stamp), `results`, `view`. `cargo test -p gitvis-core --lib palette_perf -- --ignored
+    --nocapture`.
+  - `identity`: core config listing with file:line, includeIf rules and a git-compatible wildmatch,
+    ssh-keygen / ssh-add / `ssh -T` / gpg colon / `gh auth status` parsers, signing plans; four
+    Settings sections. `GITVIS_GPG`, `GITVIS_SSH_KNOWN_HOSTS` (Windows ssh ignores HOME, and
+    `ssh -T github.com` would write the owner's known_hosts); test edits with `GIT_CONFIG_GLOBAL`
+    and a scratch `GNUPGHOME` (a plain `gpg` against the real home creates `~/.gnupg/trustdb.gpg`).
+    `--test identity_apply`.
+  - `terminal`: core `session` (spawn returns at once; threads for PTY, reader, waiter, input),
+    `stream` (answers ConPTY / terminal queries, keeps SGR 2 dim), `screen` (own scrollback:
+    vt100 0.15 panics in debug once scrolled more than one screen up), `keys`, `shells`; app
+    `panel`, `input`, `settings`. `--test terminal_pty` runs a real ConPTY.
+  - `automation`: core `notify` (poll + diff: the first check only takes note), `groups`, `links`
+    (no UTF-8 / SHA-256 false positives; lower-case keys only in branch names), `lookup` (curl
+    stdin config), `release` (manifest bumps keeping formatting, Keep a Changelog); app
+    `notifications`, `groups` (Home tab), `integrations`, `release` (Ship publish form section).
+  - `packaging`: core `version`, `buildinfo` (`crates/gitvis/build.rs` embeds commit, dirty, date,
+    target, profile, rustc, owner/repo), `release`, `checksum`, `zip`, `update`, `swap` (rename to
+    `.old`, move `.new` in, relaunch, roll back; refuses exes inside a Cargo target folder: never
+    run it on `target/debug` or `target/release`), `crash` (panic hook, redacted reports), `issue`,
+    `paths`; `scripts/package.ps1`, `packaging/windows/gitvis.iss`, `.github/workflows/{ci,release}.yml`.
 - Test doubles: `GITVIS_GH` (any area), `GITVIS_KUBECTL`, `GITVIS_TERRAFORM` replace the executables.
   `cargo build -p gitvis-core --example gh_guard`, then `GITVIS_GH=target/debug/examples/gh_guard.exe`
   passes reads to the real gh and blocks every write (non-GET, GraphQL mutations, other subcommands),
@@ -198,6 +258,11 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   that touches GitHub. Read-only public test beds the area agents used: cli/cli (environments, 3.6k
   deployments, releases), pallets/click (releases with assets), sharkdp/fd (small artifacts),
   gitlab-org/gitlab-runner (public GitLab API); brave-core has no releases or deployments.
+  Round 2: `GITVIS_NOTIFY=log|off` + `GITVIS_NOTIFY_LOG` (scripted runs always log, never show a
+  notification), `GITVIS_CURL` (issue lookups), `GITVIS_KEYCHAIN_TEST=1` (`gitvis-test-*` entries),
+  `GITVIS_UPDATE_DIR` / `GITVIS_UPDATE_THROTTLE_KIB` / `GITVIS_SCRIPT_AFTER_UPDATE` (updates from a
+  folder), `GITVIS_DATA_DIR` / `GITVIS_CRASH_DIR`, `GITVIS_ALLOW_CRASH_TEST=1` (with a script, for
+  `crash-test`). Never call the real Claude API while testing (it costs money and sends code).
 - Script commands per area (each area's `script` fn has the full list): review `review`, `prs`,
   `issues`, `pr N`, `pr-tab conversation|files|commits|checks`, `pr-file N`, `issue N`, `new-pr`,
   `pr-lines A B`, `pr-comment TEXT`, `pr-review approve|changes|comment TEXT`, `pr-submit` /
@@ -209,9 +274,29 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   images|protection|codeowners|environments|secrets|variables`, `gov-item N`, `codeowners-test PATH`,
   `secret-form`; tools `tools-tab tasks|console|rebase|bisect|history|worktrees`, `select-task N`,
   `rebase BASE`, `bisect`, `history PATH`, `worktree N`; home `home`, `home-tab …`, `inbox-item N`,
-  `forge-tab review|pipelines`, `mr N`, `pipeline N`. Commands that would write stop at the
-  confirmation dialog, except `rebase-run-now`, `bisect-run-now CMD`, `task N` and `fetch-all-in
-  DIR`, which act for real and are for scratch repositories only.
+  `forge-tab review|pipelines`, `mr N`, `pipeline N`. Round 2: conflict `conflict PATH`,
+  `conflict-next|prev|next-file`, `conflict-hunk N ours|theirs|both|both-theirs|base|reset`,
+  `conflict-all ours|theirs`, `conflict-base on|off`, `conflict-edit N`, `conflict-type TEXT`,
+  `conflict-save`, `conflict-resolve-ask`, `conflict-choice …`, `conflict-recreate STYLE`,
+  `conflict-raw`, `conflict-continue`, `conflict-close`; history `hist-compare A B|worktree`
+  (`compare A B` too), `compare-mode two|three`, `compare-tab files|commits`, `hist-mode
+  compare|files|blame`, `pick-commits N`, `multi-action …`, `filter-author|path|since|until|message
+  TEXT`, `filter-clear`, `browse SHA|head`, `browse-file PATH`, `blame-at REV PATH [LINE]`,
+  `verify`; gitplus `stashes`, `stash N`, `stash-form`, `stash-files P1,P2 MSG`, `submodules`,
+  `lfs`, `patches`, `patch-preview PATH`, `hooks`, `hook-view NAME`, `install-secret-hook`,
+  `split-commit SHA|head`; ai `ai-commit`, `ai-send`, `ai-pr`, `ai-explain [RUN JOB]`, `ai-summary
+  [N]`, `ai-commit-explain SHA|head`, `ai-model NAME`, `ai-ask on|off`; palette `palette-query
+  TEXT`, `palette-down|up N`, `palette-run`, `palette-actions`, `palette-close`; identity
+  `config-tab …`, `config-edit KEY VALUE [scope]`, `identity-form …`, `check-path PATH`,
+  `ssh-test`, `signing-form ssh|gpg`, `upload-key N`, `gh-switch …`; terminal `term-new SHELL`,
+  `term-type TEXT`, `term-press KEYS`, `term-scroll N`, `term-select …`, `term-restart`,
+  `term-close`; automation `notify-on|off|test|poll|list`, `groups`, `group-new NAME`, `group-add
+  NAME PATH`, `group-fetch|pull NAME`, `links-test TEXT`, `links-jira BASE [K,K]`, `release-prep
+  VERSION`; packaging `update-check`, `update-download`, `update-confirm-restart`, `crash-open N`,
+  `crash-report N`. Commands that would write stop at the confirmation dialog, except
+  `rebase-run-now`, `bisect-run-now CMD`, `task N`, `fetch-all-in DIR`, `conflict-resolve`,
+  `conflict-choice-now X`, `group-run-now NAME …`, `release-commit-now VERSION` and
+  `update-restart` (test mode only), which act for real and are for scratch repositories only.
 
 ## egui 0.37 gotchas (verified against the crate source)
 
