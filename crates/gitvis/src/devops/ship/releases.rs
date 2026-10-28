@@ -1042,6 +1042,10 @@ fn publish_form(
             p.text_3,
         );
     }
+    // Version bumps and CHANGELOG.md before publishing (automation area).
+    if let Some(s) = snap {
+        crate::devops::automation::release_section(ui, &s.workdir, &f.tag, &f.notes, actions);
+    }
 }
 
 fn group_short(g: Group) -> &'static str {

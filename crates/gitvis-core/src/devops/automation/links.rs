@@ -130,6 +130,9 @@ pub struct Link {
     /// `ABC-123` (upper-case for Jira and Linear), or the matched text for
     /// custom rules.
     pub key: String,
+    /// What a chip shows: the key, or for custom rules with a group
+    /// `NAME #GROUP` (`Bugzilla #42`).
+    pub label: String,
     pub tracker: Tracker,
     pub url: String,
     /// Byte range of the match in the text.
@@ -236,9 +239,14 @@ fn is_upper_key(prefix: &str) -> bool {
         .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
 }
 
+/// Custom rules that compiled: `(index, regex)`.
+pub type Compiled = Vec<(usize, Regex)>;
+/// Custom rules that did not: `(index, message)`.
+pub type RuleErrors = Vec<(usize, String)>;
+
 /// Compile the custom rules once; invalid ones come back as errors (index,
 /// message) for the settings page.
-pub fn compile_custom(rules: &[CustomRule]) -> (Vec<(usize, Regex)>, Vec<(usize, String)>) {
+pub fn compile_custom(rules: &[CustomRule]) -> (Compiled, RuleErrors) {
     let mut ok = Vec::new();
     let mut bad = Vec::new();
     for (i, r) in rules.iter().enumerate() {
@@ -307,6 +315,7 @@ pub fn find(text: &str, prefs: &LinkPrefs, source: Source) -> Vec<Link> {
                 _ => linear_url(&prefs.linear.workspace, &key),
             };
             out.push(Link {
+                label: key.clone(),
                 key,
                 tracker,
                 url,
@@ -336,7 +345,19 @@ pub fn find(text: &str, prefs: &LinkPrefs, source: Source) -> Vec<Link> {
             {
                 continue;
             }
+            let label = match caps.get(1).map(|g| g.as_str()).filter(|g| !g.is_empty()) {
+                Some(g) => {
+                    let name = Tracker::Custom(i).label(prefs);
+                    if g.chars().all(|c| c.is_ascii_digit()) {
+                        format!("{name} #{g}")
+                    } else {
+                        format!("{name} {g}")
+                    }
+                }
+                None => key.clone(),
+            };
             out.push(Link {
+                label,
                 key,
                 tracker: Tracker::Custom(i),
                 url: fill_template(prefs.custom[i].url.trim(), &caps),
@@ -558,6 +579,7 @@ mod tests {
         let got = find("Fixes bug #42 and bug 7; bug #42 again", &p, Source::Text);
         assert_eq!(keys(&got), vec!["bug #42", "bug 7"]);
         assert_eq!(got[0].url, "https://bugs.example.com/show_bug.cgi?id=42");
+        assert_eq!(got[0].label, "Bugzilla #42");
         assert_eq!(got[0].tracker, Tracker::Custom(0));
         assert_eq!(Tracker::Custom(0).label(&p), "Bugzilla");
         let (_, bad) = compile_custom(&p.custom);

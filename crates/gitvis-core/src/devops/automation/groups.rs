@@ -392,12 +392,18 @@ pub fn skip_reason(batch: &Batch, s: &RepoStatus, exists: bool, base_ok: bool) -
     }
 }
 
-fn first_line(s: &str) -> String {
-    s.lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .unwrap_or("")
-        .to_owned()
+/// The line of git's output that says what went wrong: the `fatal:` or
+/// `error:` line (without the prefix), else the last non-empty line.
+fn error_line(s: &str) -> String {
+    let lines: Vec<&str> = s.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    for l in &lines {
+        for p in ["fatal:", "error:"] {
+            if let Some(rest) = l.strip_prefix(p) {
+                return rest.trim().to_owned();
+            }
+        }
+    }
+    lines.last().map(|l| (*l).to_owned()).unwrap_or_default()
 }
 
 /// `Fast-forward` / `Already up to date.` / `Updating a..b` from pull output.
@@ -451,7 +457,7 @@ pub fn run_one(
         let outcome = if o.ok {
             Outcome::Ok(o.changes.summary())
         } else {
-            Outcome::Failed(first_line(&o.output))
+            Outcome::Failed(error_line(&o.output))
         };
         let mut r = done(outcome, o.output);
         r.elapsed_ms = o.elapsed_ms;
@@ -525,7 +531,7 @@ pub fn run_one(
         }
         Ok(c) => {
             let e = c.error_text();
-            done(Outcome::Failed(first_line(&e)), e)
+            done(Outcome::Failed(error_line(&e)), e)
         }
         Err(e) => done(Outcome::Failed(e.to_string()), e.to_string()),
     }
@@ -747,6 +753,13 @@ u UU N... 100644 100644 100644 100644 a b c conflict.rs\n\
             "Pull in 4 repositories: 2 ok, 1 skipped, 1 failed"
         );
         assert_eq!(pull_summary("Already up to date.\n"), "already up to date");
+        assert_eq!(
+            error_line(
+                "From /tmp/remote\n * branch main -> FETCH_HEAD\nhint: x\nfatal: Not possible to fast-forward, aborting.\n"
+            ),
+            "Not possible to fast-forward, aborting."
+        );
+        assert_eq!(error_line("a\nlast words\n"), "last words");
         assert_eq!(
             pull_summary(
                 "Updating a..b\nFast-forward\n a.txt | 1 +\n 1 file changed, 1 insertion(+)\n"

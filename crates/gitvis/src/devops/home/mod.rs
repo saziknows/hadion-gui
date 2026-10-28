@@ -41,6 +41,8 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(180);
 pub enum Tab {
     #[default]
     Overview,
+    /// Repository groups (drawn by `automation`).
+    Groups,
     Notifications,
     Reviews,
     Mine,
@@ -50,8 +52,9 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 7] = [
+    pub const ALL: [Tab; 8] = [
         Tab::Overview,
+        Tab::Groups,
         Tab::Notifications,
         Tab::Reviews,
         Tab::Mine,
@@ -63,6 +66,7 @@ impl Tab {
     pub fn label(self) -> &'static str {
         match self {
             Tab::Overview => "Repositories",
+            Tab::Groups => "Groups",
             Tab::Notifications => "Notifications",
             Tab::Reviews => "Review requests",
             Tab::Mine => "My pull requests",
@@ -75,6 +79,7 @@ impl Tab {
     pub fn hint(self) -> &'static str {
         match self {
             Tab::Overview => "Every open repository: branch, changes, CI, pull requests, findings",
+            Tab::Groups => "Repository groups: open together, status, fetch, pull or branch in all",
             Tab::Notifications => "Unread GitHub notifications, why each arrived, mark as read",
             Tab::Reviews => "Open pull requests waiting for your review",
             Tab::Mine => "Your open pull requests with review decision and checks",
@@ -97,6 +102,7 @@ impl Tab {
     pub fn from_name(s: &str) -> Option<Self> {
         Some(match s.trim().to_ascii_lowercase().as_str() {
             "overview" | "repos" | "repositories" => Tab::Overview,
+            "groups" | "group" => Tab::Groups,
             "notifications" | "inbox" => Tab::Notifications,
             "reviews" | "review" | "review-requests" => Tab::Reviews,
             "mine" | "my-prs" | "prs" => Tab::Mine,
@@ -476,7 +482,8 @@ pub fn apply(cx: &mut Ctx, state: &mut State, repos: &[RepoState], act: Act) {
     match act {
         Act::SetTab(t) => {
             state.tab = t;
-            if t != Tab::Overview && t != Tab::Failed && state.fetched_at.is_none() {
+            if !matches!(t, Tab::Overview | Tab::Groups | Tab::Failed) && state.fetched_at.is_none()
+            {
                 fetch_inbox(cx, state);
             }
         }

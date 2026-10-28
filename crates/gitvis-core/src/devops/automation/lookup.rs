@@ -20,6 +20,16 @@ use super::links::{Tracker, jira_base};
 pub const JIRA_TOKEN: &str = "jira-token";
 pub const LINEAR_KEY: &str = "linear-api-key";
 
+/// The keychain entry used for `name`: `gitvis-test-NAME` while
+/// `GITVIS_KEYCHAIN_TEST` is set, so UI tests never touch the real entries.
+pub fn keychain_name(name: &str) -> String {
+    if std::env::var_os("GITVIS_KEYCHAIN_TEST").is_some_and(|v| !v.is_empty()) {
+        format!("gitvis-test-{name}")
+    } else {
+        name.to_owned()
+    }
+}
+
 /// How long one lookup may take.
 pub const TIMEOUT: Duration = Duration::from_secs(20);
 

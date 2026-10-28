@@ -536,6 +536,16 @@ pub fn demote_headings(notes: &str) -> String {
         .join("\n")
 }
 
+/// The 1-based line of the section for `version`, if the changelog has one.
+pub fn section_line(content: &str, version: &str) -> Option<usize> {
+    let v = version.trim_start_matches(['v', 'V']);
+    content.lines().enumerate().find_map(|(i, l)| {
+        (l.starts_with("## ")
+            && heading_version(l).is_some_and(|h| h.trim_start_matches(['v', 'V']) == v))
+        .then_some(i + 1)
+    })
+}
+
 /// The entries under `## [Unreleased]` (trimmed), if there are any.
 pub fn unreleased_body(content: &str) -> Option<String> {
     let lines: Vec<&str> = content.lines().collect();
@@ -843,6 +853,10 @@ pub fn apply(
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
 }
 
+/// What [`discover`] finds: the manifests and `(path, content)` of the
+/// root `CHANGELOG.md`.
+pub type Discovered = (Vec<Detected>, Option<(String, String)>);
+
 /// Folders never searched for manifests.
 const SKIP_DIRS: &[&str] = &[
     "node_modules",
@@ -865,10 +879,7 @@ pub const MAX_MANIFESTS: usize = 40;
 
 /// Tracked manifests (up to four folders deep) with their versions, and the
 /// root `CHANGELOG.md` if there is one (`(path, content)`).
-pub fn discover(
-    dir: &Path,
-    log: &mut Vec<String>,
-) -> Result<(Vec<Detected>, Option<(String, String)>)> {
+pub fn discover(dir: &Path, log: &mut Vec<String>) -> Result<Discovered> {
     log.push("git ls-files -z".into());
     let out = cli::run(dir, &["ls-files", "-z"], None)?;
     let text = String::from_utf8_lossy(&out.stdout);
@@ -1162,6 +1173,8 @@ mod tests {
         assert_eq!(e.line, 10);
         assert_eq!(e.links, 2);
         assert!(!e.moved_unreleased);
+        assert_eq!(section_line(&e.content, "v1.2.0"), Some(10));
+        assert_eq!(section_line(KAC, "1.2.0"), None);
         // Same version twice is refused.
         let again = changelog_insert(&e.content, "1.2.0", "v1.2.0", "2026-10-28", "x", false);
         assert!(

@@ -553,7 +553,7 @@ pub fn diff(
     if poll.threads.is_some() || poll.reviews.is_some() || !poll.runs.is_empty() {
         seen.primed = true;
     }
-    events.sort_by(|a, b| b.at.cmp(&a.at));
+    events.sort_by_key(|e| std::cmp::Reverse(e.at));
     events
 }
 
