@@ -4257,7 +4257,6 @@ impl eframe::App for GitVis {
                 settings: &self.settings,
                 repos: &self.repos,
                 active: self.active,
-                console: &self.console,
             };
             views::statusbar::show(
                 ui,
@@ -4315,7 +4314,6 @@ impl eframe::App for GitVis {
                         settings: &self.settings,
                         repos: &self.repos,
                         active: self.active,
-                        console: &self.console,
                     };
                     devops::terminal::show_panel(
                         ui,
@@ -4484,7 +4482,6 @@ impl eframe::App for GitVis {
                 settings: &self.settings,
                 repos: &self.repos,
                 active: self.active,
-                console: &self.console,
             };
             devops::palette::show(&ctx, &mut self.globals.palette, &view, &mut actions);
         }

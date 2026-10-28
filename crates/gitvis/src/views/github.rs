@@ -165,8 +165,6 @@ pub fn show(
         .is_some_and(|c| Some(c.bad) == repo.gh_page.selected_run);
     {
         let RepoState {
-            id: repo_id,
-            workdir,
             github,
             github_remote,
             github_error,
@@ -212,11 +210,8 @@ pub fn show(
         // The AI state and the CI state are disjoint fields.
         let (ai_state, ci) = (&devops.ai, &mut devops.ci);
         let log_hook = crate::devops::hooks::LogHookCx {
-            repo: *repo_id,
-            workdir: workdir.as_path(),
             settings,
             ai: ai_state,
-            github: github_remote.as_ref(),
         };
         let cx = Cx {
             log_hook: &log_hook,

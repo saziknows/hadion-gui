@@ -57,8 +57,6 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
 
     let filter = repo.sidebar_filter.trim().to_lowercase();
     let RepoState {
-        id: repo_id,
-        workdir,
         snapshot,
         collapsed,
         filter: graph_filter,
@@ -80,12 +78,9 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
         return;
     };
     let hook = crate::devops::hooks::HookCx {
-        repo: *repo_id,
-        workdir: workdir.as_path(),
         snap,
         devops: &*devops,
         settings,
-        github: github_remote.as_ref(),
         github_data: github.as_ref(),
         busy: busy.is_some(),
         commit_message: commit_message.as_str(),

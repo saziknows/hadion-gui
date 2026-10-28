@@ -13,15 +13,14 @@ use super::widgets as w;
 use super::{AccountData, Act, State};
 use crate::devops::settings_page::Section;
 use crate::format;
-use crate::state::{Action, Settings};
+use crate::state::Action;
 use crate::theme::{pal, size, space};
 use crate::views::form;
 use crate::views::icons::{Icon, IconButton};
 use crate::views::insights::{self, Cell};
 use crate::views::kit::{self, Col, Stat, Tone};
 
-pub fn show(ui: &mut Ui, st: &mut State, settings: &mut Settings, actions: &mut Vec<Action>) {
-    let safe = settings.safe_mode;
+pub fn show(ui: &mut Ui, st: &mut State, actions: &mut Vec<Action>) {
     let State {
         account,
         config,
@@ -48,13 +47,13 @@ pub fn show(ui: &mut Ui, st: &mut State, settings: &mut Settings, actions: &mut 
                     actions.push(Act::Refresh(Section::GitHubAccount).into());
                 }
             }
-            Some(Ok(a)) => body(ui, a, safe, busy, actions),
+            Some(Ok(a)) => body(ui, a, busy, actions),
         }
-        credentials(ui, config.ok(), account.ok(), safe, busy, actions);
+        credentials(ui, config.ok(), account.ok(), busy, actions);
     });
 }
 
-fn body(ui: &mut Ui, a: &AccountData, safe: bool, busy: bool, actions: &mut Vec<Action>) {
+fn body(ui: &mut Ui, a: &AccountData, busy: bool, actions: &mut Vec<Action>) {
     if a.gh.is_none() {
         if w::missing_tool(
             ui,
@@ -105,7 +104,7 @@ fn body(ui: &mut Ui, a: &AccountData, safe: bool, busy: bool, actions: &mut Vec<
         let list: Vec<&Account> = r.accounts.iter().filter(|x| x.host == host).collect();
         kit::section(ui, host, Some(list.len()));
         for acc in list {
-            account_card(ui, acc, safe, busy, actions);
+            account_card(ui, acc, busy, actions);
             ui.add_space(space::S);
         }
     }
@@ -165,7 +164,7 @@ fn body(ui: &mut Ui, a: &AccountData, safe: bool, busy: bool, actions: &mut Vec<
     scopes(ui, r.active(), actions);
 }
 
-fn account_card(ui: &mut Ui, acc: &Account, safe: bool, busy: bool, actions: &mut Vec<Action>) {
+fn account_card(ui: &mut Ui, acc: &Account, busy: bool, actions: &mut Vec<Action>) {
     let p = *pal(ui);
     form::card(
         ui,
@@ -229,7 +228,7 @@ fn account_card(ui: &mut Ui, acc: &Account, safe: bool, busy: bool, actions: &mu
                 w::buttons(ui, |ui| {
                     if IconButton::new(Icon::Rerun, &format!("Switch to {}…", acc.login))
                         .compact()
-                        .enabled(!busy && !safe)
+                        .enabled(!busy)
                         .show(ui)
                         .clicked()
                     {
@@ -242,9 +241,6 @@ fn account_card(ui: &mut Ui, acc: &Account, safe: bool, busy: bool, actions: &mu
                         );
                     }
                 });
-                if safe {
-                    kit::muted(ui, "Safe mode is on: gitvis does not run gh auth switch.");
-                }
             }
         },
     );
@@ -424,7 +420,6 @@ fn credentials(
     ui: &mut Ui,
     cfg: Option<&Snapshot>,
     account: Option<&AccountData>,
-    safe: bool,
     busy: bool,
     actions: &mut Vec<Action>,
 ) {
@@ -510,17 +505,11 @@ fn credentials(
                 ui.add_space(2.0);
                 if IconButton::new(Icon::Gear, "Run gh auth setup-git…")
                     .compact()
-                    .enabled(!busy && !safe)
+                    .enabled(!busy)
                     .show(ui)
                     .clicked()
                 {
                     actions.push(Act::SetupGit.into());
-                }
-                if safe {
-                    kit::muted(
-                        ui,
-                        "Safe mode is on: gitvis does not run gh auth subcommands that change something.",
-                    );
                 }
             },
         );

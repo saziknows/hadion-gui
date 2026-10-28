@@ -298,7 +298,7 @@ fn safety(ui: &mut Ui, settings: &Settings, actions: &mut Vec<Action>) {
         (
             "gh",
             "secret set, release create and every other subcommand that writes",
-            "auth status, run download, release download, pr checkout",
+            "auth status, switch and setup-git, run download, release download, pr checkout",
         ),
         (
             "git",

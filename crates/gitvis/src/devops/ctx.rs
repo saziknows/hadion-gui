@@ -88,7 +88,6 @@ pub struct Ctx {
     pub gh: Option<Gh>,
     pub dark: bool,
     /// The app-wide preferences (AI model and effort, integrations, …).
-    #[allow(dead_code)] // read by the areas as they are filled in
     pub ext: super::ExtPrefs,
     effects: Vec<Effect>,
 }

@@ -18,11 +18,7 @@
 //! does the work. Keep each contribution small (a menu item, a button, a
 //! short line); open the area's own page or panel for anything bigger.
 
-// Fields the areas read as they are filled in; removed at integration.
-#![allow(dead_code)]
-
 use std::collections::HashMap;
-use std::path::Path;
 
 use egui::Ui;
 use gitvis_core::github::GitHubData;
@@ -30,17 +26,13 @@ use gitvis_core::{Commit, Oid, Snapshot};
 
 use crate::devops::global::{GlobalView, Globals};
 use crate::devops::{DevOpsState, ai, automation, conflict, gitplus, history, packaging};
-use crate::state::{Action, RepoId, Settings};
+use crate::state::{Action, Settings};
 
 /// What a hook can read about the repository it is drawn for.
 pub struct HookCx<'a> {
-    pub repo: RepoId,
-    pub workdir: &'a Path,
     pub snap: &'a Snapshot,
     pub devops: &'a DevOpsState,
     pub settings: &'a Settings,
-    /// `(owner, repo)` of the GitHub remote.
-    pub github: Option<&'a (String, String)>,
     pub github_data: Option<&'a GitHubData>,
     /// An operation is running in this repository.
     pub busy: bool,
@@ -55,12 +47,9 @@ impl<'a> HookCx<'a> {
     /// snapshot).
     pub fn of(repo: &'a crate::state::RepoState, settings: &'a Settings) -> Option<Self> {
         Some(Self {
-            repo: repo.id,
-            workdir: repo.workdir.as_path(),
             snap: repo.snapshot.as_ref()?,
             devops: &repo.devops,
             settings,
-            github: repo.github_remote.as_ref(),
             github_data: repo.github.as_ref(),
             busy: repo.busy.is_some(),
             commit_message: &repo.commit_message,
@@ -131,11 +120,8 @@ pub fn multi_selection(ui: &mut Ui, h: &HookCx, picked: &[Oid], actions: &mut Ve
 /// What the job log viewer can offer a hook: it draws while the CI area's
 /// state is borrowed, so it carries only the AI state (a disjoint field).
 pub struct LogHookCx<'a> {
-    pub repo: RepoId,
-    pub workdir: &'a Path,
     pub settings: &'a Settings,
     pub ai: &'a ai::State,
-    pub github: Option<&'a (String, String)>,
 }
 
 /// Buttons in the header of the Actions job log viewer.

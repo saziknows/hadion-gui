@@ -1384,7 +1384,9 @@ pub fn scroll_page(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
                             bottom: 32,
                         })
                         .show(ui, |ui| {
-                            ui.set_max_width(DETAIL_MAX + 120.0);
+                            // Never wider than the viewport (narrow windows).
+                            let w = ui.available_width().min(DETAIL_MAX + 120.0);
+                            ui.set_max_width(w);
                             ui.spacing_mut().item_spacing.y = 8.0;
                             add(ui)
                         });

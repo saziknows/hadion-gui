@@ -39,8 +39,6 @@ pub struct CommitCx<'a> {
 
 pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mut Vec<Action>) {
     let RepoState {
-        id: repo_id,
-        workdir,
         multi,
         github,
         snapshot,
@@ -64,12 +62,9 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
     // A copy: the message box below edits the message itself.
     let message_now = commit_message.clone();
     let hook = HookCx {
-        repo: *repo_id,
-        workdir: workdir.as_path(),
         snap,
         devops: &*devops,
         settings,
-        github: github_remote.as_ref(),
         github_data: github.as_ref(),
         busy: busy.is_some(),
         commit_message: &message_now,

@@ -16,12 +16,9 @@
 //! The `cx` is built for the active repository (its id, working directory
 //! and GitHub remote), so app-wide areas can still read about it.
 
-// Fields the areas read as they are filled in; removed at integration.
-#![allow(dead_code)]
-
 use crate::devops::{
-    Console, Ctx, DevOpsAction, DevOpsMsg, automation, home, identity, packaging, palette,
-    settings_page, terminal,
+    Ctx, DevOpsAction, DevOpsMsg, automation, home, identity, packaging, palette, settings_page,
+    terminal,
 };
 use crate::state::{RepoState, Settings};
 
@@ -59,7 +56,6 @@ pub struct GlobalView<'a> {
     pub settings: &'a Settings,
     pub repos: &'a [RepoState],
     pub active: usize,
-    pub console: &'a Console,
 }
 
 impl GlobalView<'_> {

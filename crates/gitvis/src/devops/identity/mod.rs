@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::devops::DevOpsAction;
 use crate::devops::ctx::{Ctx, TaskLog};
-use crate::devops::global::{GlobalCx, GlobalView};
+use crate::devops::global::GlobalCx;
 use crate::devops::settings_page::Section;
 use crate::state::{Action, Page, RepoState, Settings, ToastKind};
 
@@ -1729,13 +1729,10 @@ pub fn settings_section(
         Section::GitConfig => config_view::show(ui, st, settings, repo, actions),
         Section::Identities => identities_view::show(ui, st, settings, repo, actions),
         Section::Keys => keys_view::show(ui, st, settings, repo, actions),
-        Section::GitHubAccount => account_view::show(ui, st, settings, actions),
+        Section::GitHubAccount => account_view::show(ui, st, actions),
         _ => {}
     }
 }
-
-#[allow(dead_code)]
-fn _unused(_: &GlobalView) {}
 
 #[cfg(test)]
 mod tests {

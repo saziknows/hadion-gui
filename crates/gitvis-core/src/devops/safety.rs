@@ -163,7 +163,15 @@ pub fn remote_write(program: &str, args: &[&str], stdin: Option<&[u8]>) -> Optio
                     None
                 }
             }
-            Some("auth") if sub.get(1) == Some(&"status") => None,
+            // switch and setup-git only change gh's and git's config here.
+            Some("auth")
+                if matches!(
+                    sub.get(1),
+                    Some(&"status") | Some(&"switch") | Some(&"setup-git")
+                ) =>
+            {
+                None
+            }
             Some("version") | None => None,
             Some("run") if sub.get(1) == Some(&"download") => None,
             Some("release") if sub.get(1) == Some(&"download") => None,
@@ -332,6 +340,9 @@ mod tests {
         assert!(w("gh", "release download v1 -p x").is_none());
         assert!(w("gh", "run download 5 -n a -D d").is_none());
         assert!(w("gh", "auth status").is_none());
+        assert!(w("gh", "auth switch --hostname github.com --user x").is_none());
+        assert!(w("gh", "auth setup-git").is_none());
+        assert!(w("gh", "auth logout").is_some());
         assert!(w("gh", "pr checkout 12").is_none());
         // glab / az
         assert!(w("glab", "api projects/1/merge_requests").is_none());

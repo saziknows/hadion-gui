@@ -1271,7 +1271,6 @@ pub enum Action {
     /// Add text to the active repository's commit message (an issue key
     /// from the branch name, …): at the start or on a new last line, unless
     /// the message already contains it.
-    #[allow(dead_code)] // used by the automation area (issue keys)
     AddToCommitMessage {
         text: String,
         at_start: bool,
