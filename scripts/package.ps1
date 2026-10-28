@@ -4,8 +4,9 @@
 
 .DESCRIPTION
   1. cargo build -p gitvis (--release unless -Profile debug), skipped with -NoBuild
-  2. stage dist\gitvis-<version>\ : gitvis.exe, README.md, LICENSE files,
-     licenses\ (the bundled fonts' OFL texts)
+  2. stage dist\gitvis-<version>\ : gitvis.exe, README.md, LICENSE-MIT,
+     LICENSE-APACHE, licenses\ (the bundled fonts' OFL texts and
+     THIRD-PARTY-LICENSES.txt from `cargo run --example notices`)
   3. dist\gitvis-<version>-windows-<arch>.zip  (the release asset)
   4. the installer dist\gitvis-<version>-windows-<arch>-setup.exe with
      Inno Setup (ISCC) when it is installed; otherwise how to get it
@@ -89,6 +90,13 @@ if (-not $licences) {
     Write-Warning 'The repository has no LICENSE file: the package carries only the font licences.'
 }
 Copy-Item (Join-Path $root 'crates\gitvis\assets\fonts\*-OFL.txt') (Join-Path $stage 'licenses')
+# Every crate compiled into gitvis, with its licence files (MIT, BSD, ISC
+# and Zlib ask for their notices to travel with binaries).
+$notices = Join-Path $stage 'licenses\THIRD-PARTY-LICENSES.txt'
+$noticeArgs = @('run', '--quiet', '--locked', '-p', 'gitvis-core', '--example', 'notices')
+if ($Profile -eq 'release') { $noticeArgs += '--release' }
+& cargo @noticeArgs -- --out $notices
+if ($LASTEXITCODE -ne 0) { throw "cargo run --example notices failed (exit $LASTEXITCODE)" }
 Get-ChildItem $stage -Recurse -File | ForEach-Object {
     '  {0,12:N0}  {1}' -f $_.Length, $_.FullName.Substring($stage.Length + 1)
 }
