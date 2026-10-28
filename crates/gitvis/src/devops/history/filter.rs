@@ -305,7 +305,6 @@ pub fn filter_bar(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
             ui.set_min_width(ui.available_width());
             let mut edited = false;
             let mut apply = false;
-            ui.spacing_mut().interact_size.y = form::INPUT_H;
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
                 let label = |ui: &mut Ui, t: &str| widgets::bar_label(ui, t);

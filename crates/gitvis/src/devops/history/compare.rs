@@ -380,7 +380,6 @@ fn revision_bar(ui: &mut Ui, c: &mut Compare, suggestions: &[String], actions: &
         })
         .show(ui, |ui| {
             let mut submit = false;
-            ui.spacing_mut().interact_size.y = crate::views::form::INPUT_H;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 widgets::bar_label(ui, "A");
