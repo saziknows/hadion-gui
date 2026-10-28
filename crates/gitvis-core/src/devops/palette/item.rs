@@ -173,15 +173,13 @@ impl Target {
         Some(match kind {
             "cmd" => Target::Command(rest.to_owned()),
             "ref" => {
-                let (kind, name) = if let Some(n) = rest.strip_prefix("refs/heads/") {
-                    (RefKind::Local, n)
-                } else if let Some(n) = rest.strip_prefix("refs/remotes/") {
-                    (RefKind::Remote, n)
-                } else if let Some(n) = rest.strip_prefix("refs/tags/") {
-                    (RefKind::Tag, n)
-                } else {
-                    return None;
-                };
+                let (kind, name) = [
+                    ("refs/heads/", RefKind::Local),
+                    ("refs/remotes/", RefKind::Remote),
+                    ("refs/tags/", RefKind::Tag),
+                ]
+                .into_iter()
+                .find_map(|(p, k)| rest.strip_prefix(p).map(|n| (k, n)))?;
                 Target::Ref {
                     name: name.to_owned(),
                     full: rest.to_owned(),

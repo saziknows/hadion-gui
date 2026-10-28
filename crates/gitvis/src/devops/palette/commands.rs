@@ -137,7 +137,7 @@ pub fn catalog(cx: &Cx) -> Catalog {
 
     // ----- Pages -----
     if has_repo {
-        let pages: [(&str, &str, Page, Icon, &str, &str, &str, bool); 11] = [
+        let pages: [PageRow; 11] = [
             (
                 "page:home",
                 "Home",
@@ -922,6 +922,19 @@ pub fn catalog(cx: &Cx) -> Catalog {
     }
     c
 }
+
+/// A page command: id, title, page, icon, shortcut, hint, keywords, and
+/// whether it needs a GitHub / GitLab / Azure DevOps remote.
+type PageRow = (
+    &'static str,
+    &'static str,
+    Page,
+    Icon,
+    &'static str,
+    &'static str,
+    &'static str,
+    bool,
+);
 
 const SHIP_TABS: [ShipTab; 7] = [
     ShipTab::Releases,

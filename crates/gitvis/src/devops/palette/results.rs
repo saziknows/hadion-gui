@@ -21,6 +21,9 @@ pub const LIMIT: usize = 500;
 pub const RECENT: usize = 6;
 pub const SUGGESTED: usize = 6;
 
+// Nearly every row is an entry and a list holds at most `LIMIT` + a few
+// headers, so boxing entries would only add allocations.
+#[allow(clippy::large_enum_variant)]
 pub enum Row {
     /// A caption between groups (not selectable).
     Header(&'static str),

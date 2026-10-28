@@ -543,8 +543,8 @@ mod tests {
 
     #[test]
     fn keys_of_hits_are_targets() {
-        let items = vec![cmd("fetch", "Fetch")];
-        assert_eq!(items[0].target, Target::Command("fetch".into()));
+        let item = cmd("fetch", "Fetch");
+        assert_eq!(item.target, Target::Command("fetch".into()));
     }
 
     /// `cargo test -p gitvis-core --lib palette_perf -- --ignored --nocapture`

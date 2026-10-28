@@ -315,12 +315,14 @@ fn handle(st: &mut State, cx: &Cx, keys: &Keys, actions: &mut Vec<Action>) {
     if keys.tab {
         tab(st);
     }
-    if keys.actions || std::mem::take(&mut st.actions_requested) {
-        if let Some(e) = st.results.entry(st.selected).cloned() {
+    let show_actions = keys.actions || std::mem::take(&mut st.actions_requested);
+    let run = !show_actions && (keys.enter || std::mem::take(&mut st.run_requested));
+    if (show_actions || run)
+        && let Some(e) = st.results.entry(st.selected).cloned()
+    {
+        if show_actions {
             drill(st, cx, &e, actions);
-        }
-    } else if keys.enter || std::mem::take(&mut st.run_requested) {
-        if let Some(e) = st.results.entry(st.selected).cloned() {
+        } else {
             run_default(st, cx, &e, actions);
         }
     }

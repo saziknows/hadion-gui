@@ -309,7 +309,7 @@ impl Matcher {
                 self.run[j - lo] = b as i8;
             }
         }
-        for i in 1..m {
+        for (i, &pc) in pat.iter().enumerate().skip(1) {
             let (row, prev) = (i * w, (i - 1) * w);
             // Running best of `score[i-1][k] + GAP_EXT * k` over k <= j - 2.
             let mut best = NONE;
@@ -333,7 +333,7 @@ impl Matcher {
                         best_k = k;
                     }
                 }
-                if text[j] != pat[i] {
+                if text[j] != pc {
                     continue;
                 }
                 let b = hay.bonus[j] as i32;

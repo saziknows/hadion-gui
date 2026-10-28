@@ -292,7 +292,7 @@ pub fn pr_entries(cx: &Cx) -> (Vec<PrEntry>, Vec<IssueEntry>) {
         }
     }
     // Newest first.
-    prs.sort_by(|a, b| b.number.cmp(&a.number));
+    prs.sort_by_key(|p| std::cmp::Reverse(p.number));
     let mut issues = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for f in rv.issues.lists.values() {
@@ -310,7 +310,7 @@ pub fn pr_entries(cx: &Cx) -> (Vec<PrEntry>, Vec<IssueEntry>) {
             }
         }
     }
-    issues.sort_by(|a, b| b.number.cmp(&a.number));
+    issues.sort_by_key(|i| std::cmp::Reverse(i.number));
     (prs, issues)
 }
 
@@ -446,8 +446,10 @@ mod tests {
 
     #[test]
     fn recent_repositories_are_listed_once() {
-        let mut settings = Settings::default();
-        settings.recent = vec!["C:/a".into(), "C:/c".into()];
+        let settings = Settings {
+            recent: vec!["C:/a".into(), "C:/c".into()],
+            ..Default::default()
+        };
         let repos = vec![RepoState::new(1, "C:/a".into())];
         let cx = Cx {
             settings: &settings,
