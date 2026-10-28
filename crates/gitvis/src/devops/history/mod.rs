@@ -634,7 +634,7 @@ pub fn show_compare(
             "Who last changed each line of a file at any revision, and when; step back to the version before"
         }
     };
-    kit::page_header(ui, mode.label(), subtitle, |ui| {
+    page_header(ui, mode.label(), subtitle, |ui| {
         if let Some(m) = kit::segmented(
             ui,
             &[
@@ -659,6 +659,55 @@ pub fn show_compare(
         Mode::Files => browse::show(ui, repo, settings, actions),
         Mode::Blame => blame::show(ui, repo, settings, actions),
     }
+}
+
+/// `kit::page_header` with the actions placed first: the title and the
+/// subtitle take the width the actions leave and the subtitle wraps there,
+/// instead of running under the actions in a narrow window.
+fn page_header(
+    ui: &mut egui::Ui,
+    title: &str,
+    subtitle: &str,
+    actions_ui: impl FnOnce(&mut egui::Ui),
+) {
+    use egui::{Align, Label, Layout, Margin, RichText};
+    let p = *pal(ui);
+    egui::Frame::NONE
+        .inner_margin(Margin {
+            left: 24,
+            right: 16,
+            top: 14,
+            bottom: 10,
+        })
+        .show(ui, |ui| {
+            // Top-aligned: a centred right-to-left row would fill the whole
+            // page height (egui centres in the available height).
+            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                actions_ui(ui);
+                ui.add_space(16.0);
+                ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    ui.label(
+                        RichText::new(title)
+                            .size(crate::theme::size::HEADING)
+                            .family(crate::theme::semibold())
+                            .color(p.text_strong),
+                    );
+                    if !subtitle.is_empty() {
+                        ui.add(
+                            Label::new(
+                                RichText::new(subtitle)
+                                    .size(crate::theme::size::SMALL)
+                                    .color(p.text_2),
+                            )
+                            .wrap(),
+                        );
+                    }
+                });
+            });
+        });
+    kit::hairline(ui);
 }
 
 /// Branch, tag and remote names for the revision inputs, HEAD first.

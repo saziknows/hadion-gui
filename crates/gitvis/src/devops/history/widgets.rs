@@ -297,6 +297,38 @@ pub fn paint_file_row(
     }
 }
 
+/// Numbers as one wrapped line of "value label" pairs: the short-window
+/// form of a row of stat tiles (`insights::stats`), with the same tooltips.
+pub fn compact_stats(ui: &mut Ui, items: &[kit::Stat]) {
+    let p = *pal(ui);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(18.0, 4.0);
+        for s in items {
+            let color = match s.tone {
+                kit::Tone::Neutral => p.text_strong,
+                t => t.color(&p),
+            };
+            let resp = ui
+                .horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 5.0;
+                    ui.label(
+                        egui::RichText::new(&s.value)
+                            .size(size::BODY + 1.0)
+                            .family(theme::semibold())
+                            .color(color),
+                    );
+                    ui.label(
+                        egui::RichText::new(s.label)
+                            .size(size::SMALL)
+                            .color(p.text_2),
+                    );
+                })
+                .response;
+            kit::tip(resp, s.tip);
+        }
+    });
+}
+
 /// `kit::search_box` on its own row, kept inside a resizable pane (with
 /// text, its clear button would otherwise make the pane grow).
 pub fn search(ui: &mut Ui, id: &str, text: &mut String, hint: &str) -> Response {

@@ -194,8 +194,11 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
             bottom: 10,
         })
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
+            // The file input gives up width first; a window narrower still
+            // wraps the row instead of pushing the Blame button off it.
+            let file_w = (ui.available_width() - 470.0).clamp(160.0, 320.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
                 if !v.back.is_empty()
                     && IconButton::new(Icon::Undo, "Back")
                         .compact()
@@ -222,7 +225,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                     ("hist_blame", "path"),
                     &mut v.path,
                     crate::views::form::InputOpts::new("src/main.rs")
-                        .width(320.0)
+                        .width(file_w)
                         .mono(),
                 );
                 submit |= widgets::submitted(ui, &r);
@@ -315,32 +318,40 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
     };
     let b = &show.blame;
     let now = format::now_secs();
+    // A short window gets the numbers on one line instead of tiles, so the
+    // code keeps its room.
+    let compact = ui.available_height() < 520.0;
     Frame::NONE
         .inner_margin(Margin {
             left: 24,
             right: 16,
-            top: 10,
+            top: if compact { 8 } else { 10 },
             bottom: 8,
         })
         .show(ui, |ui| {
+            if compact {
+                ui.spacing_mut().item_spacing.y = 4.0;
+            }
             let authors = b.authors();
             let (oldest, newest) = b.time_range().unwrap_or((now, now));
-            crate::views::insights::stats(
-                ui,
-                &[
-                    Stat::new("Lines", format::count(b.lines.len())),
-                    Stat::new(
-                        "Commits",
-                        format::count(b.commits.iter().filter(|c| c.lines > 0).count()),
-                    ),
-                    Stat::new("Authors", format::count(authors.len())),
-                    Stat::new("Oldest line", format::relative(oldest, now)),
-                    Stat::new("Newest line", format::relative(newest, now)),
-                    Stat::new("Time", format::millis(b.elapsed_ms)),
-                ],
-            );
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
+            let stats = [
+                Stat::new("Lines", format::count(b.lines.len())),
+                Stat::new(
+                    "Commits",
+                    format::count(b.commits.iter().filter(|c| c.lines > 0).count()),
+                ),
+                Stat::new("Authors", format::count(authors.len())),
+                Stat::new("Oldest line", format::relative(oldest, now)),
+                Stat::new("Newest line", format::relative(newest, now)),
+                Stat::new("Time", format::millis(b.elapsed_ms)),
+            ];
+            if compact {
+                widgets::compact_stats(ui, &stats);
+            } else {
+                crate::views::insights::stats(ui, &stats);
+            }
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
                 ui.label(RichText::new("Age").size(size::SMALL).color(p.text_2));
                 let (rect, _) = ui.allocate_exact_size(vec2(140.0, 8.0), Sense::hover());
                 let steps = 14;
@@ -366,14 +377,17 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                     .color(p.text_2),
                 );
                 if let Some(a) = authors.first() {
+                    ui.add_space(8.0);
                     ui.label(
-                        RichText::new(format!(
-                            "·  most lines: {} ({}%)",
-                            a.0,
-                            a.1 * 100 / b.lines.len().max(1)
-                        ))
-                        .size(size::SMALL)
-                        .color(p.text_2),
+                        RichText::new("Most lines")
+                            .size(size::SMALL)
+                            .color(p.text_2),
+                    );
+                    ui.label(
+                        RichText::new(format!("{} ({}%)", a.0, a.1 * 100 / b.lines.len().max(1)))
+                            .size(size::SMALL)
+                            .family(crate::theme::medium())
+                            .color(p.text),
                     );
                 }
                 if let Some(lang) = &show.language {
@@ -383,10 +397,16 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                     kit::badge(ui, "First 100,000 lines", Tone::Warning);
                 }
             });
-            kit::muted(
-                ui,
-                &format!("{}  ·  click a commit for its menu", b.command),
-            );
+            // The hint first, then the exact command in the code font.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(10.0, 2.0);
+                ui.label(
+                    RichText::new("Click a commit in the gutter for its menu.")
+                        .size(size::SMALL)
+                        .color(p.text_2),
+                );
+                ui.label(kit::mono(&b.command).size(size::MONO - 1.0).color(p.text_3));
+            });
         });
     let scroll_to = v.scroll_to.take();
     let mark = v.mark;

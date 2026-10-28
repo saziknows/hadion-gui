@@ -293,8 +293,8 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
             bottom: 10,
         })
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
                 widgets::bar_label(ui, "Revision");
                 let (r, picked) = widgets::rev_input(
                     ui,
