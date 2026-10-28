@@ -431,7 +431,27 @@ pub fn highlight(m: &mut Matcher, mode: Mode, query: &Query, e: &Entry) -> Vec<u
             out
         }
         (Some(_), _) => Vec::new(),
-        (None, _) => rank::title_indices(m, query, &e.item),
+        (None, _) => match (&e.item.target, &e.item.extra) {
+            // A file is shown name first: emphasise a token where it
+            // matches the name, else where it matches the path.
+            (Target::File(path), Some(name)) => {
+                let offset = (path.chars().count() - name.len()) as u32;
+                let mut out = Vec::new();
+                let mut one = Vec::new();
+                for tok in query.tokens() {
+                    one.clear();
+                    if m.token(tok, name, Some(&mut one)).is_some() {
+                        out.extend(one.iter().map(|i| i + offset));
+                    } else {
+                        let _ = m.token(tok, &e.item.hay, Some(&mut out));
+                    }
+                }
+                out.sort_unstable();
+                out.dedup();
+                out
+            }
+            _ => rank::title_indices(m, query, &e.item),
+        },
     }
 }
 
@@ -574,6 +594,22 @@ mod tests {
             st.results.entry(0).and_then(|e| e.verb),
             Some(Verb::CopyPath)
         );
+    }
+
+    #[test]
+    fn file_rows_highlight_the_name() {
+        let item =
+            gitvis_core::devops::palette::sources::file_items(&["src/main/x/main.rs".into()])
+                .remove(0);
+        let e = Entry::of(item);
+        let mut m = Matcher::new();
+        // In the name (index 11 on), not in the first folder.
+        assert_eq!(
+            highlight(&mut m, Mode::Search, &Query::new("main"), &e),
+            [11, 12, 13, 14]
+        );
+        // A token only in the folders is emphasised there.
+        assert_eq!(highlight(&mut m, Mode::Search, &Query::new("x"), &e), [9]);
     }
 
     #[test]

@@ -1143,14 +1143,15 @@ fn counts(st: &State) -> String {
         Mode::Search => {
             let shown = r.entries();
             if r.query.is_empty() {
+                let what = chip_label(r.scope).to_lowercase();
                 if shown < r.matched {
                     format!(
-                        "First {} of {}",
+                        "First {} of {} {what}",
                         crate::format::count(shown),
                         crate::format::count(r.matched)
                     )
                 } else {
-                    crate::format::count(shown)
+                    format!("{} {what}", crate::format::count(shown))
                 }
             } else if shown < r.matched {
                 format!(
