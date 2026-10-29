@@ -65,8 +65,7 @@ pub fn show(
         config.ok().map(|s| {
             s.values(key)
                 .into_iter()
-                .filter(|e| e.scope <= gitvis_core::devops::identity::Scope::Global)
-                .next_back()
+                .rfind(|e| e.scope <= gitvis_core::devops::identity::Scope::Global)
                 .map(|e| e.value_text().to_owned())
         })
     };
