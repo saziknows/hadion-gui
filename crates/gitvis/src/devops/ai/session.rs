@@ -45,14 +45,16 @@ pub struct UsageRow {
     /// The model that answered (a fallback model after a switch).
     pub model: String,
     pub feature: Feature,
-    /// Through Claude Code (the plan), not the API.
+    /// Through Claude Code, not gitvis's own API requests.
     pub cli: bool,
+    /// Through Claude Code signed in with an API key: `cost` is its estimate.
+    pub billed: bool,
     pub requests: u32,
     pub failed: u32,
     pub usage: Usage,
-    /// Estimated API cost (0 for Claude Code).
+    /// Estimated API cost (0 for Claude Code on a plan).
     pub cost: f64,
-    /// Claude Code's own client-side estimate (covered by the plan).
+    /// Claude Code's own client-side estimate of what a plan covered.
     pub cli_estimate: f64,
 }
 
@@ -73,8 +75,9 @@ pub struct Session {
     pub model_override: Option<Model>,
     pub cli_model_override: Option<CliModel>,
     pub ask_override: Option<bool>,
-    /// Scroll the Settings section to a part (`usage`, `cli`, `api`) once.
-    pub scroll_to: Option<String>,
+    /// Scroll the Settings section to a part (`usage`, `cli`, `api`), asked
+    /// for at that moment.
+    pub scroll_to: Option<(String, std::time::Instant)>,
 }
 
 static SESSION: Mutex<Session> = Mutex::new(Session {
@@ -109,12 +112,17 @@ pub struct Record<'a> {
     pub ok: bool,
     /// Through Claude Code, with its own estimate.
     pub cli: Option<f64>,
+    /// Claude Code was signed in with an API key: the estimate is a bill.
+    pub billed: bool,
 }
 
 /// Count one request.
 pub fn record(r: Record) {
     let via_cli = r.cli.is_some();
-    let c = if via_cli {
+    let billed = via_cli && r.billed;
+    let c = if billed {
+        r.cli.unwrap_or(0.0)
+    } else if via_cli {
         0.0
     } else {
         cost(Model::parse(r.model_id).unwrap_or(r.requested), r.usage)
@@ -127,17 +135,16 @@ pub fn record(r: Record) {
         r.requested.id().to_owned()
     };
     with(|s| {
-        let row = match s
-            .usage
-            .iter_mut()
-            .find(|x| x.model == model && x.feature == r.feature && x.cli == via_cli)
-        {
+        let row = match s.usage.iter_mut().find(|x| {
+            x.model == model && x.feature == r.feature && x.cli == via_cli && x.billed == billed
+        }) {
             Some(x) => x,
             None => {
                 s.usage.push(UsageRow {
                     model: model.clone(),
                     feature: r.feature,
                     cli: via_cli,
+                    billed,
                     requests: 0,
                     failed: 0,
                     usage: Usage::default(),
@@ -153,7 +160,9 @@ pub fn record(r: Record) {
         }
         row.usage.add(r.usage);
         row.cost += c;
-        row.cli_estimate += r.cli.unwrap_or(0.0);
+        if !billed {
+            row.cli_estimate += r.cli.unwrap_or(0.0);
+        }
     });
 }
 
@@ -165,7 +174,8 @@ pub struct Totals {
     pub usage: Usage,
     /// Estimated API cost.
     pub cost: f64,
-    /// Requests through Claude Code, and its own estimate for them.
+    /// Requests through Claude Code on a plan, and its own estimate for
+    /// them (Claude Code signed in with an API key counts in `cost`).
     pub cli_requests: u32,
     pub cli_estimate: f64,
 }
@@ -178,7 +188,7 @@ pub fn totals() -> Totals {
             t.failed += r.failed;
             t.usage.add(&r.usage);
             t.cost += r.cost;
-            if r.cli {
+            if r.cli && !r.billed {
                 t.cli_requests += r.requests;
                 t.cli_estimate += r.cli_estimate;
             }

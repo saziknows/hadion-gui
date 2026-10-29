@@ -89,6 +89,7 @@ impl Case {
             model,
             effort: Effort::Low,
             account: "Claude Max plan".to_owned(),
+            bills_api: false,
             cwd: Some(&self.dir),
         };
         cli::send(&call, &prompt(), cancel, live)

@@ -379,6 +379,7 @@ fn start(cx: &mut Ctx, repo: &mut RepoState, target: Target) {
         started: Instant::now(),
         applied: false,
         unapplied: false,
+        chosen_cli: None,
     };
     let material = match gather(repo, &target) {
         Ok(m) => m,
@@ -407,6 +408,7 @@ fn start(cx: &mut Ctx, repo: &mut RepoState, target: Target) {
             Msg::Prepared {
                 target: t,
                 id,
+                chosen: route.as_ref().ok().map(Route::is_cli),
                 result: route
                     .and_then(|route| prepare_staged(dir, diff_budget, &mut log.commands, route)),
                 cli,
@@ -422,6 +424,7 @@ fn start(cx: &mut Ctx, repo: &mut RepoState, target: Target) {
             Msg::Prepared {
                 target: t,
                 id,
+                chosen: route.as_ref().ok().map(Route::is_cli),
                 result: route.and_then(|route| {
                     prepare_new_pr(
                         dir,
@@ -441,6 +444,7 @@ fn start(cx: &mut Ctx, repo: &mut RepoState, target: Target) {
             Msg::Prepared {
                 target: t,
                 id,
+                chosen: route.as_ref().ok().map(Route::is_cli),
                 result: route.and_then(|route| {
                     let (input, m) = inputs::commit(dir, &sha, diff_budget, &mut log.commands)
                         .map_err(Failure::Prepare)?;
@@ -469,6 +473,7 @@ fn start(cx: &mut Ctx, repo: &mut RepoState, target: Target) {
             Msg::Prepared {
                 target: t,
                 id,
+                chosen: route.as_ref().ok().map(Route::is_cli),
                 result: route.and_then(|route| {
                     let files = match files {
                         Some(f) => f,
@@ -497,6 +502,7 @@ fn start(cx: &mut Ctx, repo: &mut RepoState, target: Target) {
             Msg::Prepared {
                 target: t,
                 id,
+                chosen: route.as_ref().ok().map(Route::is_cli),
                 result: route.and_then(|route| {
                     let job_log = match job_log {
                         Some(l) => *l,
@@ -574,6 +580,7 @@ fn choose(
                 install,
                 version: st.version,
                 account: auth.label(),
+                phrase: auth.phrase(),
                 bills_api: auth.bills_api(),
             }))
         })
@@ -603,7 +610,7 @@ fn choose(
                         (None, _) => "Claude Code is not installed".to_owned(),
                         (Some(_), Some(a)) if a.bills_api() => format!(
                             "Claude Code is signed in with {}, which bills the API rather than a Claude plan",
-                            a.label()
+                            a.phrase()
                         ),
                         (Some(_), Some(_)) => "Claude Code is not signed in".to_owned(),
                         (Some(_), None) => "Claude Code's sign-in could not be read".to_owned(),
@@ -937,6 +944,7 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
         Msg::Prepared {
             target,
             id,
+            chosen,
             result,
             cli,
         } => {
@@ -953,6 +961,15 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
             let Some(a) = st.asks.get_mut(&target).filter(|a| a.id == id) else {
                 return; // cancelled or replaced meanwhile
             };
+            a.chosen_cli = chosen;
+            if matches!(&result, Err(Failure::NoKey | Failure::NoProvider(_))) {
+                // The route choice found no key; say so until a check.
+                session::with(|s| {
+                    if matches!(s.key, session::KeyState::Unknown) {
+                        s.key = session::KeyState::Known(runner::KeyStatus::default());
+                    }
+                });
+            }
             match result {
                 Err(f) => a.phase = Phase::Done(Err(f)),
                 Ok(p) => {
@@ -979,6 +996,10 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                 return;
             };
             let via_cli = a.prepared.as_ref().is_some_and(|p| p.route.is_cli());
+            let billed = a
+                .prepared
+                .as_ref()
+                .is_some_and(|p| matches!(&p.route, Route::ClaudeCode(c) if c.bills_api));
             // What streamed before a failure still counts.
             let live_usage: Option<(String, Usage)> = match &a.phase {
                 Phase::Running { live, .. } => {
@@ -996,8 +1017,14 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                         usage: &d.answer.usage,
                         ok: !d.answer.refused(),
                         cli: d.cli.as_ref().map(|c| c.cost_estimate.unwrap_or(0.0)),
+                        billed,
                     });
-                    if let Some(plan) = d.cli.as_ref().and_then(|c| c.plan.clone()) {
+                    if let Some(plan) = d
+                        .cli
+                        .as_ref()
+                        .filter(|c| !c.bills_api)
+                        .and_then(|c| c.plan.clone())
+                    {
                         session::with(|s| s.plan = Some((plan, Instant::now())));
                     }
                 }
@@ -1011,13 +1038,19 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                         usage: &u,
                         ok: false,
                         cli: via_cli.then_some(0.0),
+                        billed,
                     });
                 }
             }
             let requested = a.model;
             let priced = |d: &runner::Done| {
-                if !d.via.is_api() {
-                    return 0.0;
+                if let Some(run) = &d.cli {
+                    // A plan covers it; an API sign-in pays Claude Code's estimate.
+                    return if run.bills_api {
+                        run.cost_estimate.unwrap_or(0.0)
+                    } else {
+                        0.0
+                    };
                 }
                 Model::parse(&d.answer.model)
                     .map(|m| cost(m, &d.answer.usage))
@@ -1169,7 +1202,7 @@ fn confirm(cx: &mut Ctx, a: &Ask) {
             let who = if c.bills_api {
                 format!(
                     "your Claude Code, signed in with {}: this bills that API account, not a Claude plan",
-                    c.account
+                    c.phrase
                 )
             } else {
                 format!("Claude Code CLI (your subscription: {})", c.account)
@@ -1189,7 +1222,12 @@ fn confirm(cx: &mut Ctx, a: &Ask) {
             let plan =
                 cli::env_plan(std::env::vars_os().map(|(k, _)| k.to_string_lossy().into_owned()));
             let mut details = vec![format!(
-                "Claude Code CLI (your subscription) · {}{}",
+                "{} · {}{}",
+                if c.bills_api {
+                    "Claude Code CLI (signed in with an API key: billed per token)"
+                } else {
+                    "Claude Code CLI (your subscription)"
+                },
                 c.account,
                 c.version
                     .map(|v| format!(" · version {v}"))
@@ -1289,7 +1327,11 @@ fn send(cx: &mut Ctx, repo: &mut RepoState, target: &Target, id: u64) {
                 let args = cli::args(cli_model, cli_effort, &prompt.system);
                 log.command(format!(
                     "{} (from {}; material on standard input)",
-                    cli::display(&c.install, &args).join(" "),
+                    cli::display(&c.install, &args)
+                        .iter()
+                        .map(|l| l.trim())
+                        .collect::<Vec<_>>()
+                        .join(" "),
                     std::env::temp_dir().join(cli::WORKDIR).display()
                 ));
                 let call = cli::CliCall {
@@ -1297,6 +1339,7 @@ fn send(cx: &mut Ctx, repo: &mut RepoState, target: &Target, id: u64) {
                     model: cli_model,
                     effort: cli_effort,
                     account: c.account.clone(),
+                    bills_api: c.bills_api,
                     cwd: None,
                 };
                 cli::send(&call, &prompt, &stop, &live)

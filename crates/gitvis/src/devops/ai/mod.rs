@@ -83,6 +83,8 @@ pub struct CliRoute {
     pub account: String,
     /// Signed in with an API key: requests bill the API, not the plan.
     pub bills_api: bool,
+    /// `your Claude Max plan`, `an API key`, for sentences.
+    pub phrase: String,
 }
 
 impl Route {
@@ -142,6 +144,9 @@ pub struct Ask {
     pub applied: bool,
     /// The answer waits for "Replace your message?".
     pub unapplied: bool,
+    /// The route picked before the material was read (`Some(true)` Claude
+    /// Code), kept when reading the material fails.
+    pub chosen_cli: Option<bool>,
 }
 
 impl Ask {
@@ -168,13 +173,18 @@ impl Ask {
         }
         match &self.prepared {
             Some(p) => p.route.is_cli(),
-            None => self.provider == Provider::ClaudeCode,
+            None => self
+                .chosen_cli
+                .unwrap_or(self.provider == Provider::ClaudeCode),
         }
     }
 
-    /// Settled once the material is ready.
+    /// Settled once the route is chosen.
     pub fn route_known(&self) -> bool {
-        self.prepared.is_some() || self.reply().is_some() || self.provider != Provider::Auto
+        self.prepared.is_some()
+            || self.reply().is_some()
+            || self.chosen_cli.is_some()
+            || self.provider != Provider::Auto
     }
 
     /// `Claude Code · Opus`, `Opus 5.5`, `Auto`.
@@ -276,6 +286,9 @@ pub enum Msg {
     Prepared {
         target: Target,
         id: u64,
+        /// The route chosen (`Some(true)` Claude Code), `None` when none
+        /// could be.
+        chosen: Option<bool>,
         result: Result<Prepared, Failure>,
         /// Claude Code as the route choice found it.
         cli: Option<Box<cli::Status>>,
@@ -326,6 +339,12 @@ impl Msg {
                 Ok(d) => {
                     let a = &d.answer;
                     let cost = match &d.cli {
+                        Some(run) if run.bills_api => format!(
+                            "billed to the API account Claude Code is signed in with (Claude Code estimates {})",
+                            run.cost_estimate
+                                .map(gitvis_core::devops::ai::dollars)
+                                .unwrap_or_else(|| "nothing".to_owned())
+                        ),
                         Some(run) => format!(
                             "covered by the plan (Claude Code estimates {})",
                             run.cost_estimate
@@ -581,7 +600,7 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         "ai-check-key" => vec![Act::CheckKey.into()],
         "ai-settings" => {
             if !arg.is_empty() {
-                session::with(|s| s.scroll_to = Some(arg.to_owned()));
+                session::with(|s| s.scroll_to = Some((arg.to_owned(), Instant::now())));
             }
             vec![
                 Action::DevOps(crate::devops::DevOpsAction::SetSettingsSection(

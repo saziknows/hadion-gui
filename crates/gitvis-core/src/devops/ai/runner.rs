@@ -567,14 +567,7 @@ mod tests {
 
     #[test]
     fn pasted_keys_are_cleaned() {
-        assert_eq!(
-            clean_key(
-                "  sk-ant-x 
-"
-            )
-            .unwrap(),
-            "sk-ant-x"
-        );
+        assert_eq!(clean_key("  sk-ant-x \n").unwrap(), "sk-ant-x");
         assert!(clean_key("   ").is_err());
         let e = clean_key("sk-ant one").unwrap_err();
         assert!(!e.contains("sk-ant"), "{e}");

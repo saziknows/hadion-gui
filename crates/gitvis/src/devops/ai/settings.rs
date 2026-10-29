@@ -28,17 +28,25 @@ fn keychain_name() -> &'static str {
 }
 
 /// Scroll to this part when a script asked for it (`ai-settings cli`).
+/// Scroll to `part` when a script asked for it. It keeps doing so for a
+/// moment, because the sections above still grow while the checks the page
+/// starts come back; scrolling or clicking ends it.
 fn scroll_here(ui: &mut Ui, part: &str) {
-    let wanted = session::with(|s| {
-        if s.scroll_to.as_deref() == Some(part) {
-            s.scroll_to = None;
-            true
-        } else {
-            false
+    let user = ui.input(|i| i.is_scrolling() || i.pointer.any_pressed());
+    let wanted = session::with(|s| match &s.scroll_to {
+        Some((p, at)) if p == part => {
+            let keep = !user && at.elapsed() < std::time::Duration::from_millis(2500);
+            if !keep {
+                s.scroll_to = None;
+            }
+            keep
         }
+        _ => false,
     });
     if wanted {
         ui.scroll_to_cursor(Some(Align::TOP));
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(100));
     }
 }
 
@@ -65,7 +73,9 @@ pub fn show(
     }
     let has_repo = repo.is_some();
     kit::scroll_page(ui, "settings_ai", |ui| {
-        ui.set_max_width(kit::PROSE);
+        // Never wider than the page: `set_max_width` alone would widen a
+        // narrow window's page past its edge.
+        ui.set_max_width(ui.available_width().min(kit::PROSE));
         provider_card(ui, settings);
         claude_code_section(ui, settings, has_repo, actions);
         api_section(ui, settings, has_repo, actions);
@@ -194,7 +204,7 @@ fn cli_verdict(st: &cli::Status) -> (Tone, &'static str, String) {
             "Claude Code bills an API account",
             format!(
                 "It is signed in with {}: requests through it are billed per token, not covered by a Claude plan.",
-                a.label()
+                a.phrase()
             ),
         ),
         (Some(_), Some(a)) => (
@@ -262,6 +272,7 @@ fn claude_code_section(
 ) {
     let (state, plan, model_over) =
         session::with(|s| (s.cli.clone(), s.plan.clone(), s.cli_model_override));
+    scroll_here(ui, "cli");
     kit::section_with(ui, "Claude Code (your subscription)", None, |ui| {
         if IconButton::new(Icon::Rerun, "Check again")
             .compact()
@@ -273,7 +284,6 @@ fn claude_code_section(
             actions.push(Act::CheckCli.into());
         }
     });
-    scroll_here(ui, "cli");
     let tone = match state.status() {
         Some(st) if !st.plan_ready() => Tone::Warning,
         _ => Tone::Neutral,
@@ -362,7 +372,10 @@ fn claude_code_section(
                 }
                 kv.text("Signed in", account);
             }
-            plan_rows(kv, &plan);
+            // Limits belong to a Claude plan; an API sign-in has none.
+            if st.auth.as_ref().is_some_and(|a| a.plan()) {
+                plan_rows(kv, &plan);
+            }
         });
         if let Some(a) = &st.auth {
             if !a.logged_in {
@@ -381,7 +394,7 @@ fn claude_code_section(
                     "This sign-in bills the API, not your plan",
                     &format!(
                         "Claude Code is signed in with {}. Requests through it are billed per token to that API account. To use your Claude subscription, sign in with your Claude account: run `{}` in a terminal.",
-                        a.label(),
+                        a.phrase(),
                         cli::SIGN_IN
                     ),
                 );
@@ -420,9 +433,14 @@ fn claude_code_section(
             "How gitvis runs it",
             "Your own Claude Code, from an empty folder, with every tool, MCP server, plugin, hook and CLAUDE.md switched off, for one turn, without saving the session. The material goes on standard input. gitvis never reads or stores Claude Code's credentials.",
         );
+        let bills_api = st.auth.as_ref().is_some_and(|a| a.bills_api());
         kit::secondary(
             ui,
-            "Requests count against your plan's limits instead of a per-token bill. Claude Code still prints what a request would cost at list prices; gitvis shows that estimate, but your plan covers it.",
+            if bills_api {
+                "Signed in this way, Claude Code bills that API account per token; gitvis shows the cost Claude Code estimates for each request."
+            } else {
+                "With a Claude plan, requests count against the plan's limits instead of a per-token bill. Claude Code still prints what a request would cost at list prices; gitvis shows that estimate, but your plan covers it."
+            },
         );
     });
 }
@@ -446,8 +464,8 @@ fn terminal_row(ui: &mut Ui, actions: &mut Vec<Action>) {
 // ---------------------------------------------------------------------------
 
 fn api_section(ui: &mut Ui, settings: &mut Settings, has_repo: bool, actions: &mut Vec<Action>) {
-    kit::section(ui, "Claude API (your key)", None);
     scroll_here(ui, "api");
+    kit::section(ui, "Claude API (your key)", None);
     key_card(ui, has_repo, actions);
     ui.add_space(space::M);
     model_card(ui, settings);
@@ -739,8 +757,8 @@ fn privacy_card(ui: &mut Ui, settings: &mut Settings) {
 fn usage_section(ui: &mut Ui) {
     let rows = session::with(|s| s.usage.clone());
     let t = session::totals();
-    kit::section(ui, "This session", None);
     scroll_here(ui, "usage");
+    kit::section(ui, "This session", None);
     if rows.is_empty() {
         kit::muted(
             ui,
@@ -764,7 +782,7 @@ fn usage_section(ui: &mut Ui) {
     ];
     if t.cli_requests > 0 {
         tiles.push(kit::Stat::new(
-            "Through Claude Code",
+            "On your plan",
             crate::format::count(t.cli_requests as usize),
         ));
     }
@@ -773,7 +791,7 @@ fn usage_section(ui: &mut Ui) {
         kit::secondary(
             ui,
             &format!(
-                "Your plan covers the requests through Claude Code; Claude Code estimates them at {} at list prices.",
+                "Your plan covers the requests through Claude Code signed in with your Claude account; Claude Code estimates them at {} at list prices.",
                 dollars(t.cli_estimate)
             ),
         );
@@ -792,7 +810,12 @@ fn usage_section(ui: &mut Ui) {
         .iter()
         .map(|r| {
             vec![
-                if r.cli { "Claude Code" } else { "API" }.to_owned(),
+                match (r.cli, r.billed) {
+                    (true, false) => "Claude Code",
+                    (true, true) => "Claude Code (API key)",
+                    _ => "API",
+                }
+                .to_owned(),
                 Model::label_of(&r.model)
                     .trim_start_matches("Claude ")
                     .to_owned(),
@@ -805,7 +828,7 @@ fn usage_section(ui: &mut Ui) {
                 crate::format::count(r.usage.input_tokens as usize),
                 crate::format::count(r.usage.output_tokens as usize),
                 crate::format::count(r.usage.cache_read_input_tokens as usize),
-                if r.cli {
+                if r.cli && !r.billed {
                     "plan".to_owned()
                 } else {
                     dollars(r.cost)

@@ -284,6 +284,31 @@ impl Auth {
     }
 }
 
+impl Auth {
+    /// The sign-in for a sentence ("signed in with …"): `your Claude Max
+    /// plan`, `an API key`, `an API key (ANTHROPIC_API_KEY)`.
+    pub fn phrase(&self) -> String {
+        if !self.logged_in {
+            return "no account".to_owned();
+        }
+        if self.plan() {
+            return format!("your {}", self.label());
+        }
+        if let Some(src) = &self.api_key_source {
+            return format!("an API key ({src})");
+        }
+        match self.method.as_str() {
+            "api_key" => "an API key".to_owned(),
+            "api_key_helper" => "an API key helper".to_owned(),
+            "third_party" => format!(
+                "a cloud provider ({})",
+                self.provider.as_deref().unwrap_or("not first-party")
+            ),
+            m => format!("`{m}`"),
+        }
+    }
+}
+
 fn title_case(s: &str) -> String {
     let mut c = s.chars();
     match c.next() {
@@ -494,23 +519,39 @@ pub fn args(model: CliModel, effort: Effort, system: &str) -> Vec<String> {
     a
 }
 
-/// The command as shown in the confirmation and the log: one argument per
-/// line after the program, the system prompt replaced by its size.
+/// The flags of [`args`] that take a value.
+const TAKES_VALUE: [&str; 8] = [
+    "--output-format",
+    "--tools",
+    "--disallowedTools",
+    "--mcp-config",
+    "--system-prompt",
+    "--model",
+    "--effort",
+    "--max-turns",
+];
+
+/// The command as shown in the confirmation and the log: the program, then
+/// one flag per line with its value, the system prompt replaced by its size.
 pub fn display(install: &Install, args: &[String]) -> Vec<String> {
     let mut out = vec![install.program.display().to_string()];
-    out.extend(install.prefix.iter().cloned());
-    let mut system_next = false;
-    for a in args {
-        if system_next {
-            out.push(format!(
-                "  \"<the system prompt below: {} characters>\"",
-                a.chars().count()
-            ));
-            system_next = false;
+    out.extend(install.prefix.iter().map(|p| format!("  {}", quote(p))));
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if !TAKES_VALUE.contains(&a.as_str()) {
+            out.push(format!("  {}", quote(a)));
             continue;
         }
-        system_next = a == "--system-prompt";
-        out.push(format!("  {}", quote(a)));
+        let v = it.next().map(String::as_str).unwrap_or_default();
+        let shown = if a == "--system-prompt" {
+            format!(
+                "\"<the system prompt below: {} characters>\"",
+                v.chars().count()
+            )
+        } else {
+            quote(v)
+        };
+        out.push(format!("  {a} {shown}"));
     }
     out
 }
@@ -1178,12 +1219,15 @@ impl Stream {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CliRun {
     pub version: String,
-    /// Claude Code's client-side estimate at list prices; the plan covers it.
+    /// Claude Code's client-side estimate at list prices: covered by a plan,
+    /// or billed to the API account it is signed in with (`bills_api`).
     pub cost_estimate: Option<f64>,
     pub duration_api_ms: Option<u64>,
     pub plan: Option<PlanUsage>,
     /// `Claude Max plan`.
     pub account: String,
+    /// Signed in with an API key or token rather than a Claude plan.
+    pub bills_api: bool,
 }
 
 /// One Claude Code request.
@@ -1193,6 +1237,8 @@ pub struct CliCall<'a> {
     pub effort: Effort,
     /// `Claude Max plan`, for the result.
     pub account: String,
+    /// Signed in with an API key or token: the result says it was billed.
+    pub bills_api: bool,
     /// Where it runs ([`workdir`] when `None`).
     pub cwd: Option<&'a Path>,
 }
@@ -1388,6 +1434,7 @@ pub fn send(
             duration_api_ms: o.duration_api_ms,
             plan: stream.plan.clone(),
             account: call.account.clone(),
+            bills_api: call.bills_api,
         }),
     })
 }
@@ -1449,6 +1496,17 @@ mod tests {
         let a = parse_auth(bedrock).unwrap();
         assert!(!a.plan() && a.bills_api());
         assert_eq!(a.label(), "Cloud provider (bedrock)");
+        assert_eq!(a.phrase(), "a cloud provider (bedrock)");
+        // Sentences: "signed in with …".
+        assert_eq!(
+            parse_auth(SIGNED_IN).unwrap().phrase(),
+            "your Claude Max plan"
+        );
+        assert_eq!(
+            parse_auth(ENV_KEY).unwrap().phrase(),
+            "an API key (ANTHROPIC_API_KEY)"
+        );
+        assert_eq!(parse_auth(API_LOGIN).unwrap().phrase(), "an API key");
         // Noise before the JSON (a warning line) is skipped.
         assert!(parse_auth(&format!("warning: x\n{SIGNED_OUT}")).is_some());
         assert!(parse_auth("not json").is_none());
@@ -1567,8 +1625,11 @@ mod tests {
                 .any(|l| l.contains("<the system prompt below: 13 characters>"))
         );
         assert!(!d.iter().any(|l| l.contains("secret")));
-        assert!(d.iter().any(|l| l == "  \"\""));
-        assert!(d.iter().any(|l| l == "  \"*\""));
+        assert!(d.iter().any(|l| l == "  --tools \"\""));
+        assert!(d.iter().any(|l| l == "  --disallowedTools \"*\""));
+        assert!(d.iter().any(|l| l == "  --model sonnet"));
+        assert!(d.iter().any(|l| l == "  --effort low"));
+        assert!(d.iter().any(|l| l == "  -p"));
     }
 
     #[test]
