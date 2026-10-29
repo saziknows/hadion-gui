@@ -653,7 +653,7 @@ pub enum Msg {
         job: u64,
         single: bool,
         jobs: Result<Vec<Job>, String>,
-        run_data: Option<Result<WorkflowRun, String>>,
+        run_data: Option<Result<Box<WorkflowRun>, String>>,
     },
     /// The log of a watched job that finished.
     JobLog {

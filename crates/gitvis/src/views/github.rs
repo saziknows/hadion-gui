@@ -680,13 +680,24 @@ fn watch_tick(
     actions: &mut Vec<Action>,
 ) {
     if !job.outcome().is_running() {
-        let waiting = matches!(
-            detail.logs.get(&job.id),
+        // Not asked for yet; or asked for while it ran (another way in
+        // than this view requested it), which GitHub answered with 404,
+        // and this view watched it finish.
+        let watched = ci
+            .watch
+            .as_ref()
+            .is_some_and(|w| w.run == run && w.job == job.id);
+        let waiting = match detail.logs.get(&job.id) {
             Some(LogState {
                 loading: false,
-                doc: None
-            })
-        );
+                doc: None,
+            }) => true,
+            Some(LogState {
+                loading: false,
+                doc: Some(Err(e)),
+            }) => watched && gitvis_core::github::is_not_found(e),
+            _ => false,
+        };
         if waiting && !job.never_ran() {
             actions.push(
                 ci::Act::FetchLog {
@@ -969,16 +980,8 @@ fn title_row(
 ) {
     let id = egui::Id::unique(("title_row_buttons", id_salt));
     let buttons_w: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
-    let heading = |ui: &mut Ui, icon: Box<dyn FnOnce(&mut Ui, Rect) + '_>| {
-        ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-            let (r, _) = ui.allocate_exact_size(vec2(20.0, 22.0), Sense::hover());
-            icon(ui, r);
-            kit::title(ui, title);
-        });
-    };
     if ui.available_width() - buttons_w - space::M < TITLE_MIN_W {
-        heading(ui, Box::new(icon));
+        title_heading(ui, title, icon);
         // Under the title, right-aligned, in the same order as beside it.
         let w = ui
             .allocate_ui_with_layout(
@@ -998,7 +1001,17 @@ fn title_row(
         let w = ui.scope(|ui| buttons(ui)).response.rect.width();
         ui.data_mut(|d| d.insert_temp(id, w));
         ui.add_space(space::M);
-        heading(ui, Box::new(icon));
+        title_heading(ui, title, icon);
+    });
+}
+
+/// The icon and the wrapping title of a [`title_row`].
+fn title_heading(ui: &mut Ui, title: &str, icon: impl FnOnce(&mut Ui, Rect)) {
+    ui.with_layout(Layout::left_to_right(Align::Min), |ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        let (r, _) = ui.allocate_exact_size(vec2(20.0, 22.0), Sense::hover());
+        icon(ui, r);
+        kit::title(ui, title);
     });
 }
 

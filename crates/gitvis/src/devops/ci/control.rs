@@ -674,8 +674,11 @@ fn poll_job(cx: &mut Ctx, repo: &mut RepoState, run: u64, job: u64) {
             .ok()
             .and_then(|l| l.iter().find(|j| j.id == job))
             .is_some_and(|j| !j.outcome().is_running());
-        let run_data =
-            finished.then(|| core::fetch_run(gh, run, &mut log.calls).map_err(|e| e.to_string()));
+        let run_data = finished.then(|| {
+            core::fetch_run(gh, run, &mut log.calls)
+                .map(Box::new)
+                .map_err(|e| e.to_string())
+        });
         Msg::JobPolled {
             run,
             job,
@@ -728,12 +731,12 @@ fn job_polled(
     job: u64,
     single: bool,
     jobs: Result<Vec<Job>, String>,
-    run_data: Option<Result<WorkflowRun, String>>,
+    run_data: Option<Result<Box<WorkflowRun>, String>>,
 ) {
     if let Some(Ok(r)) = run_data
         && let Some(d) = repo.github.as_mut()
     {
-        d.upsert_run(r);
+        d.upsert_run(*r);
     }
     let detail = repo.gh_page.runs.entry(run).or_default();
     let (progress, error) = match jobs {
@@ -814,6 +817,17 @@ fn job_log(
             doc: Some(doc),
         },
     );
+    // The watch ends with its log (or the last answer about it), so a log
+    // GitHub never publishes is not asked for again and again.
+    if repo
+        .devops
+        .ci
+        .watch
+        .as_ref()
+        .is_some_and(|w| w.run == run && w.job == job)
+    {
+        repo.devops.ci.watch = None;
+    }
 }
 
 fn load_run_artifacts(cx: &mut Ctx, repo: &mut RepoState, run: u64, force: bool) {

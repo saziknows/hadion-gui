@@ -288,19 +288,26 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
             );
             widgets::note(
                 ui,
-                &if run.reused > 0 {
-                    format!(
-                        "{} checked now, {} unchanged since the last check; {} ms",
-                        format::plural(run.linted, "file", "files"),
-                        run.reused,
-                        run.elapsed_ms
-                    )
-                } else {
-                    format!(
+                &match (run.linted, run.reused) {
+                    (0, r) => format!(
+                        "No file changed since the last check, so its {} stand.",
+                        if r == 1 {
+                            "findings"
+                        } else {
+                            "files' findings"
+                        }
+                    ),
+                    (l, 0) => format!(
                         "{} checked in {} ms",
-                        format::plural(run.linted, "file", "files"),
+                        format::plural(l, "file", "files"),
                         run.elapsed_ms
-                    )
+                    ),
+                    (l, r) => format!(
+                        "{} checked in {} ms; {} unchanged since the last check",
+                        format::plural(l, "file", "files"),
+                        run.elapsed_ms,
+                        r
+                    ),
                 },
             );
             if let (Some(Ok(n)), v) = (&run.actionlint, &run.actionlint_version) {
