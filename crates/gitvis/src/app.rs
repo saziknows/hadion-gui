@@ -455,6 +455,20 @@ impl GitVis {
         detail.expanded.insert(job);
         detail.selected_job = Some(job);
         r.gh_page.scroll_to_step = step.map(|s| (job, s));
+        // A running, queued or never-run job has no log yet (GitHub answers
+        // 404): the viewer shows its progress and loads the log when it ends.
+        if detail
+            .jobs()
+            .iter()
+            .find(|j| j.id == job)
+            .is_some_and(crate::devops::ci::no_log_yet)
+        {
+            detail.logs.entry(job).or_insert(LogState {
+                loading: false,
+                doc: None,
+            });
+            return;
+        }
         let fetch = match detail.logs.get(&job) {
             None => true,
             Some(s) => !s.loading && matches!(s.doc, Some(Err(_))),
@@ -2525,6 +2539,11 @@ impl GitVis {
                                 self.request_load(i, pending_full || refresh == Refresh::Full);
                                 if network {
                                     self.maybe_fetch_github(i, true);
+                                    // A push can put the selected commit on
+                                    // GitHub: ask for its checks again.
+                                    if let Selection::Commit(id) = self.repos[i].selection {
+                                        self.ensure_checks(i, id, true);
+                                    }
                                 }
                             }
                         } else {
@@ -2846,7 +2865,9 @@ impl GitVis {
                 }
                 Cmd::Theme => self.apply(ctx, Action::ToggleTheme),
                 Cmd::Window(w, h) => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)))
+                    // A maximised window ignores a new size: restore it first.
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
                 }
                 Cmd::Collapse(key) => {
                     if let Some(r) = self.repos.get_mut(i)
