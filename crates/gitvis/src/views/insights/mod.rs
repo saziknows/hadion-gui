@@ -347,21 +347,23 @@ fn depth_menu(ui: &mut Ui, page: &InsightsPage, actions: &mut Vec<Action>) {
     egui::Popup::menu(&resp)
         .id(egui::Id::unique("insights_depth"))
         .show(|ui| {
-            ui.set_min_width(220.0);
+            ui.set_min_width(240.0);
+            let p = *pal(ui);
+            ui.label(kit::caption_text(&p, "Commits the history pass reads"));
+            ui.add_space(2.0);
             for (n, text) in [
                 (2_000, "Newest 2,000 commits"),
                 (10_000, "Newest 10,000 commits"),
                 (50_000, "Newest 50,000 commits"),
                 (0, "All commits"),
             ] {
-                if ui.selectable_label(page.depth == n, text).clicked() {
+                if crate::views::form::radio(ui, page.depth == n, text) {
                     actions.push(Action::SetInsightsDepth(n));
                     ui.close();
                 }
             }
             ui.separator();
-            if ui
-                .checkbox(&mut page.all_refs.clone(), "All branches and tags")
+            if crate::views::form::checkbox(ui, &mut page.all_refs.clone(), "All branches and tags")
                 .on_hover_text(
                     "Walk every ref instead of HEAD only. Hotspots and ownership then include unmerged work.",
                 )
@@ -373,33 +375,49 @@ fn depth_menu(ui: &mut Ui, page: &InsightsPage, actions: &mut Vec<Action>) {
 }
 
 fn empty_state(ui: &mut Ui, page: &InsightsPage, actions: &mut Vec<Action>) {
-    if let Some(e) = &page.error {
-        if kit::empty_state(
+    scroll_empty(ui, "ins_empty", |ui| {
+        if let Some(e) = &page.error {
+            if kit::empty_state(
+                ui,
+                Icon::Warning,
+                "The analysis failed",
+                e,
+                Some((Icon::Rerun, "Try again")),
+            ) {
+                actions.push(Action::RunInsights);
+            }
+        } else if page.running() {
+            kit::empty_state(
+                ui,
+                Icon::Chart,
+                "Analysing the repository",
+                "Reading the index, the history, branches, tags, debt markers, workflows and licences.",
+                None,
+            );
+        } else if kit::empty_state(
             ui,
-            Icon::Warning,
-            "The analysis failed",
-            e,
-            Some((Icon::Rerun, "Try again")),
+            Icon::Chart,
+            "Not analysed yet",
+            "The analysis reads the index, the history (with line counts), branches, tags, debt markers, workflows and licences. Everything stays on this machine.",
+            Some((Icon::Search, "Analyse")),
         ) {
             actions.push(Action::RunInsights);
         }
-    } else if page.running() {
-        kit::empty_state(
-            ui,
-            Icon::Chart,
-            "Analysing the repository",
-            "Reading the index, the history, branches, tags, debt markers, workflows and licences.",
-            None,
-        );
-    } else if kit::empty_state(
-        ui,
-        Icon::Chart,
-        "Not analysed yet",
-        "The analysis reads the index, the history (with line counts), branches, tags, debt markers, workflows and licences. Everything stays on this machine.",
-        Some((Icon::Search, "Analyse")),
-    ) {
-        actions.push(Action::RunInsights);
-    }
+    });
+}
+
+/// A page-filling empty state that scrolls when the window is too short
+/// for it (otherwise its lower part is cut off). The content keeps the
+/// viewport's height, so `kit::empty_state` still places itself by it.
+pub(crate) fn scroll_empty(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
+    let h = ui.available_height();
+    egui::ScrollArea::vertical()
+        .id_salt(id)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            ui.set_max_height(h);
+            add(ui)
+        });
 }
 
 // ---------------------------------------------------------------------------
@@ -532,8 +550,6 @@ pub(crate) fn grid(
     if cols.is_empty() || rows.is_empty() {
         return;
     }
-    let p = *pal(ui);
-    let dark = ui.visuals().dark_mode;
     let row_h = 30.0;
     let head_h = 24.0;
     let gap = 20.0;
@@ -580,34 +596,98 @@ pub(crate) fn grid(
             .sum();
         fit_columns(&mut widths, &flex, (avail - fixed - gaps).max(60.0));
     }
-    let table_w = (widths.iter().sum::<f32>() + gaps).min(avail);
+    let table_w = widths.iter().sum::<f32>() + gaps;
+    let g = Geometry {
+        widths,
+        gap,
+        table_w,
+        row_h,
+        head_h,
+    };
+    if table_w > avail + 0.5 {
+        // Even the narrowest columns do not fit (a narrow pane): scroll
+        // sideways instead of drawing past the edge.
+        // The bar stays visible (the floating style hides it until hovered),
+        // so the columns off to the right are found; room under the last
+        // row keeps the bar from covering it.
+        ui.scope(|ui| {
+            let s = &mut ui.spacing_mut().scroll;
+            s.dormant_handle_opacity = 0.6;
+            s.dormant_background_opacity = 0.4;
+            egui::ScrollArea::horizontal()
+                .id_salt((id, "grid_x"))
+                .auto_shrink([false, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                .show(ui, |ui| {
+                    paint_grid(ui, id, cols, rows, click, &g, &mut on_row);
+                    ui.add_space(12.0);
+                });
+        });
+    } else {
+        paint_grid(ui, id, cols, rows, click, &g, &mut on_row);
+    }
+    ui.add_space(2.0);
+}
+
+/// Column widths and row metrics of a [`grid`].
+struct Geometry {
+    widths: Vec<f32>,
+    gap: f32,
+    table_w: f32,
+    row_h: f32,
+    head_h: f32,
+}
+
+fn paint_grid(
+    ui: &mut Ui,
+    id: &str,
+    cols: &[Col],
+    rows: &[Vec<Cell>],
+    click: bool,
+    g: &Geometry,
+    on_row: &mut impl FnMut(usize, &Response),
+) {
+    let p = *pal(ui);
+    let dark = ui.visuals().dark_mode;
+    let font = FontId::proportional(size::SMALL + 0.5);
+    let mono_font = FontId::monospace(size::MONO);
+    let head_font = FontId::new(size::CAPTION, theme::medium());
+    let painter = ui.painter().clone();
+    let Geometry {
+        widths,
+        gap,
+        table_w,
+        row_h,
+        head_h,
+    } = g;
+    let (gap, table_w, row_h, head_h) = (*gap, *table_w, *row_h, *head_h);
     let (rect, _) = ui.allocate_exact_size(
         vec2(table_w, head_h + row_h * rows.len() as f32),
         Sense::hover(),
     );
     let mut xs = Vec::with_capacity(cols.len());
     let mut x = rect.left();
-    for w in &widths {
+    for w in widths.iter() {
         xs.push(x);
         x += w + gap;
     }
     for (i, c) in cols.iter().enumerate() {
-        let (pos, align) = if c.numeric {
-            (
-                pos2(xs[i] + widths[i], rect.top() + head_h / 2.0),
-                egui::Align2::RIGHT_CENTER,
-            )
-        } else {
-            (
-                pos2(xs[i], rect.top() + head_h / 2.0),
-                egui::Align2::LEFT_CENTER,
-            )
-        };
-        painter.text(
-            pos,
-            align,
-            c.title.to_uppercase(),
+        // Cut to the column: a squeezed column's title ran into the next.
+        let t = truncated(
+            &painter,
+            &c.title.to_uppercase(),
             head_font.clone(),
+            p.text_3,
+            widths[i],
+        );
+        let x = if c.numeric {
+            xs[i] + widths[i] - t.size().x
+        } else {
+            xs[i]
+        };
+        painter.galley(
+            pos2(x, rect.top() + head_h / 2.0 - t.size().y / 2.0),
+            t,
             p.text_3,
         );
     }
@@ -691,7 +771,6 @@ pub(crate) fn grid(
         };
         on_row(r, &resp);
     }
-    ui.add_space(2.0);
 }
 
 /// `kit::stats` split into rows that fit the available width. The kit's

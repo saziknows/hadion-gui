@@ -61,11 +61,26 @@ pub fn show(
     }
     let repo_name = repo.map(|r| r.name.clone()).unwrap_or_default();
     w::page(ui, "identity_keys", scroll, |ui| {
-        kit::callout(
+        kit::callout_with(
             ui,
             Tone::Accent,
             "What signing is for",
-            "A signature proves who made a commit: anyone can write your name and e-mail into a commit, only you hold your key. GitHub shows Verified next to a signed commit when the key is on the committer's account (an SSH key as a signing key), Unverified when it is not, and nothing for unsigned commits.",
+            "A signature proves who made a commit: anyone can write your name and e-mail into a commit, only you hold your key. GitHub shows:",
+            |ui| {
+                ui.add_space(2.0);
+                let small = |t: &str| RichText::new(t).size(size::SMALL);
+                kit::kv(ui, 92.0, |kv| {
+                    kv.text(
+                        "Verified",
+                        small("signed with a key on the committer's GitHub account (an SSH key added as a signing key)"),
+                    );
+                    kv.text(
+                        "Unverified",
+                        small("signed, but the key is not on the committer's account"),
+                    );
+                    kv.text("Nothing", small("unsigned commits"));
+                });
+            },
         );
         status(ui, config.ok(), keys.ok(), gpg.ok());
         setup_form(
@@ -396,7 +411,7 @@ fn setup_form(
                 kit::code_block(ui, &display_steps(steps).join("\n"), actions);
             }
             Err(e) => {
-                kit::muted(ui, e);
+                kit::secondary(ui, e);
             }
         }
         form::error(ui, &f.error);
@@ -641,7 +656,7 @@ fn agent(ui: &mut Ui, k: &KeysReport, cfg: Option<&Snapshot>, actions: &mut Vec<
                 },
             );
             ui.add_space(2.0);
-            kit::muted(
+            kit::secondary(
                 ui,
                 &format!("ssh-add -l said: {}", out.lines().next().unwrap_or("")),
             );
@@ -674,7 +689,7 @@ fn github_test(ui: &mut Ui, k: &KeysReport, t: &Loaded<SshTest>, actions: &mut V
         "Connects to github.com over SSH with your keys (ssh -T); GitHub answers with the account a key belongs to. Nothing changes on GitHub.",
     );
     if k.github_known == Some(false) {
-        kit::muted(
+        kit::secondary(
             ui,
             "github.com is not in ~/.ssh/known_hosts yet: on the first connection ssh adds its host key there (StrictHostKeyChecking=accept-new).",
         );
@@ -808,7 +823,7 @@ fn generate(
                 match ssh::plan_generate(&kg.to_string_lossy(), &path, &g.email) {
                     Ok(steps) => kit::code_block(ui, &display_steps(&steps).join("\n"), actions),
                     Err(e) => {
-                        kit::muted(ui, &e);
+                        kit::secondary(ui, &e);
                     }
                 }
             }
@@ -868,7 +883,7 @@ fn gpg_keys(
         }
     });
     if found.how == "Git for Windows" {
-        kit::muted(
+        kit::secondary(
             ui,
             "This is the gpg that Git for Windows ships; Gpg4win keeps its keys in another keyring (%APPDATA%/gnupg).",
         );
@@ -1070,13 +1085,13 @@ fn upload_form(ui: &mut Ui, up: &mut Uploads, actions: &mut Vec<Action>) {
             }
         }
         Some(None) => {
-            kit::muted(
+            kit::secondary(
                 ui,
                 "gh does not report this token's scopes; GitHub checks them when the key is sent.",
             );
         }
         None => {
-            kit::muted(
+            kit::secondary(
                 ui,
                 &format!(
                     "gh needs the {scope} scope; Settings → GitHub account shows what the token has."

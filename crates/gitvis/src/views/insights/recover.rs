@@ -8,7 +8,7 @@ use gitvis_core::repo;
 
 use super::{
     Cell, Cx, button_row, detail_title, dot_color, grid, list_none, list_top, more, muted,
-    path_lines, sec, text, when, why,
+    path_lines, sec, text, when,
 };
 use crate::format;
 use crate::state::{Action, InsightsPage};
@@ -24,7 +24,7 @@ pub fn show(ui: &mut Ui, cx: &Cx, page: &mut InsightsPage, actions: &mut Vec<Act
     }
     let sel = page.selected.clone();
     match &page.lost {
-        None => {
+        None => super::scroll_empty(ui, "ins_lost_empty", |ui| {
             if page.lost_run.is_some() {
                 kit::empty_state(
                     ui,
@@ -42,7 +42,7 @@ pub fn show(ui: &mut Ui, cx: &Cx, page: &mut InsightsPage, actions: &mut Vec<Act
             ) {
                 actions.push(Action::RunLost);
             }
-        }
+        }),
         Some(Err(e)) => {
             Frame::NONE
                 .inner_margin(Margin::symmetric(24, 16))
@@ -313,9 +313,26 @@ fn overview(ui: &mut Ui, cx: &Cx, lost: &Lost, actions: &mut Vec<Action>) {
         kit::callout(ui, Tone::Warning, "Cancelled", "The list is partial.");
     }
     ui.add_space(4.0);
-    why(
+    kit::callout_with(
         ui,
-        "A lost commit is not gone: its objects stay until git gc prunes them (unreachable objects older than gc.pruneExpire, two weeks by default, once no reflog names them). Restoring it as a branch makes it permanent again. Select a commit on the left to see its files and restore it.",
+        Tone::Accent,
+        "Why it matters",
+        "A lost commit is not gone: its objects stay until git gc prunes them.",
+        |ui| {
+            let small = |t: &str| egui::RichText::new(t).size(crate::theme::size::SMALL);
+            kit::kv(ui, 110.0, |kv| {
+                kv.text(
+                    "Pruned when",
+                    small(
+                        "older than gc.pruneExpire (two weeks by default) and no reflog names them",
+                    ),
+                );
+                kv.text(
+                    "Restoring",
+                    small("as a branch makes it permanent again: select a commit on the left to see its files and restore it"),
+                );
+            });
+        },
     );
     let stashes: Vec<&LostCommit> = lost
         .commits

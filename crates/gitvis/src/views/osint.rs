@@ -136,33 +136,35 @@ pub fn show(ui: &mut Ui, cx: &Cx, page: &mut SecurityPage, actions: &mut Vec<Act
         ..
     } = page;
     if osint.report.is_none() && tab != SecurityTab::GitHub {
-        if let Some(e) = &osint.error {
-            if kit::empty_state(
+        crate::views::insights::scroll_empty(ui, "osint_empty", |ui| {
+            if let Some(e) = &osint.error {
+                if kit::empty_state(
+                    ui,
+                    Icon::Warning,
+                    "The analysis failed",
+                    e,
+                    Some((Icon::Rerun, "Try again")),
+                ) {
+                    actions.push(Action::RunOsint);
+                }
+            } else if osint.running() {
+                kit::empty_state(
+                    ui,
+                    Icon::Search,
+                    "Analysing",
+                    "Reading commits, files, metadata and history leftovers. Local only; nothing leaves the machine.",
+                    None,
+                );
+            } else if kit::empty_state(
                 ui,
-                Icon::Warning,
-                "The analysis failed",
-                e,
-                Some((Icon::Rerun, "Try again")),
+                Icon::Search,
+                "Not analysed yet",
+                "The analysis reads commits, files, file metadata, history leftovers and dependencies on this machine; nothing leaves it.",
+                Some((Icon::Search, "Analyse")),
             ) {
                 actions.push(Action::RunOsint);
             }
-        } else if osint.running() {
-            kit::empty_state(
-                ui,
-                Icon::Search,
-                "Analysing",
-                "Reading commits, files, metadata and history leftovers. Local only; nothing leaves the machine.",
-                None,
-            );
-        } else if kit::empty_state(
-            ui,
-            Icon::Search,
-            "Not analysed yet",
-            "The analysis reads commits, files, file metadata, history leftovers and dependencies on this machine; nothing leaves it.",
-            Some((Icon::Search, "Analyse")),
-        ) {
-            actions.push(Action::RunOsint);
-        }
+        });
         return;
     }
     match tab {
@@ -313,10 +315,13 @@ pub(crate) fn heatmap(ui: &mut Ui, heat: &[[u32; 24]; 7]) {
     const DAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     let p = *pal(ui);
     let dark = ui.visuals().dark_mode;
-    let cell = 18.0;
     let label_w = 40.0;
+    // Narrower columns in a narrow pane, so the late hours are not cut off;
+    // rows keep their height so the weekday labels do not touch.
+    let cell = ((ui.available_width() - label_w) / 24.0).clamp(10.0, 18.0);
+    let row = cell.max(15.0);
     let header_h = 20.0;
-    let size = vec2(label_w + 24.0 * cell, header_h + 7.0 * cell);
+    let size = vec2(label_w + 24.0 * cell, header_h + 7.0 * row);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
     let painter = ui.painter();
     let font = FontId::proportional(size::CAPTION);
@@ -332,9 +337,9 @@ pub(crate) fn heatmap(ui: &mut Ui, heat: &[[u32; 24]; 7]) {
     }
     let empty = if dark { p.raised } else { p.hover };
     for (d, name) in DAYS.iter().enumerate() {
-        let y = rect.top() + header_h + d as f32 * cell;
+        let y = rect.top() + header_h + d as f32 * row;
         painter.text(
-            pos2(rect.left(), y + (cell - 2.0) / 2.0),
+            pos2(rect.left(), y + (row - 2.0) / 2.0),
             Align2::LEFT_CENTER,
             *name,
             font.clone(),
@@ -343,7 +348,7 @@ pub(crate) fn heatmap(ui: &mut Ui, heat: &[[u32; 24]; 7]) {
         for (h, &count) in heat[d].iter().enumerate() {
             let r = Rect::from_min_size(
                 pos2(rect.left() + label_w + h as f32 * cell, y),
-                vec2(cell - 2.0, cell - 2.0),
+                vec2(cell - 2.0, row - 2.0),
             );
             let color = if count == 0 {
                 empty
@@ -356,7 +361,7 @@ pub(crate) fn heatmap(ui: &mut Ui, heat: &[[u32; 24]; 7]) {
     }
     if let Some(pos) = resp.hover_pos() {
         let h = ((pos.x - rect.left() - label_w) / cell).floor();
-        let d = ((pos.y - rect.top() - header_h) / cell).floor();
+        let d = ((pos.y - rect.top() - header_h) / row).floor();
         if (0.0..24.0).contains(&h) && (0.0..7.0).contains(&d) {
             let n = heat[d as usize][h as usize];
             resp.on_hover_text_at_pointer(format!(
@@ -564,7 +569,7 @@ fn person_detail(
     why(ui, kind_why(kind));
 
     sec(ui, "Activity", None);
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             kit::Stat::new("Authored", format::count(id.commits)),
@@ -769,7 +774,7 @@ fn people_overview(ui: &mut Ui, rep: &OsintReport, public: bool, actions: &mut V
         kit::Stat::new("With aliases", format::count(with_aliases))
             .tip("Addresses that share a name with another address"),
     );
-    kit::stats(ui, &tiles);
+    crate::views::insights::stats(ui, &tiles);
     kit::secondary(
         ui,
         "Every author and committer address in the history, what kind of address it is, and what the commit times give away. Select an address on the left.",
@@ -986,7 +991,7 @@ fn footprint_overview(ui: &mut Ui, cx: &Cx, rep: &OsintReport) {
         .collect();
     let pii = live.iter().filter(|f| PII_RULES.contains(&f.rule)).count();
     let pushed = live.iter().filter(|f| f.pushed).count();
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             kit::Stat::new("Identifiers", format::count(live.len())),
@@ -1238,7 +1243,7 @@ fn files_tab(ui: &mut Ui, cx: &Cx, o: &mut OsintState, actions: &mut Vec<Action>
 
 fn files_overview(ui: &mut Ui, rep: &OsintReport) {
     let gps = rep.metadata.iter().filter(|m| has_gps(m)).count();
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             kit::Stat::new("With metadata", format::count(rep.metadata.len())),
@@ -1493,7 +1498,7 @@ fn history_tab(ui: &mut Ui, cx: &Cx, o: &mut OsintState, actions: &mut Vec<Actio
     kit::scroll_page(ui, "osint_history", |ui| {
         let p = *pal(ui);
         let stash_secrets = a.stash_findings.len();
-        kit::stats(
+        crate::views::insights::stats(
             ui,
             &[
                 kit::Stat::new("Incident messages", format::count(m.incidents.len()))
@@ -1558,8 +1563,18 @@ fn history_tab(ui: &mut Ui, cx: &Cx, o: &mut OsintState, actions: &mut Vec<Actio
         } else {
             kit::secondary(
                 ui,
-                "Reachable only through the reflog: amended, rebased or reset-away commits. They stay in this clone until the reflog expires (90 days) and git gc runs, and if they were pushed before the rewrite, the server still serves them by SHA.",
+                "Amended, rebased or reset-away commits that only the reflog still reaches.",
             );
+            kit::kv(ui, KV_W, |kv| {
+                kv.text(
+                    "In this clone",
+                    "until the reflog expires (90 days) and git gc runs",
+                );
+                kv.text(
+                    "On the server",
+                    "still served by SHA if they were pushed before the rewrite",
+                );
+            });
             ask_github(ui, cx, &a.rewritten, served, actions);
             let shown = a.rewritten.len().min(40);
             served_rows(ui, cx, &a.rewritten[..shown], served, actions);
@@ -1708,8 +1723,18 @@ fn history_tab(ui: &mut Ui, cx: &Cx, o: &mut OsintState, actions: &mut Vec<Actio
         sec(ui, "Unreachable objects", None);
         kit::secondary(
             ui,
-            "git fsck --unreachable lists objects no ref and no reflog reaches: leftovers of deleted branches, rebases and git add of files never committed. They are still readable here and, if ever pushed, on the server. Seconds on small repositories, up to a minute on large ones.",
+            "Objects no ref and no reflog reaches (git fsck --unreachable): leftovers of deleted branches, rebases, and git add of files never committed.",
         );
+        kit::kv(ui, KV_W, |kv| {
+            kv.text(
+                "Still readable",
+                "here, and on the server if they were ever pushed",
+            );
+            kv.text(
+                "Takes",
+                "seconds on small repositories, up to a minute on large ones",
+            );
+        });
         ui.add_space(space::XS);
         if let Some(run) = unreachable_run {
             if kit::progress(ui, run, "Finding unreachable objects", true) {
@@ -1762,7 +1787,7 @@ fn history_tab(ui: &mut Ui, cx: &Cx, o: &mut OsintState, actions: &mut Vec<Actio
         match pr_refs {
             Some(Ok(pr)) => {
                 ui.add_space(space::S);
-                kit::stats(
+                crate::views::insights::stats(
                     ui,
                     &[
                         kit::Stat::new("Advertised heads", format::count(pr.total)),
@@ -1949,7 +1974,7 @@ fn unreachable_section(
 ) {
     let p = *pal(ui);
     ui.add_space(space::S);
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             kit::Stat::new("Commits", format::count(u.commit_count)),
@@ -2060,13 +2085,15 @@ fn github_tab(
     actions: &mut Vec<Action>,
 ) {
     let Some((owner, name)) = cx.github.clone() else {
-        kit::empty_state(
-            ui,
-            Icon::Shield,
-            "No GitHub remote",
-            "Add a remote on github.com to see visibility, forks, alerts and the admin surface.",
-            None,
-        );
+        crate::views::insights::scroll_empty(ui, "osint_github_empty", |ui| {
+            kit::empty_state(
+                ui,
+                Icon::Shield,
+                "No GitHub remote",
+                "Add a remote on github.com to see visibility, forks, alerts and the admin surface.",
+                None,
+            );
+        });
         return;
     };
     let o = &*o;
@@ -2104,7 +2131,7 @@ fn github_tab(
             );
         }
         if !tiles.is_empty() {
-            kit::stats(ui, &tiles);
+            crate::views::insights::stats(ui, &tiles);
         }
 
         sec(ui, "Repository", None);
@@ -2395,8 +2422,18 @@ fn github_tab(
         sec(ui, "Dork yourself", None);
         kit::secondary(
             ui,
-            "The GitHub code-search queries an attacker runs against an owner first (.env files, private keys, registry tokens, credential files, Terraform state and more), run with your own account against every repository of the owner. Twelve requests; GitHub allows ten code searches a minute, so the run pauses briefly between queries.",
+            "The GitHub code-search queries an attacker runs against an owner first, run with your own account against every repository of the owner.",
         );
+        kit::kv(ui, KV_W, |kv| {
+            kv.text(
+                "Looks for",
+                ".env files, private keys, registry tokens, credential files, Terraform state and more",
+            );
+            kv.text(
+                "Cost",
+                "12 requests; GitHub allows 10 code searches a minute, so the run pauses briefly between queries",
+            );
+        });
         ui.add_space(space::XS);
         if o.dorks_running {
             kit::loading(ui, "Searching");
@@ -2486,7 +2523,7 @@ fn supply_tab(ui: &mut Ui, cx: &Cx, o: &mut OsintState, actions: &mut Vec<Action
                     .tone_if(!v.is_empty(), Tone::Danger),
             );
         }
-        kit::stats(ui, &tiles);
+        crate::views::insights::stats(ui, &tiles);
 
         sec(
             ui,

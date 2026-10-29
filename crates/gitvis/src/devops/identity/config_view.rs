@@ -89,11 +89,32 @@ fn common(
     busy: bool,
     actions: &mut Vec<Action>,
 ) {
-    kit::callout(
+    kit::callout_with(
         ui,
         Tone::Neutral,
         "How git reads its configuration",
-        "git reads the system file (every user of this computer), then your global file, then the repository's own .git/config, then worktree and command-line values. When a key is set in several of them, the value read last wins. Each setting shows the value git uses in this repository and where it comes from; Edit changes it in your global config or in this repository only.",
+        "Files are read in this order; when a key is set in several of them, the value read last wins.",
+        |ui| {
+            ui.add_space(2.0);
+            let small = |t: &str| RichText::new(t).size(size::SMALL);
+            kit::kv(ui, 118.0, |kv| {
+                kv.text("1  System", small("every user of this computer"));
+                kv.text("2  Global", small("your own file (~/.gitconfig)"));
+                kv.text("3  Local", small("this repository's .git/config"));
+                kv.text(
+                    "4  Worktree, -c",
+                    small("worktree config, then command-line values"),
+                );
+            });
+            ui.add_space(2.0);
+            ui.add(
+                Label::new(
+                    small("Each setting below shows the value git uses in this repository and where it comes from. Edit changes it in your global config or in this repository only.")
+                        .color(pal(ui).text),
+                )
+                .wrap(),
+            );
+        },
     );
     ui.add_space(space::S);
     insights::stats(
@@ -184,35 +205,47 @@ fn common_row(
                     });
                 }
                 if eff.is_none() {
-                    kit::muted(ui, &format!("Not set. git's default: {}", c.default));
+                    kit::secondary(ui, &format!("Not set. git's default: {}", c.default));
                 }
                 if values.len() > 1 {
-                    let list: Vec<String> = values
-                        .iter()
-                        .map(|e| {
-                            format!(
-                                "{} ({} · {})",
-                                show_value(e.value_text()),
-                                e.scope.label(),
-                                w::short_place(e)
-                            )
-                        })
-                        .collect();
-                    kit::muted(
+                    let multi = config::is_multi(c.key);
+                    kit::secondary(
                         ui,
-                        &if config::is_multi(c.key) {
+                        &if multi {
                             format!(
-                                "A list: {}. Every value counts, in this order.",
-                                list.join(", ")
+                                "A list of {} values; every one counts, in this order:",
+                                values.len()
                             )
                         } else {
                             format!(
-                                "Set {} times: {}. git uses the last one read.",
-                                values.len(),
-                                list.join(", "),
+                                "Set in {} places; git uses the last one read:",
+                                values.len()
                             )
                         },
                     );
+                    // One line per value: scope, file:line, value.
+                    for (i, e) in values.iter().enumerate() {
+                        let used = !multi && i + 1 == values.len();
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            w::scope_badge(ui, e.scope);
+                            ui.label(
+                                RichText::new(w::short_place(e))
+                                    .size(size::SMALL)
+                                    .color(p.text_2),
+                            );
+                            ui.label(kit::mono(show_value(e.value_text())).color(if used {
+                                p.text_strong
+                            } else {
+                                p.text
+                            }));
+                            if used {
+                                kit::badge(ui, "Used", Tone::Success);
+                            } else if !multi {
+                                kit::badge(ui, "Overridden", Tone::Neutral);
+                            }
+                        });
+                    }
                 }
             },
         );
@@ -393,7 +426,7 @@ fn editor(
                     InputOpts::new("value").mono(),
                 );
                 if config::is_multi(&f.key) {
-                    kit::muted(
+                    kit::secondary(
                         ui,
                         "This key holds a list: Set adds the value to the list; Unset removes this value only.",
                     );
@@ -402,7 +435,7 @@ fn editor(
         }
         let now = current_in(snap, &key, f.scope);
         ui.add_space(4.0);
-        kit::muted(
+        kit::secondary(
             ui,
             &match &now {
                 Some(v) => format!("Now in the {} config: {}", f.scope.label(), show_value(v)),
@@ -520,6 +553,8 @@ struct Widths {
     value: f32,
     scope: f32,
     place: f32,
+    /// 0 on a narrow page: the note is then drawn at the end of Where.
+    note: f32,
     total: f32,
 }
 
@@ -527,17 +562,21 @@ const GAP: f32 = 16.0;
 
 impl Widths {
     fn of(total: f32) -> Widths {
-        let scope = 92.0;
-        let note = 150.0;
-        let rest = (total - scope - note - 4.0 * GAP - 12.0).max(300.0);
-        let key = (rest * 0.24).clamp(110.0, 240.0);
-        let value = (rest * 0.42).max(120.0);
-        let place = (rest - key - value).max(100.0);
+        // Below this the five columns do not fit side by side.
+        let narrow = total < 720.0;
+        let scope = if narrow { 70.0 } else { 92.0 };
+        let note = if narrow { 0.0 } else { 150.0 };
+        let gaps = if narrow { 3.0 } else { 4.0 } * GAP;
+        let rest = (total - scope - note - gaps - 12.0).max(240.0);
+        let key = (rest * 0.26).clamp(80.0, 240.0);
+        let value = (rest * 0.40).max(90.0);
+        let place = (rest - key - value).max(70.0);
         Widths {
             key,
             value,
             scope,
             place,
+            note,
             total,
         }
     }
@@ -556,7 +595,12 @@ fn table_head(ui: &mut Ui, w: &Widths) {
     let p = *pal(ui);
     let (rect, _) = ui.allocate_exact_size(vec2(w.total, 22.0), Sense::hover());
     let xs = w.xs(rect.left());
-    for (x, t) in xs.iter().zip(["Key", "Value", "Scope", "Where", "Note"]) {
+    let titles: &[&str] = if w.note > 0.0 {
+        &["Key", "Value", "Scope", "Where", "Note"]
+    } else {
+        &["Key", "Value", "Scope", "Where"]
+    };
+    for (x, t) in xs.iter().zip(titles) {
         ui.painter().text(
             pos2(*x, rect.center().y),
             Align2::LEFT_CENTER,
@@ -643,7 +687,26 @@ fn entry_row(
         w::scope_tone(e.scope),
     );
     let small = FontId::proportional(size::SMALL);
-    let (place_text, place_cut) = tail_fit(painter, place, &small, w.place);
+    // On a narrow page the note sits, shortened, at the end of the Where
+    // column (the scope that overrides is in its own row).
+    let note = note.map(|(t, tone)| {
+        if w.note > 0.0 {
+            (t, tone)
+        } else if t.starts_with("Overridden") {
+            ("Overridden".to_owned(), tone)
+        } else if t == "List entry" {
+            ("List".to_owned(), tone)
+        } else {
+            (t, tone)
+        }
+    });
+    let inline_note = (w.note <= 0.0)
+        .then_some(note.as_ref())
+        .flatten()
+        .map(|(t, _)| kit::badge_width(painter, t) + 6.0)
+        .unwrap_or(0.0);
+    let (place_text, place_cut) =
+        tail_fit(painter, place, &small, (w.place - inline_note).max(40.0));
     painter.text(
         pos2(xs[3], cy),
         Align2::LEFT_CENTER,
@@ -652,8 +715,12 @@ fn entry_row(
         p.text_2,
     );
     if let Some((t, tone)) = &note {
-        let nw = kit::badge_width(painter, t);
-        kit::paint_badge(painter, &p, dark, xs[4] + nw, cy, t, *tone);
+        let right = if w.note > 0.0 {
+            xs[4] + kit::badge_width(painter, t)
+        } else {
+            xs[3] + w.place
+        };
+        kit::paint_badge(painter, &p, dark, right, cy, t, *tone);
     }
     painter.hline(
         rect.x_range(),
@@ -825,18 +892,19 @@ fn all(
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            let half = ((ui.available_width() - 8.0) / 2.0).max(160.0);
+            // Two inputs and the gap; each input adds its frame to its width.
+            let half = ((ui.available_width() - 8.0) / 2.0).max(160.0) - w::INPUT_FRAME;
             form::input(
                 ui,
                 "identity_raw_key",
                 &mut raw.key,
-                InputOpts::new("section.name").mono().width(half - 20.0),
+                InputOpts::new("section.name").mono().width(half),
             );
             form::input(
                 ui,
                 "identity_raw_value",
                 &mut raw.value,
-                InputOpts::new("value").mono().width(half - 20.0),
+                InputOpts::new("value").mono().width(half),
             );
         });
         ui.add_space(4.0);
@@ -945,7 +1013,7 @@ fn files(ui: &mut Ui, snap: &Snapshot, actions: &mut Vec<Action>) {
     }
     kit::section(ui, "How gitvis read this", None);
     kit::code_block(ui, &git_line(&config::LIST_ARGS), actions);
-    kit::muted(
+    kit::secondary(
         ui,
         &format!(
             "{} entries in {} ms, run in {}. Line numbers come from reading each file, since git does not print them.",

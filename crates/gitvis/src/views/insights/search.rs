@@ -26,22 +26,7 @@ pub fn show(ui: &mut Ui, cx: &Cx, page: &mut InsightsPage, actions: &mut Vec<Act
     match &page.search {
         None => {
             if page.search_run.is_none() {
-                kit::empty_state(
-                    ui,
-                    Icon::Search,
-                    "Find when something entered or left the code base",
-                    "Text (-S) lists every commit that changed how often the text occurs: the commit that introduced a function, the one that removed a config key, the moves in between. Diff regex (-G) matches changed lines; Message and Author search the metadata. Results come from every branch unless you turn off All refs.",
-                    None,
-                );
-                ui.add_space(8.0);
-                ui.vertical_centered(|ui| {
-                    ui.set_max_width(440.0);
-                    kit::code_block(
-                        ui,
-                        "git log --all -S\"needle\" --name-only --format=…",
-                        actions,
-                    );
-                });
+                super::scroll_empty(ui, "ins_search_empty", |ui| empty(ui, actions));
             }
         }
         Some(Err(e)) => {
@@ -70,6 +55,39 @@ pub fn show(ui: &mut Ui, cx: &Cx, page: &mut InsightsPage, actions: &mut Vec<Act
     }
 }
 
+/// Before the first search: what each mode finds.
+fn empty(ui: &mut Ui, actions: &mut Vec<Action>) {
+    kit::empty_state(
+        ui,
+        Icon::Search,
+        "Find when something entered or left the code base",
+        "Pick a mode, type, press Enter. Results come from every branch unless you turn off All refs.",
+        None,
+    );
+    ui.add_space(8.0);
+    ui.vertical_centered(|ui| {
+        ui.set_max_width(ui.available_width().min(480.0));
+        // One mode per row, left-aligned in the centred column.
+        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+            kit::kv(ui, 116.0, |kv| {
+                kv.text(
+                    "Text (-S)",
+                    "every commit that changed how often the text occurs: the one that introduced a function, the one that removed a config key, the moves in between",
+                );
+                kv.text("Diff regex (-G)", "commits whose changed lines match");
+                kv.text("Message", "commit messages");
+                kv.text("Author", "author names and e-mails");
+            });
+            ui.add_space(8.0);
+            kit::code_block(
+                ui,
+                "git log --all -S\"needle\" --name-only --format=…",
+                actions,
+            );
+        });
+    });
+}
+
 fn query_bar(ui: &mut Ui, page: &mut InsightsPage, actions: &mut Vec<Action>) {
     let p = *pal(ui);
     Frame::NONE
@@ -80,60 +98,36 @@ fn query_bar(ui: &mut Ui, page: &mut InsightsPage, actions: &mut Vec<Action>) {
             bottom: 10,
         })
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                let modes: Vec<(SearchMode, &str)> =
-                    SearchMode::ALL.iter().map(|m| (*m, m.label())).collect();
-                if let Some(m) = kit::segmented(ui, &modes, page.search_mode) {
-                    page.search_mode = m;
-                }
-                let hint = match page.search_mode {
-                    SearchMode::Pickaxe => "Exact text, e.g. a function name or a config key",
-                    SearchMode::Regex => "Regular expression matched against changed lines",
-                    SearchMode::Message => "Regular expression matched against commit messages",
-                    SearchMode::Author => "Author name or e-mail (regular expression)",
-                };
-                let width = (ui.available_width() - 520.0).max(220.0);
-                let resp = ui
-                    .allocate_ui(vec2(width, 28.0), |ui| {
-                        kit::search_box(ui, "ins_search_text", &mut page.search_text, hint)
-                    })
-                    .inner;
-                let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let path_enter = ui
-                    .allocate_ui(vec2(180.0, 28.0), |ui| {
-                        let r = kit::search_box(
-                            ui,
-                            "ins_search_path",
-                            &mut page.search_path,
-                            "Path filter (optional)",
-                        );
-                        r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
-                    })
-                    .inner;
-                if kit::tip(
-                    kit::chip(ui, "All refs", page.search_all),
-                    "Search every branch and tag (--all) instead of HEAD only",
-                )
-                .clicked()
-                {
-                    page.search_all = !page.search_all;
-                }
-                if kit::chip(ui, "Ignore case", page.search_ignore_case).clicked() {
-                    page.search_ignore_case = !page.search_ignore_case;
-                }
-                if page.search_run.is_none()
-                    && (IconButton::new(Icon::Search, "Search")
-                        .compact()
-                        .primary(true)
-                        .show(ui)
-                        .clicked()
-                        || enter
-                        || path_enter)
-                {
-                    actions.push(Action::RunSearch);
-                }
-            });
+            // Everything on one row when it fits; otherwise the mode and the
+            // switches on the first row, the inputs and Search on the second.
+            let one_row = ui.available_width() >= 1040.0;
+            let mut run = false;
+            if one_row {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    mode_switch(ui, page);
+                    let width = (ui.available_width() - 520.0).max(220.0);
+                    run |= query_inputs(ui, page, width);
+                    switches(ui, page);
+                    run |= search_button(ui, page);
+                });
+            } else {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    mode_switch(ui, page);
+                    switches(ui, page);
+                });
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let width = (ui.available_width() - 180.0 - 96.0 - 16.0).max(160.0);
+                    run |= query_inputs(ui, page, width);
+                    run |= search_button(ui, page);
+                });
+            }
+            if run && page.search_run.is_none() {
+                actions.push(Action::RunSearch);
+            }
             ui.add_space(4.0);
             ui.label(
                 RichText::new(page.search_mode.hint())
@@ -142,6 +136,65 @@ fn query_bar(ui: &mut Ui, page: &mut InsightsPage, actions: &mut Vec<Action>) {
             );
         });
     kit::hairline(ui);
+}
+
+fn mode_switch(ui: &mut Ui, page: &mut InsightsPage) {
+    let modes: Vec<(SearchMode, &str)> = SearchMode::ALL.iter().map(|m| (*m, m.label())).collect();
+    if let Some(m) = kit::segmented(ui, &modes, page.search_mode) {
+        page.search_mode = m;
+    }
+}
+
+/// The text and path inputs; true when Enter was pressed in either.
+fn query_inputs(ui: &mut Ui, page: &mut InsightsPage, width: f32) -> bool {
+    let hint = match page.search_mode {
+        SearchMode::Pickaxe => "Exact text, e.g. a function name or a config key",
+        SearchMode::Regex => "Regular expression matched against changed lines",
+        SearchMode::Message => "Regular expression matched against commit messages",
+        SearchMode::Author => "Author name or e-mail (regular expression)",
+    };
+    let resp = ui
+        .allocate_ui(vec2(width, 28.0), |ui| {
+            kit::search_box(ui, "ins_search_text", &mut page.search_text, hint)
+        })
+        .inner;
+    let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    let path_enter = ui
+        .allocate_ui(vec2(180.0, 28.0), |ui| {
+            let r = kit::search_box(
+                ui,
+                "ins_search_path",
+                &mut page.search_path,
+                "Path filter (optional)",
+            );
+            r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))
+        })
+        .inner;
+    enter || path_enter
+}
+
+fn switches(ui: &mut Ui, page: &mut InsightsPage) {
+    if kit::tip(
+        kit::chip(ui, "All refs", page.search_all),
+        "Search every branch and tag (--all) instead of HEAD only",
+    )
+    .clicked()
+    {
+        page.search_all = !page.search_all;
+    }
+    if kit::chip(ui, "Ignore case", page.search_ignore_case).clicked() {
+        page.search_ignore_case = !page.search_ignore_case;
+    }
+}
+
+/// The Search button (hidden while a search runs); true when clicked.
+fn search_button(ui: &mut Ui, page: &InsightsPage) -> bool {
+    page.search_run.is_none()
+        && IconButton::new(Icon::Search, "Search")
+            .compact()
+            .primary(true)
+            .show(ui)
+            .clicked()
 }
 
 fn hit_files(h: &SearchHit) -> String {

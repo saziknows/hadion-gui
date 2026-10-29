@@ -135,8 +135,8 @@ pub fn show(
     });
     let prefs = &settings.ext.packaging;
     kit::scroll_page(ui, "packaging_about", |ui| {
-        ui.set_max_width(super::WIDTH);
-        kit::stats(
+        ui.set_max_width(ui.available_width().min(super::WIDTH));
+        crate::views::insights::stats(
             ui,
             &[
                 kit::Stat::new("Version", b.version.clone()),

@@ -392,14 +392,28 @@ fn scopes(ui: &mut Ui, active: Option<&Account>, actions: &mut Vec<Action>) {
         return;
     }
     kit::section(ui, "Add the missing scopes", Some(missing.len()));
-    kit::callout(
+    kit::callout_with(
         ui,
         Tone::Neutral,
         "How gh auth refresh works",
         &format!(
-            "It adds scopes to the token of the active account ({}); the scopes it has stay. gh prints a one-time code and opens github.com/login/device in your browser, where you approve the new scopes. gitvis does not run it for you: copy it into a terminal. For another account, switch to it first.",
+            "It adds scopes to the token of the active account ({}); the scopes it has stay.",
             acc.login
         ),
+        |ui| {
+            let small = |t: &str| egui::RichText::new(t).size(size::SMALL);
+            kit::kv(ui, 110.0, |kv| {
+                kv.text(
+                    "In the browser",
+                    small("gh prints a one-time code and opens github.com/login/device, where you approve the new scopes"),
+                );
+                kv.text(
+                    "Where to run it",
+                    small("in a terminal: gitvis does not run it for you"),
+                );
+                kv.text("Other account", small("switch to it first"));
+            });
+        },
     );
     ui.add_space(4.0);
     w::label(ui, "Everything at once");
