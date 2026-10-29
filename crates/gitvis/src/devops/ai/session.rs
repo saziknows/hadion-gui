@@ -1,12 +1,17 @@
 //! What the AI area knows for the whole session, whichever repository is
-//! active: the key's status (never the key), where curl is, the usage and
-//! estimated cost of every request, and the script-only overrides. Updated
-//! from the controller on the UI thread; read by the views.
+//! active: Claude Code's status (where it is, its version, how it is signed
+//! in), the API key's status (never the key), where curl is, the usage of
+//! every request (and the estimated cost of API requests), the plan's usage
+//! as Claude Code last reported it, and the script-only overrides. Updated
+//! from the controller on the UI thread; read by the views. Lock briefly,
+//! never inside a background task.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Instant;
 
-use gitvis_core::devops::ai::{Feature, KeyStatus, Model, Usage, cost};
+use gitvis_core::devops::ai::cli::{self, PlanUsage};
+use gitvis_core::devops::ai::{CliModel, Feature, KeyStatus, Model, Provider, Usage, cost};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum KeyState {
@@ -16,16 +21,41 @@ pub enum KeyState {
     Known(KeyStatus),
 }
 
-/// Requests of one model for one feature.
+/// What gitvis knows about Claude Code.
+#[derive(Clone, Debug, Default)]
+pub enum CliState {
+    #[default]
+    Unknown,
+    Checking,
+    Known(Box<cli::Status>),
+}
+
+impl CliState {
+    pub fn status(&self) -> Option<&cli::Status> {
+        match self {
+            CliState::Known(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
+/// Requests of one model for one feature, through one route.
 #[derive(Clone, Debug)]
 pub struct UsageRow {
     /// The model that answered (a fallback model after a switch).
     pub model: String,
     pub feature: Feature,
+    /// Through Claude Code, not gitvis's own API requests.
+    pub cli: bool,
+    /// Through Claude Code signed in with an API key: `cost` is its estimate.
+    pub billed: bool,
     pub requests: u32,
     pub failed: u32,
     pub usage: Usage,
+    /// Estimated API cost (0 for Claude Code on a plan).
     pub cost: f64,
+    /// Claude Code's own client-side estimate of what a plan covered.
+    pub cli_estimate: f64,
 }
 
 #[derive(Debug, Default)]
@@ -36,13 +66,18 @@ pub struct Session {
     pub key_error: Option<String>,
     /// `Some(None)`: checked, not found.
     pub curl: Option<Option<PathBuf>>,
+    pub cli: CliState,
+    /// The plan's usage from the last Claude Code answer, and when.
+    pub plan: Option<(PlanUsage, Instant)>,
     pub usage: Vec<UsageRow>,
-    /// Set by the `ai-model` script command; never saved.
+    /// Set by script commands; never saved.
+    pub provider_override: Option<Provider>,
     pub model_override: Option<Model>,
-    /// Set by the `ai-ask` script command; never saved.
+    pub cli_model_override: Option<CliModel>,
     pub ask_override: Option<bool>,
-    /// Scroll the Settings section to the session usage once.
-    pub scroll_to_usage: bool,
+    /// Scroll the Settings section to a part (`usage`, `cli`, `api`), asked
+    /// for at that moment.
+    pub scroll_to: Option<(String, std::time::Instant)>,
 }
 
 static SESSION: Mutex<Session> = Mutex::new(Session {
@@ -50,10 +85,14 @@ static SESSION: Mutex<Session> = Mutex::new(Session {
     key_busy: None,
     key_error: None,
     curl: None,
+    cli: CliState::Unknown,
+    plan: None,
     usage: Vec::new(),
+    provider_override: None,
     model_override: None,
+    cli_model_override: None,
     ask_override: None,
-    scroll_to_usage: false,
+    scroll_to: None,
 });
 
 /// Read or change the session.
@@ -62,54 +101,98 @@ pub fn with<R>(f: impl FnOnce(&mut Session) -> R) -> R {
     f(&mut s)
 }
 
+/// One finished (or failed) request.
+pub struct Record<'a> {
+    /// The model that answered (empty when none did).
+    pub model_id: &'a str,
+    /// The API model asked for (prices an unknown model).
+    pub requested: Model,
+    pub feature: Feature,
+    pub usage: &'a Usage,
+    pub ok: bool,
+    /// Through Claude Code, with its own estimate.
+    pub cli: Option<f64>,
+    /// Claude Code was signed in with an API key: the estimate is a bill.
+    pub billed: bool,
+}
+
 /// Count one request.
-pub fn record(model_id: &str, requested: Model, feature: Feature, usage: &Usage, ok: bool) {
-    let priced = Model::parse(model_id).unwrap_or(requested);
-    let c = cost(priced, usage);
-    let model = if model_id.is_empty() {
-        requested.id().to_owned()
+pub fn record(r: Record) {
+    let via_cli = r.cli.is_some();
+    let billed = via_cli && r.billed;
+    let c = if billed {
+        r.cli.unwrap_or(0.0)
+    } else if via_cli {
+        0.0
     } else {
-        model_id.to_owned()
+        cost(Model::parse(r.model_id).unwrap_or(r.requested), r.usage)
+    };
+    let model = if !r.model_id.is_empty() {
+        r.model_id.to_owned()
+    } else if via_cli {
+        "(no answer)".to_owned()
+    } else {
+        r.requested.id().to_owned()
     };
     with(|s| {
-        let row = match s
-            .usage
-            .iter_mut()
-            .find(|r| r.model == model && r.feature == feature)
-        {
-            Some(r) => r,
+        let row = match s.usage.iter_mut().find(|x| {
+            x.model == model && x.feature == r.feature && x.cli == via_cli && x.billed == billed
+        }) {
+            Some(x) => x,
             None => {
                 s.usage.push(UsageRow {
                     model: model.clone(),
-                    feature,
+                    feature: r.feature,
+                    cli: via_cli,
+                    billed,
                     requests: 0,
                     failed: 0,
                     usage: Usage::default(),
                     cost: 0.0,
+                    cli_estimate: 0.0,
                 });
                 s.usage.last_mut().expect("pushed")
             }
         };
         row.requests += 1;
-        if !ok {
+        if !r.ok {
             row.failed += 1;
         }
-        row.usage.add(usage);
+        row.usage.add(r.usage);
         row.cost += c;
+        if !billed {
+            row.cli_estimate += r.cli.unwrap_or(0.0);
+        }
     });
 }
 
-/// Totals over every row: requests, failed, usage, cost.
-pub fn totals() -> (u32, u32, Usage, f64) {
+/// Totals over every row.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Totals {
+    pub requests: u32,
+    pub failed: u32,
+    pub usage: Usage,
+    /// Estimated API cost.
+    pub cost: f64,
+    /// Requests through Claude Code on a plan, and its own estimate for
+    /// them (Claude Code signed in with an API key counts in `cost`).
+    pub cli_requests: u32,
+    pub cli_estimate: f64,
+}
+
+pub fn totals() -> Totals {
     with(|s| {
-        let mut u = Usage::default();
-        let (mut n, mut f, mut c) = (0, 0, 0.0);
+        let mut t = Totals::default();
         for r in &s.usage {
-            n += r.requests;
-            f += r.failed;
-            u.add(&r.usage);
-            c += r.cost;
+            t.requests += r.requests;
+            t.failed += r.failed;
+            t.usage.add(&r.usage);
+            t.cost += r.cost;
+            if r.cli && !r.billed {
+                t.cli_requests += r.requests;
+                t.cli_estimate += r.cli_estimate;
+            }
         }
-        (n, f, u, c)
+        t
     })
 }

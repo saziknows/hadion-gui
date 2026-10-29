@@ -1,16 +1,18 @@
-//! AI assist (Claude API): "Write the message" in the WIP panel, "Write
-//! the description" in the new pull request form, "Explain this failure" in
-//! the Actions log viewer, "Summarise" on a pull request, "Explain this
-//! commit" in the commit panel and menu, and the AI section of the Settings
-//! page. Per-repository state (requests in flight, results); configuration
-//! in `Settings::ext.ai`; the key's status and the session's usage in
-//! [`session`] (app-wide).
+//! AI assist, through the owner's Claude Code CLI (their subscription) or
+//! the Claude API (a key): "Write the message" in the WIP panel, "Write the
+//! description" in the new pull request form, "Explain this failure" in the
+//! Actions log viewer, "Summarise" on a pull request, "Explain this commit"
+//! in the commit panel and menu, and the AI section of the Settings page.
+//! Per-repository state (requests in flight, results); configuration in
+//! `Settings::ext.ai`; Claude Code's status, the key's status and the
+//! session's usage in [`session`] (app-wide).
 //!
-//! A request goes through four phases: gathering and redacting the
-//! material in a background read ([`Phase::Preparing`]), the confirmation
-//! that shows what is sent ([`Phase::Confirming`], skipped when "Ask before
-//! sending" is off), the streamed curl run ([`Phase::Running`], the text
-//! shows as it arrives) and the result ([`Phase::Done`]).
+//! A request goes through four phases: choosing the way to Claude
+//! ([`Route`]) and gathering and redacting the material in a background
+//! read ([`Phase::Preparing`]), the confirmation that shows what is sent
+//! and how ([`Phase::Confirming`], skipped when "Ask before sending" is
+//! off), the streamed run ([`Phase::Running`], the text shows as it
+//! arrives) and the result ([`Phase::Done`]).
 
 mod control;
 pub mod session;
@@ -23,9 +25,12 @@ use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use gitvis_core::Commit;
+use gitvis_core::devops::ai::cli::{self, Install};
 use gitvis_core::devops::ai::redact::Redactions;
 use gitvis_core::devops::ai::runner::{Done, KeySource};
-use gitvis_core::devops::ai::{Effort, Failure, Feature, KeyStatus, Model, Prompt, Shared};
+use gitvis_core::devops::ai::{
+    CliModel, Effort, Failure, Feature, KeyStatus, Model, Prompt, Provider, Shared,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::devops::console::ConsoleRun;
@@ -60,6 +65,34 @@ impl Target {
     }
 }
 
+/// The way a request reaches Claude.
+#[derive(Clone, Debug)]
+pub enum Route {
+    /// The Claude API, with the key from here.
+    Api(KeySource),
+    /// The owner's Claude Code.
+    ClaudeCode(Box<CliRoute>),
+}
+
+/// The Claude Code a request runs.
+#[derive(Clone, Debug)]
+pub struct CliRoute {
+    pub install: Install,
+    pub version: Option<cli::Version>,
+    /// `Claude Max plan`, `API key`.
+    pub account: String,
+    /// Signed in with an API key: requests bill the API, not the plan.
+    pub bills_api: bool,
+    /// `your Claude Max plan`, `an API key`, for sentences.
+    pub phrase: String,
+}
+
+impl Route {
+    pub fn is_cli(&self) -> bool {
+        matches!(self, Route::ClaudeCode(_))
+    }
+}
+
 /// What was gathered for a request, after redaction and fitting.
 #[derive(Clone, Debug)]
 pub struct Prepared {
@@ -70,13 +103,15 @@ pub struct Prepared {
     /// Files (or log ranges) included.
     pub files: Vec<String>,
     pub redactions: Redactions,
-    pub key: KeySource,
+    pub route: Route,
 }
 
 /// An answer, ready to show.
 #[derive(Clone, Debug)]
 pub struct Reply {
     pub done: Box<Done>,
+    /// Estimated API cost; 0 through Claude Code (the plan covers it, see
+    /// `done.cli` for Claude Code's own estimate).
     pub cost: f64,
 }
 
@@ -94,8 +129,13 @@ pub enum Phase {
 pub struct Ask {
     pub id: u64,
     pub target: Target,
+    pub provider: Provider,
+    /// API model and effort.
     pub model: Model,
     pub effort: Effort,
+    /// Claude Code model and effort.
+    pub cli_model: CliModel,
+    pub cli_effort: Effort,
     pub ask_first: bool,
     pub phase: Phase,
     pub prepared: Option<Prepared>,
@@ -104,6 +144,9 @@ pub struct Ask {
     pub applied: bool,
     /// The answer waits for "Replace your message?".
     pub unapplied: bool,
+    /// The route picked before the material was read (`Some(true)` Claude
+    /// Code), kept when reading the material fails.
+    pub chosen_cli: Option<bool>,
 }
 
 impl Ask {
@@ -119,6 +162,43 @@ impl Ask {
         match &self.phase {
             Phase::Done(Ok(r)) => Some(r),
             _ => None,
+        }
+    }
+
+    /// Through Claude Code: known once the material is ready (a reply
+    /// tells, too); before that, from the provider asked for.
+    pub fn via_cli(&self) -> bool {
+        if let Some(r) = self.reply() {
+            return !r.done.via.is_api();
+        }
+        match &self.prepared {
+            Some(p) => p.route.is_cli(),
+            None => self
+                .chosen_cli
+                .unwrap_or(self.provider == Provider::ClaudeCode),
+        }
+    }
+
+    /// Settled once the route is chosen.
+    pub fn route_known(&self) -> bool {
+        self.prepared.is_some()
+            || self.reply().is_some()
+            || self.chosen_cli.is_some()
+            || self.provider != Provider::Auto
+    }
+
+    /// `Claude Code · Opus`, `Opus 5.5`, `Auto`.
+    pub fn engine(&self) -> String {
+        if !self.route_known() {
+            return "Auto".to_owned();
+        }
+        if self.via_cli() {
+            match self.cli_model {
+                CliModel::Default => "Claude Code".to_owned(),
+                m => format!("Claude Code · {}", m.label()),
+            }
+        } else {
+            self.model.short().to_owned()
         }
     }
 }
@@ -184,9 +264,14 @@ pub enum Act {
     SaveKey(Secret),
     RemoveKey,
     RemoveKeyConfirmed,
-    /// Script-only session overrides (`ai-model`, `ai-ask`).
+    /// Find Claude Code and read how it is signed in (again).
+    CheckCli,
+    /// Script-only session overrides (`ai-model`, `ai-ask`, `ai-provider`,
+    /// `ai-cli-model`).
     SetModelOverride(Option<Model>),
     SetAskOverride(Option<bool>),
+    SetProviderOverride(Option<Provider>),
+    SetCliModelOverride(Option<CliModel>),
 }
 
 /// Which keychain operation a [`Msg::Key`] answers.
@@ -201,7 +286,12 @@ pub enum Msg {
     Prepared {
         target: Target,
         id: u64,
+        /// The route chosen (`Some(true)` Claude Code), `None` when none
+        /// could be.
+        chosen: Option<bool>,
         result: Result<Prepared, Failure>,
+        /// Claude Code as the route choice found it.
+        cli: Option<Box<cli::Status>>,
     },
     Finished {
         target: Target,
@@ -214,6 +304,7 @@ pub enum Msg {
         result: Result<KeyStatus, String>,
         curl: Option<std::path::PathBuf>,
     },
+    Cli(Box<cli::Status>),
 }
 
 impl Msg {
@@ -224,9 +315,13 @@ impl Msg {
                 Ok(p) => {
                     let chars = p.prompt.chars();
                     let mut s = format!(
-                        "{} characters, about {} tokens",
+                        "{} characters, about {} tokens, {}",
                         format_count(chars),
-                        format_count(gitvis_core::devops::ai::estimate_tokens(chars) as usize)
+                        format_count(gitvis_core::devops::ai::estimate_tokens(chars) as usize),
+                        match &p.route {
+                            Route::Api(_) => "through the Claude API".to_owned(),
+                            Route::ClaudeCode(c) => format!("through Claude Code ({})", c.account),
+                        }
                     );
                     if !p.redactions.is_empty() {
                         s.push_str(&format!("; redacted {}", p.redactions.summary()));
@@ -243,19 +338,39 @@ impl Msg {
             } => match result {
                 Ok(d) => {
                     let a = &d.answer;
-                    let model = Model::parse(&a.model);
-                    let c = model
-                        .map(|m| gitvis_core::devops::ai::cost(m, &a.usage))
-                        .unwrap_or(0.0);
+                    let cost = match &d.cli {
+                        Some(run) if run.bills_api => format!(
+                            "billed to the API account Claude Code is signed in with (Claude Code estimates {})",
+                            run.cost_estimate
+                                .map(gitvis_core::devops::ai::dollars)
+                                .unwrap_or_else(|| "nothing".to_owned())
+                        ),
+                        Some(run) => format!(
+                            "covered by the plan (Claude Code estimates {})",
+                            run.cost_estimate
+                                .map(gitvis_core::devops::ai::dollars)
+                                .unwrap_or_else(|| "nothing".to_owned())
+                        ),
+                        None => gitvis_core::devops::ai::dollars(
+                            Model::parse(&a.model)
+                                .map(|m| gitvis_core::devops::ai::cost(m, &a.usage))
+                                .unwrap_or(0.0),
+                        ),
+                    };
                     let mut s = format!(
-                        "{}: {} · {} in · {} out · cache write {} / read {} · {} · {}",
+                        "{} via {}: {} · {} in · {} out · cache write {} / read {} · {} · {}",
                         feature.label(),
+                        if d.via.is_api() {
+                            "the Claude API"
+                        } else {
+                            "Claude Code"
+                        },
                         a.model,
                         format_count(a.usage.input_tokens as usize),
                         format_count(a.usage.output_tokens as usize),
                         format_count(a.usage.cache_creation_input_tokens as usize),
                         format_count(a.usage.cache_read_input_tokens as usize),
-                        gitvis_core::devops::ai::dollars(c),
+                        cost,
                         a.stop_reason.as_deref().unwrap_or("no stop reason"),
                     );
                     for f in &a.fallbacks {
@@ -281,6 +396,7 @@ impl Msg {
                 }),
                 Err(e) => Err(e.clone()),
             },
+            Msg::Cli(st) => Ok(st.summary()),
         }
     }
 }
@@ -292,17 +408,29 @@ fn format_count(n: usize) -> String {
 /// Size budgets offered in the settings, in KB.
 pub const BUDGETS_KB: [u32; 5] = [16, 32, 64, 128, 256];
 
-/// App-wide configuration (`Settings::ext.ai`): model, effort, whether a key
-/// is stored (the key itself is only in the OS keychain).
+/// App-wide configuration (`Settings::ext.ai`): the provider, the model and
+/// effort of each provider, what is sent. The API key lives only in the OS
+/// keychain; Claude Code keeps its own login.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Prefs {
+    /// Claude Code, the API, or Auto (Claude Code when it is signed in
+    /// with a plan, else the API key).
+    pub provider: Provider,
+    /// API model and effort per feature.
     pub model: Model,
     pub effort_commit: Effort,
     pub effort_pr: Effort,
     pub effort_ci: Effort,
     pub effort_summary: Effort,
     pub effort_commit_explain: Effort,
+    /// Claude Code model and effort per feature.
+    pub cli_model: CliModel,
+    pub cli_effort_commit: Effort,
+    pub cli_effort_pr: Effort,
+    pub cli_effort_ci: Effort,
+    pub cli_effort_summary: Effort,
+    pub cli_effort_commit_explain: Effort,
     /// Show what is sent and ask before every request.
     pub ask: bool,
     /// Most of a diff sent, in KB.
@@ -314,12 +442,19 @@ pub struct Prefs {
 impl Default for Prefs {
     fn default() -> Self {
         Self {
+            provider: Provider::Auto,
             model: Model::default(),
             effort_commit: Feature::CommitMessage.default_effort(),
             effort_pr: Feature::PrDescription.default_effort(),
             effort_ci: Feature::ExplainFailure.default_effort(),
             effort_summary: Feature::SummarisePr.default_effort(),
             effort_commit_explain: Feature::ExplainCommit.default_effort(),
+            cli_model: CliModel::Default,
+            cli_effort_commit: Feature::CommitMessage.default_effort(),
+            cli_effort_pr: Feature::PrDescription.default_effort(),
+            cli_effort_ci: Feature::ExplainFailure.default_effort(),
+            cli_effort_summary: Feature::SummarisePr.default_effort(),
+            cli_effort_commit_explain: Feature::ExplainCommit.default_effort(),
             ask: true,
             diff_kb: 64,
             log_kb: 48,
@@ -328,6 +463,7 @@ impl Default for Prefs {
 }
 
 impl Prefs {
+    /// The API effort of a feature.
     pub fn effort(&self, f: Feature) -> Effort {
         match f {
             Feature::CommitMessage => self.effort_commit,
@@ -348,9 +484,40 @@ impl Prefs {
         }
     }
 
-    /// The model in use (a script override wins).
+    /// The Claude Code effort of a feature.
+    pub fn cli_effort(&self, f: Feature) -> Effort {
+        match f {
+            Feature::CommitMessage => self.cli_effort_commit,
+            Feature::PrDescription => self.cli_effort_pr,
+            Feature::ExplainFailure => self.cli_effort_ci,
+            Feature::SummarisePr => self.cli_effort_summary,
+            Feature::ExplainCommit => self.cli_effort_commit_explain,
+        }
+    }
+
+    pub fn cli_effort_mut(&mut self, f: Feature) -> &mut Effort {
+        match f {
+            Feature::CommitMessage => &mut self.cli_effort_commit,
+            Feature::PrDescription => &mut self.cli_effort_pr,
+            Feature::ExplainFailure => &mut self.cli_effort_ci,
+            Feature::SummarisePr => &mut self.cli_effort_summary,
+            Feature::ExplainCommit => &mut self.cli_effort_commit_explain,
+        }
+    }
+
+    /// The provider in use (a script override wins).
+    pub fn provider_now(&self) -> Provider {
+        session::with(|s| s.provider_override).unwrap_or(self.provider)
+    }
+
+    /// The API model in use (a script override wins).
     pub fn model_now(&self) -> Model {
         session::with(|s| s.model_override).unwrap_or(self.model)
+    }
+
+    /// The Claude Code model in use (a script override wins).
+    pub fn cli_model_now(&self) -> CliModel {
+        session::with(|s| s.cli_model_override).unwrap_or(self.cli_model)
     }
 
     pub fn ask_now(&self) -> bool {
@@ -386,8 +553,11 @@ pub fn on_console_done(_cx: &mut Ctx, _repo: &mut RepoState, _run: &ConsoleRun) 
 /// - `ai-pr` (new pull request form), `ai-explain [RUN JOB]` (the job in
 ///   the log viewer without ids), `ai-summary [N]` (the selected pull
 ///   request without a number), `ai-commit-explain SHA|head`.
-/// - `ai-model NAME` / `ai-ask on|off`: session-only overrides for tests.
-/// - `ai-stop`, `ai-dismiss`, `ai-settings [usage]`, `ai-check-key`.
+/// - `ai-provider auto|cli|api`, `ai-model NAME` (API), `ai-cli-model
+///   default|opus|sonnet|haiku|fable`, `ai-ask on|off`: session-only
+///   overrides for tests.
+/// - `ai-stop`, `ai-dismiss`, `ai-settings [usage|cli|api]`,
+///   `ai-check-key`, `ai-cli-check`.
 pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
     let arg = arg.trim();
     let mut nums = arg.split_whitespace().map(|s| s.parse::<u64>().ok());
@@ -411,6 +581,9 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
             }
         }
         "ai-model" => vec![Act::SetModelOverride(Some(Model::parse(arg)?)).into()],
+        "ai-provider" => vec![Act::SetProviderOverride(Some(Provider::parse(arg)?)).into()],
+        "ai-cli-model" => vec![Act::SetCliModelOverride(Some(CliModel::parse(arg)?)).into()],
+        "ai-cli-check" => vec![Act::CheckCli.into()],
         "ai-ask" => vec![
             Act::SetAskOverride(match arg {
                 "on" => Some(true),
@@ -426,8 +599,8 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         "ai-dismiss" => vec![Act::Dismiss(Target::Wip).into()],
         "ai-check-key" => vec![Act::CheckKey.into()],
         "ai-settings" => {
-            if arg == "usage" {
-                session::with(|s| s.scroll_to_usage = true);
+            if !arg.is_empty() {
+                session::with(|s| s.scroll_to = Some((arg.to_owned(), Instant::now())));
             }
             vec![
                 Action::DevOps(crate::devops::DevOpsAction::SetSettingsSection(
@@ -490,6 +663,11 @@ pub(crate) fn key_unknown() -> bool {
     matches!(key_status(), session::KeyState::Unknown)
 }
 
+/// Claude Code's status has not been read yet.
+pub(crate) fn cli_unknown() -> bool {
+    session::with(|s| matches!(s.cli, session::CliState::Unknown))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -503,6 +681,9 @@ mod tests {
         assert_eq!(p.effort(Feature::PrDescription), Effort::Medium);
         assert_eq!(p.effort(Feature::ExplainFailure), Effort::Medium);
         assert_eq!(p.effort(Feature::SummarisePr), Effort::High);
+        assert_eq!(p.provider, Provider::Auto);
+        assert_eq!(p.cli_model, CliModel::Default);
+        assert_eq!(p.cli_effort(Feature::SummarisePr), Effort::High);
         // Settings saved before this area existed, or by a newer version.
         let p: Prefs = serde_json::from_str("{}").unwrap();
         assert!(p.ask);
@@ -527,6 +708,10 @@ mod tests {
         assert!(script("ai-commit", "").is_some());
         assert!(script("ai-model", "sonnet").is_some());
         assert!(script("ai-model", "gpt").is_none());
+        assert!(script("ai-provider", "cli").is_some());
+        assert!(script("ai-provider", "pigeon").is_none());
+        assert!(script("ai-cli-model", "haiku").is_some());
+        assert!(script("ai-cli-check", "").is_some());
         assert!(script("ai-explain", "12 34").is_some());
         assert!(script("ai-summary", "").is_some());
         assert!(script("ai-commit-explain", "head").is_some());

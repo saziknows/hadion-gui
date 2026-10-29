@@ -11,10 +11,11 @@ use egui::{
     Stroke, Ui, vec2,
 };
 use gitvis_core::Commit;
+use gitvis_core::devops::ai::cli::{self, CliErrorKind};
 use gitvis_core::devops::ai::output::{self, Flaky};
-use gitvis_core::devops::ai::{Failure, Feature, Model, dollars};
+use gitvis_core::devops::ai::{CliModel, Failure, Feature, Model, Provider, dollars};
 
-use super::{Act, Ask, Phase, Prefs, State, Target, control};
+use super::{Act, Ask, Phase, Prefs, State, Target, control, session};
 use crate::devops::DevOpsAction;
 use crate::devops::hooks::{HookCx, LogHookCx};
 use crate::state::{Action, Page, Selection};
@@ -22,13 +23,39 @@ use crate::theme::{Tone, medium, pal, radius, semibold, size, space};
 use crate::views::icons::{Icon, IconButton};
 use crate::views::{form, kit, menus};
 
-/// `Opus 5.5 · low effort`.
+/// Where requests go now: `Some(true)` Claude Code, `Some(false)` the API,
+/// `None` not known yet (Auto before Claude Code has been looked at).
+pub(super) fn goes_cli(prefs: &Prefs) -> Option<bool> {
+    match prefs.provider_now() {
+        Provider::ClaudeCode => Some(true),
+        Provider::Api => Some(false),
+        Provider::Auto => session::with(|s| s.cli.status().map(cli::Status::plan_ready)),
+    }
+}
+
+/// `Claude Code · low effort`, `Opus 5.5 · low effort`, `Auto`.
 fn caption(prefs: &Prefs, f: Feature) -> String {
-    format!(
-        "{} · {} effort",
-        prefs.model_now().short(),
-        prefs.effort(f).as_str()
-    )
+    let no_key =
+        session::with(|s| matches!(&s.key, session::KeyState::Known(k) if k.source().is_none()));
+    if prefs.provider_now() == Provider::Auto && goes_cli(prefs) == Some(false) && no_key {
+        return "Not set up yet".to_owned();
+    }
+    match goes_cli(prefs) {
+        Some(true) => match prefs.cli_model_now() {
+            CliModel::Default => format!("Claude Code · {} effort", prefs.cli_effort(f).as_str()),
+            m => format!(
+                "Claude Code · {} · {} effort",
+                m.label(),
+                prefs.cli_effort(f).as_str()
+            ),
+        },
+        Some(false) => format!(
+            "{} · {} effort",
+            prefs.model_now().short(),
+            prefs.effort(f).as_str()
+        ),
+        None => "Auto: Claude Code or the API".to_owned(),
+    }
 }
 
 fn open_settings(actions: &mut Vec<Action>) {
@@ -38,36 +65,52 @@ fn open_settings(actions: &mut Vec<Action>) {
     actions.push(Action::ShowPage(Page::Settings));
 }
 
-/// `Claude Opus 5.5 · 1,204 in · 96 out · cache 0 / 800 · $0.0042 · 3.1 s`.
+/// Two lines: who answered and how (`Claude Opus 5.5 · through Claude
+/// Code (Claude Max plan)`), then the numbers (`518 tokens in, 62 out ·
+/// 5.9 s · covered by your plan`).
 fn usage_line(a: &Ask) -> String {
     let Some(r) = a.reply() else {
         return String::new();
     };
     let ans = &r.done.answer;
     let model = if ans.model.is_empty() {
-        a.model.label().to_owned()
+        a.engine()
     } else {
         Model::label_of(&ans.model)
     };
+    let who = match &r.done.cli {
+        Some(run) => format!("{model} · through Claude Code ({})", run.account),
+        None => format!("{model} · through the Claude API"),
+    };
     let u = &ans.usage;
-    let mut s = format!(
-        "{model} · {} in · {} out",
+    let mut numbers = format!(
+        "{} tokens in, {} out",
         crate::format::count(u.input_tokens as usize),
         crate::format::count(u.output_tokens as usize)
     );
     if u.cache_creation_input_tokens + u.cache_read_input_tokens > 0 {
-        s.push_str(&format!(
-            " · cache write {} / read {}",
+        numbers.push_str(&format!(
+            " · cache: {} written, {} read",
             crate::format::count(u.cache_creation_input_tokens as usize),
             crate::format::count(u.cache_read_input_tokens as usize)
         ));
     }
-    s.push_str(&format!(
-        " · about {} · {}",
-        dollars(r.cost),
-        crate::format::millis(r.done.elapsed_ms)
-    ));
-    s
+    numbers.push_str(&format!(" · {}", crate::format::millis(r.done.elapsed_ms)));
+    match &r.done.cli {
+        Some(run) if run.bills_api => numbers.push_str(&format!(
+            " · billed to that API account: about {} (Claude Code's estimate)",
+            dollars(r.cost)
+        )),
+        Some(run) => numbers.push_str(&format!(
+            " · covered by your plan{}",
+            run.cost_estimate
+                .filter(|c| *c > 0.0)
+                .map(|c| format!(" (Claude Code's list-price estimate: {})", dollars(c)))
+                .unwrap_or_default()
+        )),
+        None => numbers.push_str(&format!(" · about {}", dollars(r.cost))),
+    }
+    format!("{who}\n{numbers}")
 }
 
 /// "Claude Opus 5.5 declined; continued on Claude Opus 5" lines.
@@ -96,8 +139,9 @@ fn note(ui: &mut Ui, text: &str) {
     ui.add(Label::new(RichText::new(text).size(size::SMALL).color(c)).wrap());
 }
 
-/// Live text of a running request, and whether the model is still thinking.
-fn live_text(a: &Ask) -> Option<(String, bool, u64)> {
+/// Live text of a running request, whether the model is still thinking,
+/// the seconds so far and a note (Claude Code retrying after a limit).
+fn live_text(a: &Ask) -> Option<(String, bool, u64, Option<String>)> {
     let Phase::Running { live, .. } = &a.phase else {
         return None;
     };
@@ -106,48 +150,56 @@ fn live_text(a: &Ask) -> Option<(String, bool, u64)> {
         l.answer.text.clone(),
         l.answer.text.is_empty(),
         l.started.elapsed().as_secs(),
+        l.note.clone(),
     ))
 }
 
 /// Spinner, phase, elapsed time and Stop, for a request in flight.
-/// Returns the live text (empty while thinking). `short` phrases fit the
-/// narrow WIP panel.
+/// Returns the live text (empty while thinking). `short` is the narrow WIP
+/// panel; elsewhere the phrases shorten when the row is narrow.
 fn progress_row(ui: &mut Ui, a: &Ask, short: bool, actions: &mut Vec<Action>) -> String {
     let p = *pal(ui);
     ui.ctx().request_repaint_after(Duration::from_millis(120));
-    let (text, phase) = match &a.phase {
+    let narrow = short || ui.available_width() < 380.0;
+    let mut tip: Option<String> = None;
+    // The phase, longest first.
+    let (text, phases): (String, Vec<String>) = match &a.phase {
         Phase::Preparing => (
             String::new(),
-            if short {
-                "Reading what to send…".to_owned()
-            } else {
-                "Gathering and checking what to send…".to_owned()
-            },
+            vec![
+                "Gathering and checking what to send…".to_owned(),
+                "Reading what to send…".to_owned(),
+                "Reading…".to_owned(),
+            ],
         ),
         Phase::Confirming => (
             String::new(),
-            if short {
-                "Waiting to send".to_owned()
-            } else {
-                "Waiting for your confirmation".to_owned()
-            },
+            vec![
+                "Waiting for your confirmation".to_owned(),
+                "Waiting to send".to_owned(),
+                "Waiting".to_owned(),
+            ],
         ),
         Phase::Running { .. } => {
-            let (text, thinking, secs) = live_text(a).unwrap_or_default();
-            let who = a.model.short();
-            let phase = match (thinking, short) {
-                (true, true) => format!("Thinking · {secs} s"),
-                (true, false) => format!("{who} is thinking · {secs} s"),
-                (false, true) => format!(
-                    "Writing · {} chars · {secs} s",
-                    crate::format::count(text.chars().count())
-                ),
-                (false, false) => format!(
-                    "{who} is writing · {} characters · {secs} s",
-                    crate::format::count(text.chars().count())
-                ),
+            let (text, thinking, secs, note) = live_text(a).unwrap_or_default();
+            let who = a.engine();
+            let chars = crate::format::count(text.chars().count());
+            let phases = match (&note, thinking) {
+                (Some(n), _) => {
+                    tip = Some(n.clone());
+                    vec![format!("{n} · {secs} s"), format!("Retrying · {secs} s")]
+                }
+                (None, true) => vec![
+                    format!("{who} is thinking · {secs} s"),
+                    format!("Thinking · {secs} s"),
+                ],
+                (None, false) => vec![
+                    format!("{who} is writing · {chars} characters · {secs} s"),
+                    format!("Writing · {chars} chars · {secs} s"),
+                    format!("Writing · {secs} s"),
+                ],
             };
-            (text, phase)
+            (text, phases)
         }
         Phase::Done(_) => return String::new(),
     };
@@ -162,7 +214,7 @@ fn progress_row(ui: &mut Ui, a: &Ask, short: bool, actions: &mut Vec<Action>) ->
                     if IconButton::text("Cancel").compact().show(ui).clicked() {
                         actions.push(Act::Cancel(a.target.clone()).into());
                     }
-                    if IconButton::text(if short { "Review" } else { "Review and send" })
+                    if IconButton::text(if narrow { "Review" } else { "Review and send" })
                         .compact()
                         .show(ui)
                         .on_hover_text("Show the confirmation again")
@@ -187,11 +239,27 @@ fn progress_row(ui: &mut Ui, a: &Ask, short: bool, actions: &mut Vec<Action>) ->
                 if !matches!(a.phase, Phase::Confirming) {
                     ui.add(egui::Spinner::new().size(13.0).color(p.accent));
                 }
+                // The WIP panel always takes the short phrases.
+                let options = if short && phases.len() > 1 {
+                    &phases[1..]
+                } else {
+                    &phases[..]
+                };
+                let phase = fitting(
+                    ui,
+                    options,
+                    ui.available_width(),
+                    FontId::proportional(size::SMALL),
+                );
+                let shortened = phase != phases[0];
                 let resp = ui.add(
                     Label::new(RichText::new(&phase).size(size::SMALL).color(p.text_2)).truncate(),
                 );
-                // In the narrow panel the text so far is only in the tooltip.
-                if short && !text.is_empty() {
+                // When shortened, the retry note and the text so far are
+                // in the tooltip.
+                if let Some(t) = tip.take().filter(|_| shortened) {
+                    resp.on_hover_text(t);
+                } else if shortened && !text.is_empty() {
                     let tail: String = {
                         let chars: Vec<char> = text.chars().collect();
                         chars[chars.len().saturating_sub(400)..].iter().collect()
@@ -218,12 +286,21 @@ fn details_button(ui: &mut Ui, text: &str) {
 /// panel): a one-line title, the text behind a Details button.
 fn failure(ui: &mut Ui, a: &Ask, f: &Failure, compact: bool, actions: &mut Vec<Action>) {
     let t = a.target.clone();
+    let cli_title = match f {
+        Failure::ClaudeCode(e) => e.kind.title(),
+        _ => "",
+    };
     let short_api = match f {
         Failure::Api(e) => {
             let mut s = if e.kind.is_empty() {
                 "API error".to_owned()
             } else {
-                e.kind.replace('_', " ")
+                // `authentication_error` → `Authentication error`.
+                let k = e.kind.replace('_', " ");
+                let mut c = k.chars();
+                c.next()
+                    .map(|f| f.to_uppercase().chain(c).collect())
+                    .unwrap_or_default()
             };
             if let Some(st) = e.status.filter(|s| *s != 200) {
                 s.push_str(&format!(" (HTTP {st})"));
@@ -241,12 +318,35 @@ fn failure(ui: &mut Ui, a: &Ask, f: &Failure, compact: bool, actions: &mut Vec<A
         Failure::Api(_) if compact => (Tone::Danger, short_api.as_str()),
         Failure::Api(_) => (Tone::Danger, "The Claude API returned an error"),
         Failure::Incomplete(_) => (Tone::Danger, "The answer was cut off"),
+        Failure::NoClaudeCode => (Tone::Warning, "Claude Code is not installed"),
+        Failure::NoProvider(_) => (Tone::Warning, "Set up Claude Code or an API key"),
+        Failure::ClaudeCode(e) => (
+            match e.kind {
+                CliErrorKind::NotSignedIn
+                | CliErrorKind::LoginExpired
+                | CliErrorKind::SessionLimit
+                | CliErrorKind::WeeklyLimit
+                | CliErrorKind::TooOld
+                | CliErrorKind::ModelNotFound => Tone::Warning,
+                _ => Tone::Danger,
+            },
+            cli_title,
+        ),
     };
     let mut body = match f {
         Failure::Cancelled => "Nothing was filled in.".to_owned(),
         Failure::NoCurl => {
             "gitvis sends requests with curl, which reads the key from standard input so it never appears on a command line. curl ships with Windows 10 and 11 (C:\\Windows\\System32\\curl.exe) and with Git for Windows; otherwise: winget install cURL.cURL".to_owned()
         }
+        Failure::NoClaudeCode => format!(
+            "gitvis looks for claude.exe in ~/.local/bin, on PATH and next to an npm claude.cmd. Install it with one of:\n{}\nthen sign in (`{}` in a terminal), or choose the Claude API in Settings → AI assist.",
+            cli::INSTALL_HINTS
+                .iter()
+                .map(|(how, cmd)| format!("{how}: {cmd}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            cli::SIGN_IN
+        ),
         other => other.message(),
     };
     if let Failure::Api(e) = f
@@ -254,6 +354,12 @@ fn failure(ui: &mut Ui, a: &Ask, f: &Failure, compact: bool, actions: &mut Vec<A
     {
         body.push('\n');
         body.push_str(e.hint());
+    }
+    if let Failure::ClaudeCode(e) = f
+        && !e.kind.next_step().is_empty()
+    {
+        body.push('\n');
+        body.push_str(e.kind.next_step());
     }
     let wait = control::retry_wait(a);
     let shown = if compact { "" } else { body.as_str() };
@@ -288,6 +394,73 @@ fn failure(ui: &mut Ui, a: &Ask, f: &Failure, compact: bool, actions: &mut Vec<A
                         .clicked()
                     {
                         actions.push(Act::Start(t.clone()).into());
+                    }
+                }
+                Failure::NoClaudeCode | Failure::NoProvider(_) => {
+                    if IconButton::new(Icon::Gear, "Settings")
+                        .compact()
+                        .show(ui)
+                        .clicked()
+                    {
+                        open_settings(actions);
+                    }
+                    if IconButton::new(Icon::Rerun, "Check again")
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Look for Claude Code and its sign-in again, then ask")
+                        .clicked()
+                    {
+                        actions.push(Act::Start(t.clone()).into());
+                    }
+                }
+                Failure::ClaudeCode(e)
+                    if e.kind.needs_sign_in() || e.kind == CliErrorKind::TooOld =>
+                {
+                    let cmd = if e.kind == CliErrorKind::TooOld {
+                        "claude update"
+                    } else {
+                        cli::SIGN_IN
+                    };
+                    if IconButton::new(Icon::Copy, &format!("Copy `{cmd}`"))
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Run it in a terminal (gitvis never runs it for you)")
+                        .clicked()
+                    {
+                        actions.push(Action::Copy(cmd.to_owned()));
+                    }
+                    if IconButton::new(Icon::Terminal, "Terminal")
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Open the terminal panel, to paste and run it there")
+                        .clicked()
+                    {
+                        actions.push(Action::ToggleTerminal);
+                    }
+                    if IconButton::new(Icon::Rerun, "Check again")
+                        .compact()
+                        .show(ui)
+                        .clicked()
+                    {
+                        actions.push(Act::Start(t.clone()).into());
+                    }
+                }
+                Failure::ClaudeCode(e)
+                    if matches!(
+                        e.kind,
+                        CliErrorKind::SessionLimit
+                            | CliErrorKind::WeeklyLimit
+                            | CliErrorKind::ModelNotFound
+                            | CliErrorKind::CreditTooLow
+                            | CliErrorKind::ToolsEnabled
+                    ) =>
+                {
+                    if IconButton::new(Icon::Gear, "Settings")
+                        .compact()
+                        .show(ui)
+                        .clicked()
+                    {
+                        open_settings(actions);
                     }
                 }
                 Failure::Api(e) if e.kind == "authentication_error" => {
@@ -690,17 +863,23 @@ fn fill_status(ui: &mut Ui, a: &Ask, done_text: &str, compact: bool, actions: &m
                 return;
             }
             // Filled in: one line with what it cost.
-            let done_text = if compact {
-                short_usage(a)
-            } else {
-                done_text.to_owned()
-            };
             ui.allocate_ui_with_layout(
                 vec2(ui.available_width(), 22.0),
                 Layout::left_to_right(Align::Center),
                 |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     crate::views::icons::show(ui, Icon::Check, 12.0, p.success);
+                    // Room for the label beside the close button.
+                    let done_text = if compact {
+                        fitting(
+                            ui,
+                            &short_usages(a),
+                            ui.available_width() - 30.0,
+                            FontId::new(size::SMALL, medium()),
+                        )
+                    } else {
+                        done_text.to_owned()
+                    };
                     ui.add(
                         Label::new(
                             RichText::new(&done_text)
@@ -747,27 +926,71 @@ fn fill_status(ui: &mut Ui, a: &Ask, done_text: &str, compact: bool, actions: &m
     }
 }
 
-/// `Opus 5.5 · about $0.0042 · 2 redacted` (details in the tooltip).
-fn short_usage(a: &Ask) -> String {
+/// Labels for a one-line "done" row, longest first: `Opus 5.5 · about
+/// $0.0042 · 2 redacted` down to `$0.0042`, `Claude Code · your plan` down
+/// to `Claude Code` (the tooltip has the details).
+fn short_usages(a: &Ask) -> Vec<String> {
     let Some(r) = a.reply() else {
-        return String::new();
+        return Vec::new();
     };
+    let n = a
+        .prepared
+        .as_ref()
+        .map_or(0, |p| p.redactions.values() + p.redactions.withheld.len());
+    let red = if n > 0 {
+        format!(" · {n} redacted")
+    } else {
+        String::new()
+    };
+    if r.done.cli.as_ref().is_some_and(|run| run.bills_api) {
+        let cost = dollars(r.cost);
+        return vec![
+            format!("Claude Code · about {cost}{red}"),
+            format!("about {cost}{red}"),
+            cost,
+        ];
+    }
+    if r.done.cli.is_some() {
+        return vec![
+            format!("Claude Code · your plan{red}"),
+            format!("Claude Code{red}"),
+            "Claude Code".to_owned(),
+            "Done".to_owned(),
+        ];
+    }
     let ans = &r.done.answer;
     let model = if ans.model.is_empty() {
-        a.model.short().to_owned()
+        a.engine()
     } else {
         Model::label_of(&ans.model)
             .trim_start_matches("Claude ")
             .to_owned()
     };
-    let mut s = format!("{model} · about {}", dollars(r.cost));
-    if let Some(p) = &a.prepared {
-        let n = p.redactions.values() + p.redactions.withheld.len();
-        if n > 0 {
-            s.push_str(&format!(" · {n} redacted"));
-        }
-    }
-    s
+    let cost = dollars(r.cost);
+    vec![
+        format!("{model} · about {cost}{red}"),
+        format!("about {cost}{red}"),
+        format!("about {cost}"),
+        cost,
+    ]
+}
+
+/// The first of `options` that fits in `width`; the last one otherwise (its
+/// label still truncates).
+fn fitting(ui: &Ui, options: &[String], width: f32, font: FontId) -> String {
+    let fits = |o: &String| {
+        ui.painter()
+            .layout_no_wrap(o.clone(), font.clone(), egui::Color32::WHITE)
+            .size()
+            .x
+            <= width
+    };
+    options
+        .iter()
+        .find(|o| fits(o))
+        .or(options.last())
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Above the commit message box.
@@ -786,7 +1009,7 @@ pub fn wip_tools(ui: &mut Ui, h: &HookCx, actions: &mut Vec<Action>) {
         ui.add_space(2.0);
         return;
     }
-    let done_line = ask.filter(|a| a.applied).map(short_usage);
+    let done_line = ask.filter(|a| a.applied).map(short_usages);
     ui.allocate_ui_with_layout(
         vec2(ui.available_width(), 24.0),
         Layout::left_to_right(Align::Center),
@@ -827,11 +1050,16 @@ pub fn wip_tools(ui: &mut Ui, h: &HookCx, actions: &mut Vec<Action>) {
                                 && !pr.redactions.is_empty()
                             {
                                 tip.push_str(&format!(
-                                    "
-Redacted before sending: {}",
+                                    "\nRedacted before sending: {}",
                                     pr.redactions.summary()
                                 ));
                             }
+                            let line = fitting(
+                                ui,
+                                line,
+                                ui.available_width(),
+                                FontId::proportional(size::SMALL),
+                            );
                             ui.add(
                                 Label::new(
                                     RichText::new(line).size(size::SMALL).color(p.text_2),
@@ -856,7 +1084,7 @@ Redacted before sending: {}",
         },
     );
     if let Some(a) = ask.filter(|a| !a.applied) {
-        let what = format!("Message written by {}", a.model.label());
+        let what = format!("Message written by {}", a.engine());
         fill_status(ui, a, &what, true, actions);
     } else if let Some(a) = ask
         && let Some(r) = a.reply()
@@ -911,18 +1139,19 @@ pub fn new_pr_tools(ui: &mut Ui, h: &HookCx, actions: &mut Vec<Action>) {
             );
             if let Some(a) = ask {
                 ui.add_space(4.0);
-                let what = format!("Title and description written by {}", a.model.label());
+                let what = format!("Title and description written by {}", a.engine());
                 fill_status(ui, a, &what, false, actions);
             }
         });
 }
 
 /// A result card (pull request summary, commit explanation).
+/// `titles`: the title, then shorter ones for a narrow panel.
 fn result_card(
     ui: &mut Ui,
     st: &State,
     a: &Ask,
-    title: &str,
+    titles: &[&str],
     actions: &mut Vec<Action>,
     badges: &[(String, Tone)],
 ) {
@@ -985,6 +1214,13 @@ fn result_card(
                     {
                         actions.push(Act::ToggleCollapsed(a.target.clone()).into());
                     }
+                    let options: Vec<String> = titles.iter().map(|t| (*t).to_owned()).collect();
+                    let title = fitting(
+                        ui,
+                        &options,
+                        ui.available_width(),
+                        FontId::new(size::BODY, semibold()),
+                    );
                     ui.add(
                         Label::new(
                             RichText::new(title)
@@ -1076,50 +1312,54 @@ pub fn pr_tools(ui: &mut Ui, h: &HookCx, number: u64, actions: &mut Vec<Action>)
             );
         }
         Some(a) => {
-            let badges = vec![(a.model.short().to_owned(), Tone::Neutral)];
-            result_card(ui, st, a, "Claude's summary", actions, &badges);
+            let badges = vec![(a.engine(), Tone::Neutral)];
+            result_card(ui, st, a, &["Claude's summary"], actions, &badges);
         }
     }
     ui.add_space(space::M);
 }
 
-/// In the commit panel, after the details.
+/// In the commit panel, after the details: the button. The answer opens in
+/// a window, because the panel's upper part does not scroll (a card there
+/// was cut off, or pushed the file list away, on smaller windows).
 pub fn commit_panel(ui: &mut Ui, h: &HookCx, c: &Commit, actions: &mut Vec<Action>) {
     let st = &h.devops.ai;
     let target = Target::Commit(c.id.to_string());
     let prefs = &h.settings.ext.ai;
-    match st.asks.get(&target) {
-        None => {
-            kit::section_with(ui, "Claude", None, |ui| {
-                if IconButton::new(Icon::Comment, "Explain this commit")
-                    .compact()
-                    .show(ui)
-                    .on_hover_text(format!(
-                        "What the commit does and what could break ({})",
-                        caption(prefs, Feature::ExplainCommit)
-                    ))
-                    .clicked()
-                {
-                    actions.push(Act::Start(target.clone()).into());
-                }
-            });
+    let ask = st.asks.get(&target);
+    let busy = ask.is_some_and(|a| a.running() || matches!(a.phase, Phase::Confirming));
+    kit::section_with(ui, "Claude", None, |ui| {
+        if IconButton::new(Icon::Comment, "Explain this commit")
+            .compact()
+            .enabled(!busy)
+            .show(ui)
+            .on_hover_text(format!(
+                "What the commit does and what could break ({})",
+                caption(prefs, Feature::ExplainCommit)
+            ))
+            .clicked()
+        {
+            actions.push(Act::Start(target.clone()).into());
         }
-        Some(a) => {
-            kit::section(ui, "Claude", None);
-            let risk = a
-                .reply()
-                .and_then(|r| output::risk(&r.done.answer.text))
-                .map(|r| {
-                    let tone = match r.to_ascii_lowercase().as_str() {
-                        "high" => Tone::Danger,
-                        "medium" => Tone::Warning,
-                        _ => Tone::Success,
-                    };
-                    (format!("{r} risk"), tone)
-                });
-            let badges: Vec<(String, Tone)> = risk.into_iter().collect();
-            result_card(ui, st, a, "What this commit does", actions, &badges);
+    });
+    if let Some(a) = ask {
+        let mut badges = vec![(a.engine(), Tone::Neutral)];
+        if let Some(r) = a.reply().and_then(|r| output::risk(&r.done.answer.text)) {
+            let tone = match r.to_ascii_lowercase().as_str() {
+                "high" => Tone::Danger,
+                "medium" => Tone::Warning,
+                _ => Tone::Success,
+            };
+            badges.push((format!("{r} risk"), tone));
         }
+        answer_window(
+            ui.ctx(),
+            a,
+            "What this commit does",
+            egui::Id::unique("ai_commit_window"),
+            &badges,
+            actions,
+        );
     }
 }
 
@@ -1163,11 +1403,37 @@ pub fn log_tools(ui: &mut Ui, h: &LogHookCx, run: u64, job: u64, actions: &mut V
         actions.push(Act::Start(target.clone()).into());
     }
     if let Some(a) = ask {
-        explain_window(ui.ctx(), a, job, actions);
+        let mut badges = vec![(a.engine(), Tone::Neutral)];
+        if let Some(f) = a.reply().and_then(|r| output::flaky(&r.done.answer.text)) {
+            let tone = match f {
+                Flaky::Yes => Tone::Warning,
+                Flaky::No => Tone::Danger,
+                Flaky::Maybe => Tone::Neutral,
+            };
+            badges.push((f.label().to_owned(), tone));
+        }
+        answer_window(
+            ui.ctx(),
+            a,
+            "Why the job failed",
+            egui::Id::unique(("ai_explain_window", job)),
+            &badges,
+            actions,
+        );
     }
 }
 
-fn explain_window(ctx: &egui::Context, a: &Ask, job: u64, actions: &mut Vec<Action>) {
+/// A floating answer (a failed job, a commit): title and badges, the
+/// answer or its progress, what it cost and what was sent. Closing it
+/// dismisses the answer.
+fn answer_window(
+    ctx: &egui::Context,
+    a: &Ask,
+    title: &str,
+    id: egui::Id,
+    badges: &[(String, Tone)],
+    actions: &mut Vec<Action>,
+) {
     let p = *crate::theme::palette(ctx.global_style().visuals.dark_mode);
     let frame = Frame::NONE
         .fill(p.overlay)
@@ -1176,8 +1442,8 @@ fn explain_window(ctx: &egui::Context, a: &Ask, job: u64, actions: &mut Vec<Acti
         .inner_margin(Margin::same(16))
         .shadow(ctx.global_style().visuals.window_shadow);
     let screen = ctx.content_rect();
-    egui::Window::new("Explain this failure")
-        .id(egui::Id::unique(("ai_explain_window", job)))
+    egui::Window::new(title)
+        .id(id)
         .title_bar(false)
         .collapsible(false)
         .frame(frame)
@@ -1188,26 +1454,19 @@ fn explain_window(ctx: &egui::Context, a: &Ask, job: u64, actions: &mut Vec<Acti
         .constrain(true)
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = 6.0;
-            let flaky = a.reply().and_then(|r| output::flaky(&r.done.answer.text));
             ui.allocate_ui_with_layout(
                 vec2(ui.available_width(), 26.0),
                 Layout::left_to_right(Align::Center),
                 |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     ui.label(
-                        RichText::new("Why the job failed")
+                        RichText::new(title)
                             .size(size::TITLE)
                             .family(semibold())
                             .color(p.text_strong),
                     );
-                    kit::badge(ui, a.model.short(), Tone::Neutral);
-                    if let Some(f) = flaky {
-                        let tone = match f {
-                            Flaky::Yes => Tone::Warning,
-                            Flaky::No => Tone::Danger,
-                            Flaky::Maybe => Tone::Neutral,
-                        };
-                        kit::badge(ui, f.label(), tone);
+                    for (b, tone) in badges {
+                        kit::badge(ui, b, *tone);
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if IconButton::icon(Icon::Close)
@@ -1225,7 +1484,7 @@ fn explain_window(ctx: &egui::Context, a: &Ask, job: u64, actions: &mut Vec<Acti
             // The body scrolls; the window keeps to its content up to that.
             let max_body = (screen.height() * 0.62).clamp(200.0, 560.0);
             egui::ScrollArea::vertical()
-                .id_salt(("ai_explain_scroll", job))
+                .id_salt((id, "scroll"))
                 .max_height(max_body)
                 .auto_shrink([false, true])
                 .show(ui, |ui| match &a.phase {
@@ -1250,17 +1509,15 @@ fn explain_window(ctx: &egui::Context, a: &Ask, job: u64, actions: &mut Vec<Acti
                 }
             }
             if let Some(pr) = &a.prepared {
-                let excerpt = pr
+                let mut parts: Vec<String> = pr
                     .sources
-                    .first()
+                    .iter()
                     .map(|(w, d)| format!("{w}: {d}"))
-                    .unwrap_or_default();
-                let red = if pr.redactions.is_empty() {
-                    String::new()
-                } else {
-                    format!(" · redacted {}", pr.redactions.summary())
-                };
-                note(ui, &format!("Sent: {excerpt}{red}"));
+                    .collect();
+                if !pr.redactions.is_empty() {
+                    parts.push(format!("redacted {}", pr.redactions.summary()));
+                }
+                note(ui, &format!("Sent: {}", parts.join(" · ")));
             }
             if let Some(r) = a.reply() {
                 ui.horizontal(|ui| {

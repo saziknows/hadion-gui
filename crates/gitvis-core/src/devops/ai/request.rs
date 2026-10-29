@@ -52,7 +52,7 @@ pub fn body(model: Model, effort: Effort, prompt: &Prompt) -> Value {
             "cache_control": {"type": "ephemeral"},
         }],
         "messages": [{"role": "user", "content": prompt.user}],
-        "output_config": {"effort": effort.as_str()},
+        "output_config": {"effort": effort.for_api().as_str()},
     });
     if model.supports_fallbacks() {
         v["fallbacks"] = json!("default");

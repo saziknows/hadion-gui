@@ -7,18 +7,21 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use gitvis_core::devops::ai::budget;
+use gitvis_core::devops::ai::cli::{self, CliError, CliErrorKind};
 use gitvis_core::devops::ai::inputs;
 use gitvis_core::devops::ai::output;
 use gitvis_core::devops::ai::prompts::{self, FailureInput, PrInput, SummaryInput};
 use gitvis_core::devops::ai::redact::{self, Redactions};
 use gitvis_core::devops::ai::request;
-use gitvis_core::devops::ai::runner::{self, KeySource, Live};
-use gitvis_core::devops::ai::{Failure, Model, Usage, cost, dollars, estimate_tokens};
+use gitvis_core::devops::ai::runner::{self, Live};
+use gitvis_core::devops::ai::{
+    CliModel, Failure, Model, Provider, Usage, cost, dollars, estimate_tokens,
+};
 use gitvis_core::devops::review::model::{PrDetail, PrFile, ReviewThread};
 use gitvis_core::github::{Annotation, Job, WorkflowRun};
 use gitvis_core::joblog::JobLog;
 
-use super::{Act, Ask, KeyOp, Msg, Phase, Prepared, Reply, Target, session};
+use super::{Act, Ask, CliRoute, KeyOp, Msg, Phase, Prepared, Reply, Route, Target, session};
 use crate::devops::ctx::Ctx;
 use crate::state::{RepoState, ToastKind};
 
@@ -169,6 +172,17 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             }
         }
         Act::SetAskOverride(a) => session::with(|s| s.ask_override = a),
+        Act::SetProviderOverride(p) => {
+            session::with(|s| s.provider_override = p);
+            if let Some(p) = p {
+                cx.toast(
+                    ToastKind::Info,
+                    format!("AI requests go through {} for this session", p.label()),
+                );
+            }
+        }
+        Act::SetCliModelOverride(m) => session::with(|s| s.cli_model_override = m),
+        Act::CheckCli => check_cli(cx),
     }
 }
 
@@ -324,7 +338,8 @@ fn gather(repo: &RepoState, t: &Target) -> Result<Material, String> {
     }
 }
 
-/// Start a request: gather and redact in the background, then confirm.
+/// Start a request: choose the way to Claude, gather and redact in the
+/// background, then confirm.
 fn start(cx: &mut Ctx, repo: &mut RepoState, target: Target) {
     if repo
         .devops
@@ -335,9 +350,17 @@ fn start(cx: &mut Ctx, repo: &mut RepoState, target: Target) {
     {
         return;
     }
+    // After a setup problem (not installed, signed out), look again rather
+    // than reuse the five-minute check.
+    let recheck = repo.devops.ai.asks.get(&target).is_some_and(|a| {
+        matches!(
+            &a.phase,
+            Phase::Done(Err(Failure::NoClaudeCode | Failure::NoProvider(_)))
+        ) || matches!(&a.phase, Phase::Done(Err(Failure::ClaudeCode(e))) if e.kind.needs_sign_in() || e.kind == CliErrorKind::TooOld)
+    });
     let feature = target.feature();
     let prefs = cx.ext.ai.clone();
-    let (model, effort, ask_first) = (prefs.model_now(), prefs.effort(feature), prefs.ask_now());
+    let provider = prefs.provider_now();
     let (diff_budget, log_budget) = (prefs.diff_budget(), prefs.log_budget());
     let st = &mut repo.devops.ai;
     st.next_id += 1;
@@ -345,14 +368,18 @@ fn start(cx: &mut Ctx, repo: &mut RepoState, target: Target) {
     let mut ask = Ask {
         id,
         target: target.clone(),
-        model,
-        effort,
-        ask_first,
+        provider,
+        model: prefs.model_now(),
+        effort: prefs.effort(feature),
+        cli_model: prefs.cli_model_now(),
+        cli_effort: prefs.cli_effort(feature),
+        ask_first: prefs.ask_now(),
         phase: Phase::Preparing,
         prepared: None,
         started: Instant::now(),
         applied: false,
         unapplied: false,
+        chosen_cli: None,
     };
     let material = match gather(repo, &target) {
         Ok(m) => m,
@@ -363,69 +390,105 @@ fn start(cx: &mut Ctx, repo: &mut RepoState, target: Target) {
         }
     };
     repo.devops.ai.asks.insert(target.clone(), ask);
+    if provider != Provider::Api {
+        session::with(|s| {
+            if matches!(s.cli, session::CliState::Unknown) {
+                s.cli = session::CliState::Checking;
+            }
+        });
+    }
     let label = format!(
         "Claude: gather the material ({})",
         feature.label().to_lowercase()
     );
     let t = target.clone();
     let started = match material {
-        Material::Staged => cx.read(label, move |dir, log| Msg::Prepared {
-            target: t,
-            id,
-            result: preflight().and_then(|key| prepare_staged(dir, diff_budget, &mut log.commands, key)),
+        Material::Staged => cx.read(label, move |dir, log| {
+            let (route, cli) = choose(provider, recheck, &mut log.commands);
+            Msg::Prepared {
+                target: t,
+                id,
+                chosen: route.as_ref().ok().map(Route::is_cli),
+                result: route
+                    .and_then(|route| prepare_staged(dir, diff_budget, &mut log.commands, route)),
+                cli,
+            }
         }),
         Material::NewPr {
             base,
             head,
             base_ref,
             template,
-        } => cx.read(label, move |dir, log| Msg::Prepared {
-            target: t,
-            id,
-            result: preflight().and_then(|key| {
-                prepare_new_pr(dir, &base, &head, &base_ref, template, &mut log.commands, key)
-            }),
+        } => cx.read(label, move |dir, log| {
+            let (route, cli) = choose(provider, recheck, &mut log.commands);
+            Msg::Prepared {
+                target: t,
+                id,
+                chosen: route.as_ref().ok().map(Route::is_cli),
+                result: route.and_then(|route| {
+                    prepare_new_pr(
+                        dir,
+                        &base,
+                        &head,
+                        &base_ref,
+                        template,
+                        &mut log.commands,
+                        route,
+                    )
+                }),
+                cli,
+            }
         }),
-        Material::Commit(sha) => cx.read(label, move |dir, log| Msg::Prepared {
-            target: t,
-            id,
-            result: preflight().and_then(|key| {
-                let (input, m) = inputs::commit(dir, &sha, diff_budget, &mut log.commands)
-                    .map_err(Failure::Prepare)?;
-                let prompt = prompts::explain_commit(&input);
-                Ok(Prepared {
-                    sources: vec![
-                        ("Commit".to_owned(), short(&sha).to_owned()),
-                        ("Diff".to_owned(), m.fitted.summary()),
-                        ("Message and stat".to_owned(), "full".to_owned()),
-                    ],
-                    files: m.fitted.included.clone(),
-                    redactions: m.redactions,
-                    prompt,
-                    key,
-                })
-            }),
+        Material::Commit(sha) => cx.read(label, move |dir, log| {
+            let (route, cli) = choose(provider, recheck, &mut log.commands);
+            Msg::Prepared {
+                target: t,
+                id,
+                chosen: route.as_ref().ok().map(Route::is_cli),
+                result: route.and_then(|route| {
+                    let (input, m) = inputs::commit(dir, &sha, diff_budget, &mut log.commands)
+                        .map_err(Failure::Prepare)?;
+                    let prompt = prompts::explain_commit(&input);
+                    Ok(Prepared {
+                        sources: vec![
+                            ("Commit".to_owned(), short(&sha).to_owned()),
+                            ("Diff".to_owned(), m.fitted.summary()),
+                            ("Message and stat".to_owned(), "full".to_owned()),
+                        ],
+                        files: m.fitted.included.clone(),
+                        redactions: m.redactions,
+                        prompt,
+                        route,
+                    })
+                }),
+                cli,
+            }
         }),
         Material::Pr {
             detail,
             files,
             owner_repo,
-        } => cx.gh_read(label, move |gh, log| Msg::Prepared {
-            target: t,
-            id,
-            result: preflight().and_then(|key| {
-                let files = match files {
-                    Some(f) => f,
-                    None => gitvis_core::devops::review::fetch::fetch_pr_files(
-                        gh,
-                        detail.pr.number,
-                        &mut log.calls,
-                    )
-                    .map_err(|e| Failure::Prepare(e.to_string()))?,
-                };
-                let _ = &owner_repo;
-                Ok(prepare_summary(&detail, &files, diff_budget, key))
-            }),
+        } => cx.gh_read(label, move |gh, log| {
+            let (route, cli) = choose(provider, recheck, &mut log.commands);
+            Msg::Prepared {
+                target: t,
+                id,
+                chosen: route.as_ref().ok().map(Route::is_cli),
+                result: route.and_then(|route| {
+                    let files = match files {
+                        Some(f) => f,
+                        None => gitvis_core::devops::review::fetch::fetch_pr_files(
+                            gh,
+                            detail.pr.number,
+                            &mut log.calls,
+                        )
+                        .map_err(|e| Failure::Prepare(e.to_string()))?,
+                    };
+                    let _ = &owner_repo;
+                    Ok(prepare_summary(&detail, &files, diff_budget, route))
+                }),
+                cli,
+            }
         }),
         Material::Job {
             run,
@@ -434,39 +497,44 @@ fn start(cx: &mut Ctx, repo: &mut RepoState, target: Target) {
             annotations,
             owner_repo,
             job_id,
-        } => cx.gh_read(label, move |gh, log| Msg::Prepared {
-            target: t,
-            id,
-            result: preflight().and_then(|key| {
-                let job_log = match job_log {
-                    Some(l) => *l,
-                    None => {
-                        let raw = gitvis_core::github::fetch_job_log(
-                            gh.dir(),
-                            &owner_repo.0,
-                            &owner_repo.1,
-                            job_id,
-                            &mut log.calls,
-                        )
-                        .map_err(|e| {
-                            Failure::Prepare(format!(
-                                "Could not load the job's log: {e}. Logs are available only after a job has finished."
-                            ))
-                        })?;
-                        gitvis_core::joblog::parse(&raw)
-                    }
-                };
-                Ok(prepare_failure(
-                    gh.dir(),
-                    run.as_deref(),
-                    job.as_deref(),
-                    &job_log,
-                    &annotations,
-                    log_budget,
-                    &mut log.commands,
-                    key,
-                ))
-            }),
+        } => cx.gh_read(label, move |gh, log| {
+            let (route, cli) = choose(provider, recheck, &mut log.commands);
+            Msg::Prepared {
+                target: t,
+                id,
+                chosen: route.as_ref().ok().map(Route::is_cli),
+                result: route.and_then(|route| {
+                    let job_log = match job_log {
+                        Some(l) => *l,
+                        None => {
+                            let raw = gitvis_core::github::fetch_job_log(
+                                gh.dir(),
+                                &owner_repo.0,
+                                &owner_repo.1,
+                                job_id,
+                                &mut log.calls,
+                            )
+                            .map_err(|e| {
+                                Failure::Prepare(format!(
+                                    "Could not load the job's log: {e}. Logs are available only after a job has finished."
+                                ))
+                            })?;
+                            gitvis_core::joblog::parse(&raw)
+                        }
+                    };
+                    Ok(prepare_failure(
+                        gh.dir(),
+                        run.as_deref(),
+                        job.as_deref(),
+                        &job_log,
+                        &annotations,
+                        log_budget,
+                        &mut log.commands,
+                        route,
+                    ))
+                }),
+                cli,
+            }
         }),
     };
     if !started && let Some(a) = repo.devops.ai.asks.get_mut(&target) {
@@ -480,19 +548,92 @@ fn short(sha: &str) -> &str {
     &sha[..sha.len().min(10)]
 }
 
-/// Key and curl, before any material is read.
-fn preflight() -> Result<KeySource, Failure> {
-    if runner::curl_path().is_none() {
-        return Err(Failure::NoCurl);
+/// The way to Claude, before any material is read. Claude Code's status
+/// comes along so the session can show it. Runs in a background task.
+fn choose(
+    provider: Provider,
+    recheck: bool,
+    commands: &mut Vec<String>,
+) -> (Result<Route, Failure>, Option<Box<cli::Status>>) {
+    let api = || -> Result<Route, Failure> {
+        if runner::curl_path().is_none() {
+            return Err(Failure::NoCurl);
+        }
+        runner::key_status()
+            .source()
+            .map(Route::Api)
+            .ok_or(Failure::NoKey)
+    };
+    if provider == Provider::Api {
+        return (api(), None);
     }
-    runner::key_status().source().ok_or(Failure::NoKey)
+    commands.push(
+        "claude --version and claude auth status (Claude Code's own sign-in; reused for five minutes)"
+            .to_owned(),
+    );
+    let st = cli::detect(recheck);
+    let cli_route = |st: &cli::Status| -> Option<Route> {
+        let install = st.install.clone()?;
+        let auth = st.auth.as_ref()?;
+        auth.logged_in.then(|| {
+            Route::ClaudeCode(Box::new(CliRoute {
+                install,
+                version: st.version,
+                account: auth.label(),
+                phrase: auth.phrase(),
+                bills_api: auth.bills_api(),
+            }))
+        })
+    };
+    let result = match provider {
+        Provider::ClaudeCode => {
+            if !st.installed() {
+                Err(Failure::NoClaudeCode)
+            } else {
+                cli_route(&st).ok_or_else(|| {
+                    Failure::ClaudeCode(CliError::new(
+                        CliErrorKind::NotSignedIn,
+                        match &st.error {
+                            Some(e) if st.auth.is_none() => e.clone(),
+                            _ => "Claude Code is installed but not signed in.".to_owned(),
+                        },
+                    ))
+                })
+            }
+        }
+        _ => {
+            if st.plan_ready() {
+                Ok(cli_route(&st).expect("signed in with a plan"))
+            } else {
+                api().map_err(|api_err| {
+                    let cli_why = match (&st.install, &st.auth) {
+                        (None, _) => "Claude Code is not installed".to_owned(),
+                        (Some(_), Some(a)) if a.bills_api() => format!(
+                            "Claude Code is signed in with {}, which bills the API rather than a Claude plan",
+                            a.phrase()
+                        ),
+                        (Some(_), Some(_)) => "Claude Code is not signed in".to_owned(),
+                        (Some(_), None) => "Claude Code's sign-in could not be read".to_owned(),
+                    };
+                    let api_why = match api_err {
+                        Failure::NoCurl => "curl was not found for the Claude API",
+                        _ => "no Claude API key is stored and ANTHROPIC_API_KEY is not set",
+                    };
+                    Failure::NoProvider(format!(
+                        "{cli_why}, and {api_why}. Sign in to Claude Code with your Claude account (`claude auth login` in a terminal), or store an API key in Settings → AI assist."
+                    ))
+                })
+            }
+        }
+    };
+    (result, Some(Box::new(st)))
 }
 
 fn prepare_staged(
     dir: &Path,
     budget: usize,
     commands: &mut Vec<String>,
-    key: KeySource,
+    route: Route,
 ) -> Result<Prepared, Failure> {
     let (input, m) = inputs::staged(dir, budget, commands).map_err(Failure::Prepare)?;
     let prompt = prompts::commit_message(&input);
@@ -516,7 +657,7 @@ fn prepare_staged(
         files: m.fitted.included.clone(),
         redactions: m.redactions,
         prompt,
-        key,
+        route,
     })
 }
 
@@ -528,7 +669,7 @@ fn prepare_new_pr(
     base_ref: &str,
     template: Option<(String, String)>,
     commands: &mut Vec<String>,
-    key: KeySource,
+    route: Route,
 ) -> Result<Prepared, Failure> {
     let (base_ref, range_note) =
         inputs::resolve_base(dir, base, base_ref, head, commands).map_err(Failure::Prepare)?;
@@ -586,7 +727,7 @@ fn prepare_new_pr(
         files: Vec::new(),
         redactions: r,
         prompt,
-        key,
+        route,
     })
 }
 
@@ -638,7 +779,7 @@ fn thread_text(t: &ReviewThread) -> String {
     s
 }
 
-fn prepare_summary(detail: &PrDetail, files: &[PrFile], budget: usize, key: KeySource) -> Prepared {
+fn prepare_summary(detail: &PrDetail, files: &[PrFile], budget: usize, route: Route) -> Prepared {
     let pr = &detail.pr;
     let m = inputs::prepare_diff(&pr_diff(files), budget);
     let (body, _) = budget::cut_text(&detail.body, 16 * 1024);
@@ -681,7 +822,7 @@ fn prepare_summary(detail: &PrDetail, files: &[PrFile], budget: usize, key: KeyS
         files: m.fitted.included.clone(),
         redactions: r,
         prompt,
-        key,
+        route,
     }
 }
 
@@ -694,7 +835,7 @@ fn prepare_failure(
     annotations: &[Annotation],
     budget: usize,
     commands: &mut Vec<String>,
-    key: KeySource,
+    route: Route,
 ) -> Prepared {
     let ex = budget::log_excerpt(log, 40, budget);
     let (log_text, mut r) = redact::text(&ex.text, "ci.log");
@@ -794,17 +935,41 @@ fn prepare_failure(
             .collect(),
         redactions: r,
         prompt,
-        key,
+        route,
     }
 }
 
 pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
     match msg {
-        Msg::Prepared { target, id, result } => {
+        Msg::Prepared {
+            target,
+            id,
+            chosen,
+            result,
+            cli,
+        } => {
+            if let Some(st) = cli {
+                session::with(|s| s.cli = session::CliState::Known(st));
+            } else {
+                session::with(|s| {
+                    if matches!(s.cli, session::CliState::Checking) {
+                        s.cli = session::CliState::Unknown;
+                    }
+                });
+            }
             let st = &mut repo.devops.ai;
             let Some(a) = st.asks.get_mut(&target).filter(|a| a.id == id) else {
                 return; // cancelled or replaced meanwhile
             };
+            a.chosen_cli = chosen;
+            if matches!(&result, Err(Failure::NoKey | Failure::NoProvider(_))) {
+                // The route choice found no key; say so until a check.
+                session::with(|s| {
+                    if matches!(s.key, session::KeyState::Unknown) {
+                        s.key = session::KeyState::Known(runner::KeyStatus::default());
+                    }
+                });
+            }
             match result {
                 Err(f) => a.phase = Phase::Done(Err(f)),
                 Ok(p) => {
@@ -830,6 +995,11 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
             let Some(a) = repo.devops.ai.asks.get_mut(&target).filter(|a| a.id == id) else {
                 return;
             };
+            let via_cli = a.prepared.as_ref().is_some_and(|p| p.route.is_cli());
+            let billed = a
+                .prepared
+                .as_ref()
+                .is_some_and(|p| matches!(&p.route, Route::ClaudeCode(c) if c.bills_api));
             // What streamed before a failure still counts.
             let live_usage: Option<(String, Usage)> = match &a.phase {
                 Phase::Running { live, .. } => {
@@ -840,27 +1010,55 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
             };
             match &result {
                 Ok(d) => {
-                    session::record(
-                        &d.answer.model,
-                        a.model,
+                    session::record(session::Record {
+                        model_id: &d.answer.model,
+                        requested: a.model,
                         feature,
-                        &d.answer.usage,
-                        !d.answer.refused(),
-                    );
+                        usage: &d.answer.usage,
+                        ok: !d.answer.refused(),
+                        cli: d.cli.as_ref().map(|c| c.cost_estimate.unwrap_or(0.0)),
+                        billed,
+                    });
+                    if let Some(plan) = d
+                        .cli
+                        .as_ref()
+                        .filter(|c| !c.bills_api)
+                        .and_then(|c| c.plan.clone())
+                    {
+                        session::with(|s| s.plan = Some((plan, Instant::now())));
+                    }
                 }
-                Err(Failure::NoKey | Failure::NoCurl | Failure::Prepare(_)) => {}
+                Err(f) if f.before_sending() => {}
                 Err(_) => {
                     let (m, u) = live_usage.unwrap_or_default();
-                    session::record(&m, a.model, feature, &u, false);
+                    session::record(session::Record {
+                        model_id: &m,
+                        requested: a.model,
+                        feature,
+                        usage: &u,
+                        ok: false,
+                        cli: via_cli.then_some(0.0),
+                        billed,
+                    });
                 }
             }
             let requested = a.model;
             let priced = |d: &runner::Done| {
+                if let Some(run) = &d.cli {
+                    // A plan covers it; an API sign-in pays Claude Code's estimate.
+                    return if run.bills_api {
+                        run.cost_estimate.unwrap_or(0.0)
+                    } else {
+                        0.0
+                    };
+                }
                 Model::parse(&d.answer.model)
                     .map(|m| cost(m, &d.answer.usage))
                     .unwrap_or_else(|| cost(requested, &d.answer.usage))
             };
             let no_key = matches!(result, Err(Failure::NoKey));
+            let cli_signed_out =
+                matches!(&result, Err(Failure::ClaudeCode(e)) if e.kind.needs_sign_in());
             a.phase = Phase::Done(result.map(|done| Reply {
                 cost: priced(&done),
                 done,
@@ -874,6 +1072,10 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
             }
             if no_key {
                 session::with(|s| s.key = session::KeyState::Unknown);
+            }
+            if cli_signed_out {
+                // The cached check said otherwise: read the sign-in again.
+                check_cli(cx);
             }
         }
         Msg::Key { op, result, curl } => {
@@ -901,6 +1103,7 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                 _ => {}
             }
         }
+        Msg::Cli(st) => session::with(|s| s.cli = session::CliState::Known(st)),
     }
 }
 
@@ -911,64 +1114,24 @@ fn confirm(cx: &mut Ctx, a: &Ask) {
     };
     let chars = p.prompt.chars();
     let tokens = estimate_tokens(chars);
-    let est = cost(
-        a.model,
-        &Usage {
-            input_tokens: tokens,
-            ..Usage::default()
-        },
-    );
     let n = p.redactions.values();
     let redacted = if p.redactions.is_empty() {
         "The secret scanner found nothing to redact.".to_owned()
     } else {
         format!("Redacted before sending: {}.", p.redactions.summary())
     };
-    let body = format!(
-        "{} with {} at {} effort. About {} tokens ({} characters, input about {}) go to api.anthropic.com. {redacted}",
-        a.feature().action(),
-        a.model.label(),
-        a.effort.as_str(),
-        crate::format::count(tokens as usize),
-        crate::format::count(chars),
-        dollars(est),
-    );
-    let mut details = vec![
-        format!("POST {}", request::API_URL),
-        format!(
-            "model {} · effort {} · max_tokens {} · stream{}",
-            a.model.id(),
-            a.effort.as_str(),
-            request::MAX_TOKENS,
-            if a.model.supports_fallbacks() {
-                " · fallbacks default"
-            } else {
-                ""
-            }
-        ),
-        format!("API key: from {} (never shown)", p.key.label()),
-        format!(
-            "size: {} characters · about {} tokens · input about {}",
-            crate::format::count(chars),
-            crate::format::count(tokens as usize),
-            dollars(est)
-        ),
-    ];
-    for (what, detail) in &p.sources {
-        details.push(format!("{what}: {detail}"));
-    }
-    details.push(format!(
+    let redacted_line = format!(
         "redacted: {}",
         if n == 0 && p.redactions.withheld.is_empty() {
             "nothing found".to_owned()
         } else {
             p.redactions.summary()
         }
-    ));
-    if !p.files.is_empty() {
+    );
+    let included = (!p.files.is_empty()).then(|| {
         let shown: Vec<&str> = p.files.iter().take(40).map(String::as_str).collect();
         let more = p.files.len().saturating_sub(shown.len());
-        details.push(format!(
+        format!(
             "included: {}{}",
             shown.join(", "),
             if more > 0 {
@@ -976,19 +1139,142 @@ fn confirm(cx: &mut Ctx, a: &Ask) {
             } else {
                 String::new()
             }
-        ));
-    }
-    details.push(request::curl_display());
-    details.push(String::new());
-    details.push("The message as sent (start):".to_owned());
-    let preview: String = p.prompt.user.chars().take(2_500).collect();
-    details.push(preview);
-    let rest = p.prompt.user.chars().count().saturating_sub(2_500);
-    if rest > 0 {
-        details.push(format!("… {} more characters", crate::format::count(rest)));
-    }
+        )
+    });
+    let preview = |details: &mut Vec<String>, title: &str| {
+        details.push(String::new());
+        details.push(title.to_owned());
+        details.push(p.prompt.user.chars().take(2_500).collect());
+        let rest = p.prompt.user.chars().count().saturating_sub(2_500);
+        if rest > 0 {
+            details.push(format!("… {} more characters", crate::format::count(rest)));
+        }
+    };
+    let (title, body, details) = match &p.route {
+        Route::Api(key) => {
+            let est = cost(
+                a.model,
+                &Usage {
+                    input_tokens: tokens,
+                    ..Usage::default()
+                },
+            );
+            let body = format!(
+                "{} with {} at {} effort, through the Claude API (billed per token). About {} tokens ({} characters, input about {}) go to api.anthropic.com. {redacted}",
+                a.feature().action(),
+                a.model.label(),
+                a.effort.as_str(),
+                crate::format::count(tokens as usize),
+                crate::format::count(chars),
+                dollars(est),
+            );
+            let mut details = vec![
+                format!("POST {}", request::API_URL),
+                format!(
+                    "model {} · effort {} · max_tokens {} · stream{}",
+                    a.model.id(),
+                    a.effort.for_api().as_str(),
+                    request::MAX_TOKENS,
+                    if a.model.supports_fallbacks() {
+                        " · fallbacks default"
+                    } else {
+                        ""
+                    }
+                ),
+                format!("API key: from {} (never shown)", key.label()),
+                format!(
+                    "size: {} characters · about {} tokens · input about {}",
+                    crate::format::count(chars),
+                    crate::format::count(tokens as usize),
+                    dollars(est)
+                ),
+            ];
+            for (what, detail) in &p.sources {
+                details.push(format!("{what}: {detail}"));
+            }
+            details.push(redacted_line);
+            details.extend(included);
+            details.push(request::curl_display());
+            preview(&mut details, "The message as sent (start):");
+            ("Send to Claude?", body, details)
+        }
+        Route::ClaudeCode(c) => {
+            let who = if c.bills_api {
+                format!(
+                    "your Claude Code, signed in with {}: this bills that API account, not a Claude plan",
+                    c.phrase
+                )
+            } else {
+                format!("Claude Code CLI (your subscription: {})", c.account)
+            };
+            let model = match a.cli_model {
+                CliModel::Default => "its default model".to_owned(),
+                m => m.label().to_owned(),
+            };
+            let body = format!(
+                "{} with Claude Code ({model}, {} effort). About {} tokens ({} characters) go through {who}. {redacted}",
+                a.feature().action(),
+                a.cli_effort.as_str(),
+                crate::format::count(tokens as usize),
+                crate::format::count(chars),
+            );
+            let args = cli::args(a.cli_model, a.cli_effort, &p.prompt.system);
+            let plan =
+                cli::env_plan(std::env::vars_os().map(|(k, _)| k.to_string_lossy().into_owned()));
+            let mut details = vec![format!(
+                "{} · {}{}",
+                if c.bills_api {
+                    "Claude Code CLI (signed in with an API key: billed per token)"
+                } else {
+                    "Claude Code CLI (your subscription)"
+                },
+                c.account,
+                c.version
+                    .map(|v| format!(" · version {v}"))
+                    .unwrap_or_default()
+            )];
+            details.push("The command (no shell; the material goes on standard input):".to_owned());
+            details.extend(cli::display(&c.install, &args));
+            details.push(format!(
+                "working folder: {} (empty)",
+                std::env::temp_dir().join(cli::WORKDIR).display()
+            ));
+            details.push(format!(
+                "environment: removed {}",
+                if plan.remove.is_empty() {
+                    "nothing (no ANTHROPIC_* or CLAUDE* variables are set)".to_owned()
+                } else {
+                    plan.remove.join(", ")
+                }
+            ));
+            details.push(format!(
+                "environment: set {}",
+                plan.set
+                    .iter()
+                    .map(|(k, v)| format!("{k}={v}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+            details.push(String::new());
+            details.push(format!(
+                "size: {} characters on standard input · about {} tokens",
+                crate::format::count(chars),
+                crate::format::count(tokens as usize)
+            ));
+            for (what, detail) in &p.sources {
+                details.push(format!("{what}: {detail}"));
+            }
+            details.push(redacted_line);
+            details.extend(included);
+            details.push(String::new());
+            details.push("The system prompt (--system-prompt):".to_owned());
+            details.push(p.prompt.system.clone());
+            preview(&mut details, "Standard input (start):");
+            ("Send to Claude Code?", body, details)
+        }
+    };
     cx.confirm(
-        "Send to Claude?",
+        title,
         body,
         "Send",
         false,
@@ -1019,25 +1305,73 @@ fn send(cx: &mut Ctx, repo: &mut RepoState, target: &Target, id: u64) {
     let live = Arc::new(Mutex::new(Live::default()));
     let stop = Arc::new(AtomicBool::new(false));
     let (model, effort, feature) = (a.model, a.effort, a.feature());
+    let (cli_model, cli_effort) = (a.cli_model, a.cli_effort);
     let prompt = p.prompt.clone();
+    let route = p.route.clone();
     a.phase = Phase::Running {
         live: live.clone(),
         cancel: stop.clone(),
     };
     let t = target.clone();
-    let label = format!("Claude: {}", feature.action().to_lowercase());
+    let label = match &route {
+        Route::Api(_) => format!("Claude API: {}", feature.action().to_lowercase()),
+        Route::ClaudeCode(_) => format!("Claude Code: {}", feature.action().to_lowercase()),
+    };
     let started = cx.read(label, move |dir, log| {
-        log.command(request::curl_display());
-        let result = runner::send(dir, model, effort, &prompt, &stop, &live).map(Box::new);
+        let result = match &route {
+            Route::Api(_) => {
+                log.command(request::curl_display());
+                runner::send(dir, model, effort, &prompt, &stop, &live)
+            }
+            Route::ClaudeCode(c) => {
+                let args = cli::args(cli_model, cli_effort, &prompt.system);
+                log.command(format!(
+                    "{} (from {}; material on standard input)",
+                    cli::display(&c.install, &args)
+                        .iter()
+                        .map(|l| l.trim())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    std::env::temp_dir().join(cli::WORKDIR).display()
+                ));
+                let call = cli::CliCall {
+                    install: &c.install,
+                    model: cli_model,
+                    effort: cli_effort,
+                    account: c.account.clone(),
+                    bills_api: c.bills_api,
+                    cwd: None,
+                };
+                cli::send(&call, &prompt, &stop, &live)
+            }
+        };
         Msg::Finished {
             target: t,
             id,
             feature,
-            result,
+            result: result.map(Box::new),
         }
     });
     if !started && let Some(a) = repo.devops.ai.asks.get_mut(target) {
         a.phase = Phase::Done(Err(Failure::Prepare("No repository is open.".to_owned())));
+    }
+}
+
+/// Find Claude Code and read its sign-in again (Settings, after errors).
+fn check_cli(cx: &mut Ctx) {
+    session::with(|s| s.cli = session::CliState::Checking);
+    let started = cx.read(
+        "Claude Code: check the installation and sign-in",
+        |_, log| {
+            log.command("claude --version");
+            log.command(
+                "claude auth status (Claude Code's own sign-in; gitvis reads only this status)",
+            );
+            Msg::Cli(Box::new(cli::detect(true)))
+        },
+    );
+    if !started {
+        session::with(|s| s.cli = session::CliState::Unknown);
     }
 }
 
