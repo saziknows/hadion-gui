@@ -560,7 +560,7 @@ fn sbom_overview(
             .take(50)
             .map(|(t, n, v)| vec![text(n.as_str()), sec(t.as_str()), mono(v.join(", "))])
             .collect();
-        crate::devops::pages::layout::wide(ui, "gov_sbom_mismatch", 520.0, |ui| {
+        crate::devops::pages::layout::wide(ui, id, 520.0, |ui| {
             grid(
                 ui,
                 id,
@@ -591,7 +591,7 @@ fn sbom_overview(
                 ]
             })
             .collect();
-        crate::devops::pages::layout::wide(ui, "gov_sbom_diff", 560.0, |ui| {
+        crate::devops::pages::layout::wide(ui, "gov_sbom_mismatch", 560.0, |ui| {
             grid(
                 ui,
                 "gov_sbom_mismatch",
@@ -1197,7 +1197,7 @@ fn scan_result(ui: &mut Ui, run: &ScanRun, console: &Console, actions: &mut Vec<
                         ]
                     })
                     .collect();
-                crate::devops::pages::layout::wide(ui, "gov_scan_vulns", 760.0, |ui| {
+                crate::devops::pages::layout::wide(ui, ("gov_scan_vulns", run.id), 760.0, |ui| {
                     grid(
                         ui,
                         &format!("gov_scan_{}", run.id),

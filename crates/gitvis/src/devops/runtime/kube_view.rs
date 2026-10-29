@@ -1318,7 +1318,7 @@ fn events_table(ui: &mut Ui, cx: &Cx, id: &str, ev: &[Event]) {
             ]
         })
         .collect();
-    crate::devops::pages::layout::wide(ui, "k8s_events", 760.0, |ui| {
+    crate::devops::pages::layout::wide(ui, id, 760.0, |ui| {
         grid(
             ui,
             id,

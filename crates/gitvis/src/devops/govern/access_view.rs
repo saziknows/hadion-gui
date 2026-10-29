@@ -1062,7 +1062,7 @@ fn problem_list(
         } else {
             &[Col::num("Line"), Col::text("Rule")]
         };
-        crate::devops::pages::layout::wide(ui, "gov_co_problems", 560.0, |ui| {
+        crate::devops::pages::layout::wide(ui, ("gov_co_problems", title), 560.0, |ui| {
             grid(
                 ui,
                 &format!("gov_co_problems_{title}"),

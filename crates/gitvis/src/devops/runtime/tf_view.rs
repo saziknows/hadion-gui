@@ -508,8 +508,10 @@ fn root_detail(
         .filter(|c| running(console, runs, *c) || last_result(runs, *c, cx.now).is_some())
         .collect();
     for cmd in ran {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
+        // Wraps as whole pieces: in a narrow pane the "Show output" link
+        // goes under the badge instead of breaking over two lines.
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(110.0, 20.0),
                 egui::Layout::left_to_right(egui::Align::Center),
@@ -535,7 +537,14 @@ fn root_detail(
             if let Some(id) = runs.and_then(|r| r.last.get(&cmd))
                 && console.get(*id).is_some()
                 && tf.shown_run != Some(*id)
-                && kit::link(ui, "Show output").clicked()
+                && ui
+                    .add(
+                        egui::Label::new(RichText::new("Show output").color(pal(ui).accent))
+                            .sense(egui::Sense::click())
+                            .wrap_mode(egui::TextWrapMode::Extend),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
             {
                 actions.push(Act::TfShowRun(Some(*id)).into());
             }
@@ -746,7 +755,7 @@ fn change_table(ui: &mut Ui, id: &str, list: &[ResourceChange]) {
             ]
         })
         .collect();
-    crate::devops::pages::layout::wide(ui, "tf_changes", 600.0, |ui| {
+    crate::devops::pages::layout::wide(ui, id, 600.0, |ui| {
         grid(
             ui,
             id,

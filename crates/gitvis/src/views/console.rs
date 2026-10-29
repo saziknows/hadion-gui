@@ -211,6 +211,10 @@ pub fn lines(ui: &mut Ui, run: &ConsoleRun, id_salt: &str) {
             return;
         }
         let font = FontId::monospace(size::MONO - 0.5);
+        // `show_rows` spaces rows by the row height plus the item spacing it
+        // finds here, and the rows inherit it: no spacing, so the line
+        // pitch is exactly LINE_H and the last line scrolls into view.
+        ui.spacing_mut().item_spacing.y = 0.0;
         egui::ScrollArea::both()
             .id_salt(("console_lines", id_salt, run.id))
             .auto_shrink([false, false])
