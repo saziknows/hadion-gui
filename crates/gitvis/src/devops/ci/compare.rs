@@ -207,7 +207,9 @@ fn run_line(
             }
         });
     });
-    ui.horizontal(|ui| {
+    // Wrapped: in a plain row the facts ran off a narrow pane and widened
+    // everything under them.
+    ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         ui.add_space(70.0);
         let sha = kit::link(ui, short(&r.sha)).on_hover_text(if jump.is_some() {
