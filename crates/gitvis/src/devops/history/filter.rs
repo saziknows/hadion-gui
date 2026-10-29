@@ -321,55 +321,63 @@ pub fn filter_bar(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
             let mut edited = false;
             let mut apply = false;
             ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                let label = |ui: &mut Ui, t: &str| widgets::bar_label(ui, t);
-                label(ui, "Author");
-                let (r, picked) = widgets::suggest_input(
-                    ui,
-                    "flt_author",
-                    &mut f.spec.author,
-                    "name or e-mail",
-                    &f.authors,
-                    150.0,
-                    false,
-                    false,
-                );
+                ui.spacing_mut().item_spacing = vec2(10.0, 6.0);
+                // Each label and its input wrap as one piece: a wrapping row
+                // only knows a widget's width once it is placed, so an input
+                // at the end of a line used to be squeezed ("src/ or a f…")
+                // instead of moving to the next one.
+                let (r, picked) = pair(ui, "Author", 150.0, |ui| {
+                    widgets::suggest_input(
+                        ui,
+                        "flt_author",
+                        &mut f.spec.author,
+                        "name or e-mail",
+                        &f.authors,
+                        150.0,
+                        false,
+                        false,
+                    )
+                });
                 edited |= r.changed() || picked;
-                label(ui, "Path");
-                let r = form::input(
-                    ui,
-                    ("hist_flt", "path"),
-                    &mut f.spec.path,
-                    InputOpts::new("src/ or a file").width(170.0).mono(),
-                );
+                let r = pair(ui, "Path", 170.0, |ui| {
+                    form::input(
+                        ui,
+                        ("hist_flt", "path"),
+                        &mut f.spec.path,
+                        InputOpts::new("src/ or a file").width(170.0).mono(),
+                    )
+                });
                 apply |= widgets::submitted(ui, &r);
-                label(ui, "From");
-                let r = form::input(
-                    ui,
-                    ("hist_flt", "since"),
-                    &mut f.spec.since,
-                    InputOpts::new("YYYY-MM-DD")
-                        .width(96.0)
-                        .invalid(f.since_err.is_some()),
-                );
+                let r = pair(ui, "From", 96.0, |ui| {
+                    form::input(
+                        ui,
+                        ("hist_flt", "since"),
+                        &mut f.spec.since,
+                        InputOpts::new("YYYY-MM-DD")
+                            .width(96.0)
+                            .invalid(f.since_err.is_some()),
+                    )
+                });
                 edited |= r.changed();
-                label(ui, "to");
-                let r = form::input(
-                    ui,
-                    ("hist_flt", "until"),
-                    &mut f.spec.until,
-                    InputOpts::new("YYYY-MM-DD")
-                        .width(96.0)
-                        .invalid(f.until_err.is_some()),
-                );
+                let r = pair(ui, "to", 96.0, |ui| {
+                    form::input(
+                        ui,
+                        ("hist_flt", "until"),
+                        &mut f.spec.until,
+                        InputOpts::new("YYYY-MM-DD")
+                            .width(96.0)
+                            .invalid(f.until_err.is_some()),
+                    )
+                });
                 edited |= r.changed();
-                label(ui, "Message");
-                let r = form::input(
-                    ui,
-                    ("hist_flt", "message"),
-                    &mut f.spec.message,
-                    InputOpts::new("text in the message").width(150.0),
-                );
+                let r = pair(ui, "Message", 150.0, |ui| {
+                    form::input(
+                        ui,
+                        ("hist_flt", "message"),
+                        &mut f.spec.message,
+                        InputOpts::new("text in the message").width(150.0),
+                    )
+                });
                 apply |= widgets::submitted(ui, &r);
                 if f.git_pending() && form::primary(ui, "Search", !f.querying).clicked() {
                     apply = true;
@@ -382,88 +390,31 @@ pub fn filter_bar(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
                 actions.push(Act::FilterApply.into());
             }
             ui.add_space(2.0);
+            // The buttons first, at the right; the status in what they
+            // leave, cut with an ellipsis (it used to run under them).
             ui.allocate_ui_with_layout(
                 vec2(ui.available_width(), 26.0),
-                Layout::left_to_right(Align::Center),
+                Layout::right_to_left(Align::Center),
                 |ui| {
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    if f.querying {
-                        ui.add(egui::Spinner::new().size(13.0).color(p.accent));
-                        ui.label(
-                            RichText::new(format!(
-                                "Searching the history: {}",
-                                core::log_args(&f.spec).join(" ")
-                            ))
-                            .size(size::SMALL)
-                            .color(p.text_2),
-                        );
-                    } else if let Some(e) = f.since_err.as_ref().or(f.until_err.as_ref()) {
-                        ui.label(RichText::new(e).size(size::SMALL).color(p.danger));
-                    } else if let Some(Err(e)) = &f.query {
-                        ui.label(
-                            RichText::new(format!("The path / message search failed: {e}"))
-                                .size(size::SMALL)
-                                .color(p.danger),
-                        );
-                    } else if f.active() {
-                        let n = f.rows.len();
-                        ui.label(
-                            RichText::new(format!(
-                                "{} of {} commits match",
-                                format::count(n),
-                                format::count(f.total)
-                            ))
-                            .size(size::SMALL)
-                            .family(crate::theme::medium())
-                            .color(if n == 0 {
-                                p.warning
-                            } else {
-                                p.text
-                            }),
-                        );
-                        if let Some(Ok(q)) = &f.query
-                            && q.truncated
-                        {
-                            kit::badge(ui, "Search capped", Tone::Warning);
-                        }
-                    } else if f.git_pending() {
-                        ui.label(
-                            RichText::new("Press Enter in Path or Message to search the history.")
-                                .size(size::SMALL)
-                                .color(p.text_2),
-                        );
-                    } else {
-                        ui.label(
-                            RichText::new("Matching commits stay bright; the others are dimmed.")
-                                .size(size::SMALL)
-                                .color(p.text_2),
-                        );
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    if IconButton::icon(Icon::Close)
+                        .compact()
+                        .show(ui)
+                        .on_hover_text("Hide the filter bar (the filter stays)")
+                        .clicked()
+                    {
+                        actions.push(Act::ToggleFilterBar.into());
                     }
-                    if f.git_pending() && f.active() {
-                        ui.label(
-                            RichText::new("· press Enter to apply the path / message")
-                                .size(size::SMALL)
-                                .color(p.text_3),
-                        );
-                    }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        if IconButton::icon(Icon::Close)
+                    if f.spec.is_active()
+                        && IconButton::new(Icon::Trash, "Clear")
                             .compact()
                             .show(ui)
-                            .on_hover_text("Hide the filter bar (the filter stays)")
                             .clicked()
-                        {
-                            actions.push(Act::ToggleFilterBar.into());
-                        }
-                        if f.spec.is_active()
-                            && IconButton::new(Icon::Trash, "Clear")
-                                .compact()
-                                .show(ui)
-                                .clicked()
-                        {
-                            actions.push(Act::FilterClear.into());
-                        }
+                    {
+                        actions.push(Act::FilterClear.into());
+                    }
+                    // Next / previous only while something is filtered.
+                    if f.active() {
                         let has = !f.rows.is_empty();
                         if IconButton::icon(Icon::ChevronDown)
                             .compact()
@@ -483,9 +434,113 @@ pub fn filter_bar(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
                         {
                             actions.push(Act::FilterStep(false).into());
                         }
+                    }
+                    ui.add_space(8.0);
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        let line = |ui: &mut Ui, text: RichText| {
+                            ui.add(egui::Label::new(text).truncate());
+                        };
+                        if f.querying {
+                            ui.add(egui::Spinner::new().size(13.0).color(p.accent));
+                            line(
+                                ui,
+                                RichText::new(format!(
+                                    "Searching the history: {}",
+                                    core::log_args(&f.spec).join(" ")
+                                ))
+                                .size(size::SMALL)
+                                .color(p.text_2),
+                            );
+                        } else if let Some(e) = f.since_err.as_ref().or(f.until_err.as_ref()) {
+                            line(ui, RichText::new(e).size(size::SMALL).color(p.danger));
+                        } else if let Some(Err(e)) = &f.query {
+                            line(
+                                ui,
+                                RichText::new(format!("The path / message search failed: {e}"))
+                                    .size(size::SMALL)
+                                    .color(p.danger),
+                            );
+                        } else if f.active() {
+                            let n = f.rows.len();
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} of {} commits match",
+                                    format::count(n),
+                                    format::count(f.total)
+                                ))
+                                .size(size::SMALL)
+                                .family(crate::theme::medium())
+                                .color(if n == 0 {
+                                    p.warning
+                                } else {
+                                    p.text
+                                }),
+                            );
+                            if let Some(Ok(q)) = &f.query
+                                && q.truncated
+                            {
+                                kit::badge(ui, "Search capped", Tone::Warning);
+                            }
+                            if f.git_pending() {
+                                line(
+                                    ui,
+                                    RichText::new("Press Enter to apply the path or message.")
+                                        .size(size::SMALL)
+                                        .color(p.text_2),
+                                );
+                            }
+                        } else if f.git_pending() {
+                            line(
+                                ui,
+                                RichText::new(
+                                    "Press Enter in Path or Message to search the history.",
+                                )
+                                .size(size::SMALL)
+                                .color(p.text_2),
+                            );
+                        } else {
+                            line(
+                                ui,
+                                RichText::new(
+                                    "Matching commits stay bright; the others are dimmed.",
+                                )
+                                .size(size::SMALL)
+                                .color(p.text_2),
+                            );
+                        }
                     });
                 },
             );
         });
     kit::hairline(ui);
+}
+
+/// A label and its input as one piece of a wrapping row: the piece's width
+/// (label, gap, input of `input_w` with its frame) is reserved before it is
+/// drawn, so the row wraps it whole.
+fn pair<R>(ui: &mut Ui, label: &str, input_w: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let p = *pal(ui);
+    let label_w = ui
+        .painter()
+        .layout_no_wrap(
+            label.to_owned(),
+            egui::FontId::proportional(size::SMALL),
+            p.text_2,
+        )
+        .size()
+        .x
+        + 2.0;
+    // `form::input` adds 10 points of margin and a 1 point border a side.
+    let w = label_w + 6.0 + input_w + 22.0;
+    ui.allocate_ui_with_layout(
+        vec2(w, form::INPUT_H),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            widgets::bar_label(ui, label);
+            add(ui)
+        },
+    )
+    .inner
 }

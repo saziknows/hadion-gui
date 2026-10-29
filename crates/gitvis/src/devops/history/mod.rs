@@ -200,6 +200,8 @@ pub enum Act {
     VerifyVisible,
     /// Forget every result and verify again (after fixing the setup).
     RecheckSignatures,
+    /// Type into the toolbar's commit search (scripts).
+    GraphSearch(String),
     /// Focus the WIP panel's commit message.
     FocusCommitMessage,
 }
@@ -381,6 +383,13 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         | Act::VerifyVisible
         | Act::RecheckSignatures => sigs::apply(cx, repo, act),
         Act::FocusCommitMessage => repo.devops.history.focus_commit.set(true),
+        Act::GraphSearch(text) => {
+            repo.search = text;
+            if repo.page != Page::Graph {
+                cx.action(Action::ShowPage(Page::Graph));
+            }
+            cx.action(Action::SearchChanged);
+        }
     }
 }
 
@@ -410,7 +419,8 @@ pub fn on_console_done(_cx: &mut Ctx, _repo: &mut RepoState, _run: &ConsoleRun) 
 /// `browse SHA|head`, `browse-file PATH`, `browse-line N`, `blame-at SHA
 /// PATH [LINE]`, `blame-previous N` (line N's commit), `verify`,
 /// `verify-detail`. Testing aids for the History page and the shell:
-/// `commit-msg TEXT` (`\n` for a new line), `commit-focus`, `dialog
+/// `commit-msg TEXT` (`\n` for a new line), `commit-focus`, `graph-search
+/// TEXT` (the toolbar's commit search), `dialog
 /// stash|branch|branch-invalid|tag|rename|delete-branch|push|reset|confirm|
 /// confirm-action|clone`, `toast info|success|error TEXT`.
 pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
@@ -501,6 +511,7 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
             at_start: false,
         }]),
         "commit-focus" => one(Act::FocusCommitMessage),
+        "graph-search" => one(Act::GraphSearch(arg.to_owned())),
         "dialog" => Some(vec![test_dialog(arg)?]),
         "toast" => {
             let (kind, text) = arg.split_once(' ').unwrap_or((arg, ""));
