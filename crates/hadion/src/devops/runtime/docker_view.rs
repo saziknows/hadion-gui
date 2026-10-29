@@ -248,6 +248,25 @@ fn commit_cell(r: &Revision) -> Cell {
     }
 }
 
+/// A path inside the repository relative to it (`ops/compose.yaml`, `the
+/// repository root`); other paths as they are. Long absolute paths wrap
+/// badly in a narrow pane.
+fn in_repo(workdir: &std::path::Path, p: &str) -> String {
+    use hadion_core::devops::runtime::docker::scope;
+    let root = scope::path_key(&workdir.to_string_lossy());
+    let key = scope::path_key(p);
+    if key == root {
+        return "the repository root".into();
+    }
+    if !scope::inside(&key, &root) {
+        return p.to_owned();
+    }
+    let norm = p.trim().replace('\\', "/");
+    let norm = norm.strip_prefix("//?/").unwrap_or(&norm);
+    let rel: String = norm.chars().skip(root.chars().count() + 1).collect();
+    if rel.is_empty() { p.to_owned() } else { rel }
+}
+
 fn relative(t: Option<i64>, now: i64) -> String {
     t.map(|t| common::since(t, now))
         .unwrap_or_else(|| "–".into())
@@ -555,7 +574,7 @@ fn toolbar(ui: &mut Ui, d: &DockerCx, st: &State, actions: &mut Vec<Action>) {
                 }
             };
             let mut counts_row = |ui: &mut Ui| {
-                if st.scoped.is_some() {
+                if st.scoped.is_some() && st.reachable() {
                     kit::badge(ui, &format!("{running} running"), if running > 0 { Tone::Success } else { Tone::Neutral });
                     kit::badge(ui, &format!("{stopped} stopped"), Tone::Neutral);
                     if unhealthy > 0 {
@@ -979,21 +998,17 @@ fn overview(
     let restarting = cs.iter().filter(|c| c.state == CState::Restarting).count();
     let failed = cs.iter().filter(|c| c.failed()).count();
     common::gap(ui);
-    crate::views::insights::stats(
-        ui,
-        &[
-            Stat::new("running", format::count(running))
-                .tone_if(running > 0 && unhealthy == 0, Tone::Success),
-            Stat::new("stopped", format::count(stopped)),
-            Stat::new("unhealthy", format::count(unhealthy)).tone_if(unhealthy > 0, Tone::Danger),
-            Stat::new("restarting", format::count(restarting))
-                .tone_if(restarting > 0, Tone::Warning),
-            Stat::new("exited with an error", format::count(failed))
-                .tone_if(failed > 0, Tone::Danger),
-            Stat::new("compose projects", format::count(s.projects.len())),
-            Stat::new("not started", format::count(s.not_started.len())),
-        ],
-    );
+    let tiles = [
+        Stat::new("running", format::count(running))
+            .tone_if(running > 0 && unhealthy == 0, Tone::Success),
+        Stat::new("stopped", format::count(stopped)),
+        Stat::new("unhealthy", format::count(unhealthy)).tone_if(unhealthy > 0, Tone::Danger),
+        Stat::new("restarting", format::count(restarting)).tone_if(restarting > 0, Tone::Warning),
+        Stat::new("exited with an error", format::count(failed)).tone_if(failed > 0, Tone::Danger),
+        Stat::new("compose projects", format::count(s.projects.len())),
+        Stat::new("not started", format::count(s.not_started.len())),
+    ];
+    stat_tiles(ui, &tiles);
     if let Some(e) = st.compose_problem() {
         let p = triage::classify(&e, st.remote());
         let fix = triage::fix(p, &ctx, &st.endpoint());
@@ -1148,6 +1163,50 @@ fn overview(
             );
         },
     );
+}
+
+/// Stat tiles, or in a narrow pane (where they stack one per row) the same
+/// numbers as two lines of text.
+fn stat_tiles(ui: &mut Ui, tiles: &[Stat]) {
+    if ui.available_width() >= 460.0 {
+        crate::views::insights::stats(ui, tiles);
+        return;
+    }
+    let p = *pal(ui);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(14.0, 4.0);
+        for t in tiles {
+            let color = match t.tone {
+                Tone::Neutral => p.text_strong,
+                tone => tone.color(&p),
+            };
+            // One label per number that never breaks inside, so the row
+            // wraps between them (a nested `horizontal` cannot be measured
+            // before it is laid out, and ran off the pane).
+            let mut job = egui::text::LayoutJob::default();
+            job.append(
+                &t.value,
+                0.0,
+                egui::TextFormat {
+                    font_id: egui::FontId::new(size::TITLE, crate::theme::semibold()),
+                    color,
+                    valign: egui::Align::BOTTOM,
+                    ..Default::default()
+                },
+            );
+            job.append(
+                t.label,
+                5.0,
+                egui::TextFormat {
+                    font_id: egui::FontId::proportional(size::SMALL),
+                    color: p.text_2,
+                    valign: egui::Align::BOTTOM,
+                    ..Default::default()
+                },
+            );
+            ui.add(egui::Label::new(job).extend());
+        }
+    });
 }
 
 fn problem_text(c: &Container) -> String {
@@ -1317,8 +1376,8 @@ fn compose_buttons(
     });
     if started {
         let volumes = st.down_volumes;
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 10.0;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(10.0, 6.0);
             let op = ComposeOp::Down {
                 volumes,
                 remove_orphans: false,
@@ -1586,11 +1645,17 @@ fn project_detail(
             for f in &pr.config_files {
                 let exists = std::path::Path::new(f).is_file();
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(kit::mono(f).color(if exists {
-                        pal(ui).text
-                    } else {
-                        pal(ui).text_3
-                    }));
+                    let r = ui.add(
+                        egui::Label::new(kit::mono(in_repo(&cx.workdir, f)).color(if exists {
+                            pal(ui).text
+                        } else {
+                            pal(ui).text_3
+                        }))
+                        .wrap(),
+                    );
+                    if in_repo(&cx.workdir, f) != *f {
+                        r.on_hover_text(f);
+                    }
                     if !exists {
                         kit::badge(ui, "gone", Tone::Warning);
                     }
@@ -1598,10 +1663,12 @@ fn project_detail(
             }
         });
         if !pr.working_dir.is_empty() {
-            kv.text("Working dir", kit::mono(&pr.working_dir));
-        }
-        if let Some(f) = pr.file.and_then(|i| st.files.compose.get(i)) {
-            kv.text("In the repository", kit::mono(&f.rel));
+            let shown = in_repo(&cx.workdir, &pr.working_dir);
+            if shown == "the repository root" {
+                kv.text("Working dir", shown);
+            } else {
+                kv.text("Working dir", kit::mono(shown));
+            }
         }
         kv.text("Context", st.context_name().unwrap_or_default());
     });
@@ -1856,16 +1923,25 @@ fn container_detail(
                 c.restart_policy
             ),
         ),
-        CState::Exited(code) if code != 0 && c.started.is_some() => kit::callout(
-            ui,
-            Tone::Danger,
-            &format!("Exited with code {code}"),
-            &format!(
-                "It ran from {} and ended {}. Its logs keep the last output.",
-                relative(c.started, cx.now),
-                relative(c.finished, cx.now)
-            ),
-        ),
+        CState::Exited(code) if code != 0 && c.started.is_some() => {
+            let ran = match (c.started, c.finished) {
+                (Some(a), Some(b)) if b >= a => format!(
+                    "It ran for {} and ended {}.",
+                    format::millis(((b - a) as u64) * 1000),
+                    relative(c.finished, cx.now)
+                ),
+                _ => format!("It ended {}.", relative(c.finished, cx.now)),
+            };
+            let meaning = triage::exit_meaning(code)
+                .map(|m| format!(" Exit {code} usually means {m}."))
+                .unwrap_or_default();
+            kit::callout(
+                ui,
+                Tone::Danger,
+                &format!("Exited with code {code}"),
+                &format!("{ran}{meaning} Its logs keep the last output."),
+            )
+        }
         _ => {}
     }
     container_actions(ui, st, c, &ctx, actions);
@@ -1929,7 +2005,11 @@ fn container_detail(
             .map(|m| {
                 vec![
                     Cell::Sec(m.kind.clone()),
-                    Cell::Mono(m.source.clone()),
+                    Cell::Mono(if m.kind == "bind" {
+                        in_repo(&cx.workdir, &m.source)
+                    } else {
+                        m.source.clone()
+                    }),
                     Cell::Mono(m.destination.clone()),
                     Cell::Sec(if m.read_only {
                         "read-only".into()
@@ -1939,7 +2019,7 @@ fn container_detail(
                 ]
             })
             .collect();
-        layout::wide(ui, "docker_mounts", 620.0, |ui| {
+        layout::wide(ui, "docker_mounts", 520.0, |ui| {
             grid(
                 ui,
                 "docker_mounts",
@@ -2145,8 +2225,8 @@ fn container_actions(ui: &mut Ui, st: &State, c: &Container, ctx: &str, actions:
             actions.push(Action::Copy(c.id.clone()));
         }
     });
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 10.0;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(10.0, 6.0);
         if c.state.up() {
             let kill = ContainerOp::Kill;
             if form::danger(ui, "Kill…", true)
@@ -2190,23 +2270,29 @@ fn container_actions(ui: &mut Ui, st: &State, c: &Container, ctx: &str, actions:
 
 fn health_section(ui: &mut Ui, cx: &Cx, c: &Container, h: &model::Health) {
     kit::kv(ui, 130.0, |kv| {
-        kv.row("Status", |ui| {
-            ui.horizontal(|ui| {
-                if let Some((t, tone)) = health_badge(h.status) {
-                    kit::badge(ui, &t, tone);
-                }
-                if h.failing_streak > 0 {
-                    ui.label(
-                        RichText::new(format!(
-                            "{} failed in a row",
-                            format::plural(h.failing_streak as usize, "probe", "probes")
-                        ))
-                        .size(size::SMALL)
-                        .color(pal(ui).text_2),
-                    );
-                }
+        // docker resets a stopped container's status to `starting`: say so
+        // rather than show it.
+        if !c.state.up() {
+            kv.muted("Status", "not checked while the container is stopped");
+        } else {
+            kv.row("Status", |ui| {
+                ui.horizontal(|ui| {
+                    if let Some((t, tone)) = health_badge(h.status) {
+                        kit::badge(ui, &t, tone);
+                    }
+                    if h.failing_streak > 0 {
+                        ui.label(
+                            RichText::new(format!(
+                                "{} failed in a row",
+                                format::plural(h.failing_streak as usize, "probe", "probes")
+                            ))
+                            .size(size::SMALL)
+                            .color(pal(ui).text_2),
+                        );
+                    }
+                });
             });
-        });
+        }
         if let Some(hc) = &c.healthcheck {
             kv.text("Check", kit::mono(&hc.test));
             kv.text(
@@ -2248,7 +2334,7 @@ fn health_section(ui: &mut Ui, cx: &Cx, c: &Container, h: &model::Health) {
             ]
         })
         .collect();
-    layout::wide(ui, ("docker_probes", &c.id), 620.0, |ui| {
+    layout::wide(ui, ("docker_probes", &c.id), 440.0, |ui| {
         grid(
             ui,
             &format!("docker_probes_{}", c.id),
@@ -2443,7 +2529,7 @@ fn stats_section(ui: &mut Ui, st: &State, c: &Container) {
         Some(s) => match &s.sample {
             Some(Ok(x)) => {
                 let (used, limit) = x.mem.split_once(" / ").unwrap_or((x.mem.as_str(), ""));
-                crate::views::insights::stats(
+                stat_tiles(
                     ui,
                     &[
                         Stat::new("CPU", x.cpu.map_or("–".into(), |c| format!("{c:.1}%")))
@@ -2671,7 +2757,7 @@ fn scan_result(ui: &mut Ui, s: &docker::ScanResult, console: &Console, actions: 
         });
         match &s.result {
             Some(Ok(sum)) => {
-                crate::views::insights::stats(
+                stat_tiles(
                     ui,
                     &[
                         Stat::new("critical", sum.counts[0].to_string())

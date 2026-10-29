@@ -15,6 +15,8 @@
 //!   (default `https://github.com/acme/shop`): one of the repository's
 //!   remotes makes them "this repository".
 //! - `FAKE_DOCKER_LOG`: append every argv here, one line each.
+//! - `FAKE_DOCKER_EVENTS=end`: `events` fails after ~3 s (the app then
+//!   polls every 10 s).
 //!
 //! `events` prints a container event every ~2 s until killed; `logs -f`
 //! prints its tail, then a line a second until killed; `exec -it` is a tiny
@@ -1074,8 +1076,18 @@ fn compose(w: &World, rest: &[String], all: &[Ctr]) {
 fn events(all: &[Ctr]) {
     let mut n = 0u64;
     let mut o = std::io::stdout();
+    if all.is_empty() {
+        // Nothing runs: nothing happens, until killed.
+        loop {
+            std::thread::sleep(Duration::from_secs(3600));
+        }
+    }
+    let ends = env("FAKE_DOCKER_EVENTS").as_deref() == Some("end");
     loop {
         std::thread::sleep(Duration::from_secs(2));
+        if ends && n == 1 {
+            fail("error during connect: the events stream was closed by the engine (fake)");
+        }
         let (name, action, extra) = match n % 3 {
             0 => ("shop-worker-1", "die", json!({"exitCode": "137"})),
             1 => ("shop-worker-1", "start", json!({})),

@@ -176,9 +176,13 @@ pub fn fix(p: Problem, context: &str, endpoint: &str) -> Fix {
             command: (!windows && !mac).then(|| "sudo apt-get install docker-compose-plugin".into()),
         },
         Problem::Unreachable | Problem::Timeout => Fix {
-            text: if super::endpoint::is_remote(endpoint) {
+            text: if endpoint.starts_with("ssh://") {
                 format!(
-                    "{endpoint} does not answer. Check the network or VPN, that the host runs docker, and for ssh:// that `ssh` reaches it without a password prompt. This checks it:"
+                    "{endpoint} does not answer. Check the network or VPN, that the host runs docker, and that ssh reaches it without a password prompt (docker uses your ssh config and keys). This checks it:"
+                )
+            } else if super::endpoint::is_remote(endpoint) {
+                format!(
+                    "{endpoint} does not answer. Check the network or VPN, that the engine listens on that port, and the context's TLS certificates. This checks it:"
                 )
             } else {
                 "The engine is slow or stuck. Restart Docker Desktop (or the docker service), then Refresh.".into()
@@ -191,6 +195,29 @@ pub fn fix(p: Problem, context: &str, endpoint: &str) -> Fix {
         },
         Problem::Other => Fix::default(),
     }
+}
+
+/// What a container's exit code usually means.
+pub fn exit_meaning(code: i64) -> Option<&'static str> {
+    Some(match code {
+        0 => "the program finished normally",
+        1 => "the program reported an error",
+        2 => "the program was started with wrong arguments",
+        125 => "docker itself could not run the container",
+        126 => "the command is not executable in the image",
+        127 => "the command was not found in the image",
+        130 => "it was interrupted (SIGINT, Ctrl+C)",
+        134 => "the program aborted (SIGABRT)",
+        137 => {
+            "it was killed (SIGKILL): out of memory, docker kill, or a stop that ran out of time"
+        }
+        139 => "the program crashed (segmentation fault)",
+        143 => "it was stopped (SIGTERM, docker stop)",
+        255 => {
+            "the engine stopped under it (Docker Desktop closed or restarted), or the program exited with -1"
+        }
+        _ => return None,
+    })
 }
 
 /// docker's stderr without its noise (`See 'docker --help'.`, blank lines,
@@ -272,6 +299,14 @@ mod tests {
                 .command
                 .is_some()
         );
+        assert!(
+            fix(Problem::Unreachable, "prod", "tcp://10.0.0.5:2376")
+                .text
+                .contains("TLS")
+        );
+        assert!(exit_meaning(137).unwrap().contains("SIGKILL"));
+        assert!(exit_meaning(255).unwrap().contains("engine stopped"));
+        assert!(exit_meaning(42).is_none());
         assert_eq!(
             clean_error("docker: 'compose' is not a docker command.\nSee 'docker --help'\n\n"),
             "docker: 'compose' is not a docker command."

@@ -863,7 +863,13 @@ impl Container {
         &self.id[..self.id.len().min(12)]
     }
 
+    /// The health check's verdict while the container is up; `None` once it
+    /// stopped (docker keeps reporting `starting` for a stopped container,
+    /// which means nothing).
     pub fn health_status(&self) -> HealthStatus {
+        if !self.state.up() {
+            return HealthStatus::None;
+        }
         self.health.as_ref().map(|h| h.status).unwrap_or_default()
     }
 

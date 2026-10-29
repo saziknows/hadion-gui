@@ -531,6 +531,8 @@ pub enum Act {
     Relist,
     Context(String),
     ShowAll(bool),
+    /// The list's filter (scripts; the view edits it in place).
+    Filter(String),
     Select(Option<Sel>),
     /// The N-th container row (scripts).
     SelectContainerRow(usize),
@@ -1620,6 +1622,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             load_full(cx, st);
         }
         Act::ShowAll(on) => repo.devops.runtime.docker.show_all = on,
+        Act::Filter(text) => repo.devops.runtime.docker.filter = text,
         Act::Select(sel) => select(cx, repo, sel),
         Act::SelectContainerRow(n) => {
             let pick = rows(&repo.devops.runtime.docker)
@@ -2041,7 +2044,7 @@ pub fn on_console_done(cx: &mut Ctx, repo: &mut RepoState, run: &ConsoleRun) {
 /// `container N`, `compose N`, `docker-refresh`, `docker-relist`,
 /// `docker-ask start|stop|restart|pause|unpause|kill|rm|down|down-volumes|up|up-build|build`,
 /// `docker-logs`, `docker-shell`, `docker-inspect`, `docker-build-form`,
-/// `docker-build` (the form's Build), `docker-overview`, `docker-filter
+/// `docker-build` (the form's Build), `docker-build-close`, `docker-overview`, `docker-filter
 /// TEXT`, `docker-hide-console`.
 pub fn script(cmd: &str, arg: &str) -> Option<Act> {
     let n = arg.trim().parse::<usize>().ok();
@@ -2058,6 +2061,8 @@ pub fn script(cmd: &str, arg: &str) -> Option<Act> {
         "docker-inspect" => Act::SelectedInspect,
         "docker-build-form" => Act::BuildFormFirst,
         "docker-build" => Act::Build,
+        "docker-build-close" => Act::BuildClose,
+        "docker-filter" => Act::Filter(arg.trim().to_owned()),
         "docker-overview" => Act::Select(None),
         "docker-hide-console" => Act::HideConsole,
         _ => return None,
