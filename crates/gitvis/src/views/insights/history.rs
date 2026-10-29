@@ -1146,10 +1146,12 @@ fn lines_chart(ui: &mut Ui, months: &[Month]) {
 pub fn heat_map(ui: &mut Ui, heat: &[[u32; 24]; 7]) {
     let p = *pal(ui);
     let label_w = 40.0;
-    // Smaller cells in a narrow pane, so the late hours are not cut off.
+    // Narrower columns in a narrow pane, so the late hours are not cut off;
+    // rows keep their height so the weekday labels do not touch.
     let cell = ((ui.available_width() - label_w) / 24.0).clamp(10.0, 16.0);
+    let row = cell.max(15.0);
     let header_h = 18.0;
-    let size = vec2(label_w + 24.0 * cell, header_h + 7.0 * cell);
+    let size = vec2(label_w + 24.0 * cell, header_h + 7.0 * row);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
     let painter = ui.painter();
     let max = heat.iter().flatten().copied().max().unwrap_or(0).max(1) as f32;
@@ -1164,9 +1166,9 @@ pub fn heat_map(ui: &mut Ui, heat: &[[u32; 24]; 7]) {
         );
     }
     for (d, name) in WEEKDAYS.iter().enumerate() {
-        let y = rect.top() + header_h + d as f32 * cell;
+        let y = rect.top() + header_h + d as f32 * row;
         painter.text(
-            pos2(rect.left(), y + cell / 2.0),
+            pos2(rect.left(), y + (row - 2.0) / 2.0),
             egui::Align2::LEFT_CENTER,
             *name,
             font.clone(),
@@ -1176,7 +1178,7 @@ pub fn heat_map(ui: &mut Ui, heat: &[[u32; 24]; 7]) {
             let n = count as f32;
             let r = Rect::from_min_size(
                 pos2(rect.left() + label_w + h as f32 * cell, y),
-                vec2(cell - 2.0, cell - 2.0),
+                vec2(cell - 2.0, row - 2.0),
             );
             let color = if n == 0.0 {
                 p.raised
@@ -1188,7 +1190,7 @@ pub fn heat_map(ui: &mut Ui, heat: &[[u32; 24]; 7]) {
     }
     if let Some(pos) = resp.hover_pos() {
         let h = ((pos.x - rect.left() - label_w) / cell).floor();
-        let d = ((pos.y - rect.top() - header_h) / cell).floor();
+        let d = ((pos.y - rect.top() - header_h) / row).floor();
         if (0.0..24.0).contains(&h) && (0.0..7.0).contains(&d) {
             let n = heat[d as usize][h as usize];
             let text = format!(

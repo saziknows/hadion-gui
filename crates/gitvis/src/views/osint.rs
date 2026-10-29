@@ -316,10 +316,12 @@ pub(crate) fn heatmap(ui: &mut Ui, heat: &[[u32; 24]; 7]) {
     let p = *pal(ui);
     let dark = ui.visuals().dark_mode;
     let label_w = 40.0;
-    // Smaller cells in a narrow pane, so the late hours are not cut off.
+    // Narrower columns in a narrow pane, so the late hours are not cut off;
+    // rows keep their height so the weekday labels do not touch.
     let cell = ((ui.available_width() - label_w) / 24.0).clamp(10.0, 18.0);
+    let row = cell.max(15.0);
     let header_h = 20.0;
-    let size = vec2(label_w + 24.0 * cell, header_h + 7.0 * cell);
+    let size = vec2(label_w + 24.0 * cell, header_h + 7.0 * row);
     let (rect, resp) = ui.allocate_exact_size(size, Sense::hover());
     let painter = ui.painter();
     let font = FontId::proportional(size::CAPTION);
@@ -335,9 +337,9 @@ pub(crate) fn heatmap(ui: &mut Ui, heat: &[[u32; 24]; 7]) {
     }
     let empty = if dark { p.raised } else { p.hover };
     for (d, name) in DAYS.iter().enumerate() {
-        let y = rect.top() + header_h + d as f32 * cell;
+        let y = rect.top() + header_h + d as f32 * row;
         painter.text(
-            pos2(rect.left(), y + (cell - 2.0) / 2.0),
+            pos2(rect.left(), y + (row - 2.0) / 2.0),
             Align2::LEFT_CENTER,
             *name,
             font.clone(),
@@ -346,7 +348,7 @@ pub(crate) fn heatmap(ui: &mut Ui, heat: &[[u32; 24]; 7]) {
         for (h, &count) in heat[d].iter().enumerate() {
             let r = Rect::from_min_size(
                 pos2(rect.left() + label_w + h as f32 * cell, y),
-                vec2(cell - 2.0, cell - 2.0),
+                vec2(cell - 2.0, row - 2.0),
             );
             let color = if count == 0 {
                 empty
@@ -359,7 +361,7 @@ pub(crate) fn heatmap(ui: &mut Ui, heat: &[[u32; 24]; 7]) {
     }
     if let Some(pos) = resp.hover_pos() {
         let h = ((pos.x - rect.left() - label_w) / cell).floor();
-        let d = ((pos.y - rect.top() - header_h) / cell).floor();
+        let d = ((pos.y - rect.top() - header_h) / row).floor();
         if (0.0..24.0).contains(&h) && (0.0..7.0).contains(&d) {
             let n = heat[d as usize][h as usize];
             resp.on_hover_text_at_pointer(format!(
