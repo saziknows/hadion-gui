@@ -950,7 +950,7 @@ pub fn show(
         .iter()
         .map(|t| (*t, nav_count(&repo.devops.govern, *t)))
         .collect();
-    kit::page_with_nav(
+    crate::devops::pages::layout::page_with_nav(
         ui,
         "govern_nav",
         |ui| {
@@ -1027,7 +1027,7 @@ fn content(ui: &mut egui::Ui, repo: &mut RepoState, console: &Console, actions: 
     let tab = repo.devops.govern.tab;
     if tab.needs_github() && repo.github_remote.is_none() {
         crate::devops::pages::layout::page_header(ui, tab.label(), tab.hint(), |_| {});
-        kit::scroll_page(ui, "gov_no_remote", |ui| {
+        crate::devops::pages::layout::page(ui, "gov_no_remote", |ui| {
             widgets::no_github(ui, repo, tab);
         });
         return;

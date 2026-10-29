@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use egui::{RichText, Ui};
+use egui::Ui;
 
 use gitvis_core::devops::govern::Feature;
 use gitvis_core::devops::govern::alerts::{
@@ -12,9 +12,10 @@ use gitvis_core::devops::govern::alerts::{
 
 use super::widgets::{self, severity_badge, severity_dot};
 use super::{Act, AlertKind, DismissForm, State};
+use crate::devops::pages::explain;
 use crate::format;
 use crate::state::{Action, Page, RepoState};
-use crate::theme::{pal, size};
+use crate::theme::pal;
 use crate::views::form;
 use crate::views::icons::{Icon, IconButton};
 use crate::views::insights::{Cell, grid, mono, num};
@@ -156,7 +157,7 @@ pub fn dependabot(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
         actions,
     );
     if let Some(e) = st.dependabot.error.clone() {
-        kit::scroll_page(ui, "gov_dep_err", |ui| {
+        crate::devops::pages::layout::page(ui, "gov_dep_err", |ui| {
             widgets::denied(
                 ui,
                 gh.as_ref(),
@@ -170,7 +171,7 @@ pub fn dependabot(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
         return;
     }
     if st.dependabot.ok().is_none() {
-        kit::scroll_page(ui, "gov_dep_wait", |ui| {
+        crate::devops::pages::layout::page(ui, "gov_dep_wait", |ui| {
             widgets::loading(ui, "Reading Dependabot alerts from GitHub…");
         });
         return;
@@ -249,7 +250,11 @@ pub fn dependabot(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
                             .leading(Leading::Dot(severity_dot(ui, a.severity)))
                             .subtitle(&sub)
                             .meta(&format!("#{}", a.number))
-                            .badges(&badges)
+                            .badges(&crate::devops::pages::layout::fit_badges(
+                                ui,
+                                rect.width(),
+                                &badges,
+                            ))
                             .dimmed(!a.is_open()),
                         sel == Some(a.number),
                     );
@@ -297,10 +302,14 @@ fn dependabot_overview(
     kit::secondary(
         ui,
         &format!(
-            "{} alerts ({}). Select one for the advisory, the fix and the Dependabot pull request.",
+            "{} alerts: {}.",
             filter.label(),
             format::plural(all.len(), "alert", "alerts")
         ),
+    );
+    kit::secondary(
+        ui,
+        "Select one for the advisory, the fix and the Dependabot pull request.",
     );
     if !all.is_empty() {
         let mut eco: BTreeMap<String, u32> = BTreeMap::new();
@@ -471,7 +480,7 @@ fn dependabot_detail(
 
     kit::section(ui, "Fix", None);
     let fix = alerts::fix_guidance(a, installed.as_deref());
-    kit::body(ui, &fix.text);
+    kit::body(ui, &explain::one_per_line(&fix.text));
     if let Some(cmd) = &fix.command {
         let full = if fix.dir.is_empty() {
             cmd.clone()
@@ -509,13 +518,17 @@ fn dependabot_detail(
             );
         }
         None => {
-            kit::muted(
+            kit::secondary(
                 ui,
                 &format!(
-                    "No open Dependabot pull request for {} (head dependabot/{}/…). With Dependabot security updates on, GitHub opens one by itself.",
+                    "No open Dependabot pull request for {} (head dependabot/{}/…).",
                     a.package,
                     alerts::dependabot_dir(&a.ecosystem)
                 ),
+            );
+            kit::secondary(
+                ui,
+                "With Dependabot security updates on, GitHub opens one by itself.",
             );
         }
     }
@@ -674,7 +687,7 @@ pub fn code(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
         actions,
     );
     if let Some(e) = st.code.error.clone() {
-        kit::scroll_page(ui, "gov_code_err", |ui| {
+        crate::devops::pages::layout::page(ui, "gov_code_err", |ui| {
             widgets::denied(
                 ui,
                 gh.as_ref(),
@@ -688,7 +701,7 @@ pub fn code(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
         return;
     }
     if st.code.ok().is_none() {
-        kit::scroll_page(ui, "gov_code_wait", |ui| {
+        crate::devops::pages::layout::page(ui, "gov_code_wait", |ui| {
             widgets::loading(ui, "Reading code scanning alerts from GitHub…");
         });
         return;
@@ -763,7 +776,11 @@ pub fn code(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                             .leading(Leading::Dot(severity_dot(ui, a.severity())))
                             .subtitle(&sub)
                             .meta(&format!("#{}", a.number))
-                            .badges(&badges)
+                            .badges(&crate::devops::pages::layout::fit_badges(
+                                ui,
+                                rect.width(),
+                                &badges,
+                            ))
                             .dimmed(!a.is_open()),
                         sel == Some(a.number),
                     );
@@ -794,12 +811,10 @@ fn code_overview(ui: &mut Ui, all: &[CodeAlert], filter: StateFilter, actions: &
         kit::Stat::new("Tools", tools.len().to_string()),
     ]);
     crate::views::insights::stats(ui, &tiles);
+    kit::secondary(ui, &format!("{} alerts.", filter.label()));
     kit::secondary(
         ui,
-        &format!(
-            "{} alerts. Select one for the rule, the code it points at in your working tree, and the dismiss options.",
-            filter.label()
-        ),
+        "Select one for the rule, the code it points at in your working tree, and the dismiss options.",
     );
     if !all.is_empty() {
         kit::section(ui, "By rule", None);
@@ -927,7 +942,7 @@ fn code_detail(
     match snippet {
         None => kit::loading(ui, &format!("Reading {}…", a.path)),
         Some(None) => {
-            kit::muted(
+            kit::secondary(
                 ui,
                 &format!(
                     "{} is not in the working tree (deleted, renamed, or binary), so there is no code to show.",
@@ -951,18 +966,21 @@ fn code_detail(
                 kit::muted(ui, "No lines at that position.");
             } else {
                 widgets::code_lines(ui, s.first, &s.lines, s.highlight);
-                ui.label(
-                    RichText::new(format!(
-                        "{}  ·  {} highlighted  ·  from the working tree, which may differ from the analysed commit",
+                kit::secondary(
+                    ui,
+                    &format!(
+                        "{}, {} highlighted.",
                         a.path,
                         if s.highlight.0 == s.highlight.1 {
                             format!("line {}", s.highlight.0)
                         } else {
                             format!("lines {}–{}", s.highlight.0, s.highlight.1)
                         }
-                    ))
-                    .size(size::SMALL)
-                    .color(pal(ui).text_2),
+                    ),
+                );
+                kit::secondary(
+                    ui,
+                    "From the working tree, which may differ from the analysed commit.",
                 );
             }
         }
@@ -978,15 +996,19 @@ fn code_detail(
             kit::body(ui, about);
         }
         if !a.help.is_empty() {
-            egui::CollapsingHeader::new(RichText::new("Rule help (Markdown)").size(size::SMALL))
-                .id_salt(("gov_code_help", a.number))
-                .show(ui, |ui| {
+            explain::details(
+                ui,
+                ("gov_code_help", a.number),
+                "Rule help (Markdown)",
+                false,
+                |ui| {
                     kit::code_block(
                         ui,
                         &gitvis_core::devops::govern::clip(&a.help, 6000),
                         actions,
                     );
-                });
+                },
+            );
         }
     }
 }

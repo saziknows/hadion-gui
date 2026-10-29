@@ -424,7 +424,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                 ui,
                 Tone::Neutral,
                 "No submodules",
-                "A submodule is another git repository checked out inside this one at a fixed commit: a library, a theme, shared configuration. This repository records which commit; Update checks that commit out, Update to remote moves it forward. This repository has none.",
+                "This repository has none.\nA submodule is another git repository checked out inside this one at a fixed commit: a library, a theme, shared configuration.\nThis repository records which commit; Update checks that commit out, Update to remote moves it forward.",
             );
             add_form(ui, s, busy, actions);
         });
@@ -465,7 +465,11 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                         .leading(kit::Leading::Dot(state_tone(m.state).color(&p)))
                         .subtitle(&sub)
                         .meta(&meta)
-                        .badges(&b),
+                        .badges(&crate::devops::pages::layout::fit_badges(
+                            ui,
+                            rect.width(),
+                            &b,
+                        )),
                     selected.as_deref() == Some(m.path.as_str()),
                 );
                 if resp.clicked() {
@@ -519,7 +523,7 @@ fn overview(ui: &mut Ui, s: &mut Submodules, o: &Overview, busy: bool, actions: 
         .iter()
         .filter(|m| m.ahead_behind.is_some_and(|(_, b)| b > 0))
         .count();
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             Stat::new("Submodules", format::count(o.modules.len())),
@@ -621,11 +625,12 @@ fn add_form(ui: &mut Ui, s: &mut Submodules, busy: bool, actions: &mut Vec<Actio
             "Branch to track (optional)",
             Some("Recorded in .gitmodules for Update to remote."),
             |ui| {
+                let iw = crate::devops::pages::layout::input_width(ui, 240.0);
                 form::input(
                     ui,
                     "gp_sub_branch",
                     &mut s.add_branch,
-                    InputOpts::new("main").mono().width(240.0),
+                    InputOpts::new("main").mono().width(iw),
                 )
             },
         );

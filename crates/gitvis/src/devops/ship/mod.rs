@@ -233,9 +233,6 @@ pub struct State {
 
     // DORA
     pub dora: DoraState,
-
-    /// A scroll offset for the next frame of a scrolling tab (script).
-    pub scroll_to: Option<f32>,
 }
 
 /// Persisted per repository.
@@ -1033,7 +1030,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             recompute_dora(&mut repo.devops.ship);
             dora_start(cx, repo, false);
         }
-        Act::ScrollTo(y) => repo.devops.ship.scroll_to = Some(y.max(0.0)),
+        Act::ScrollTo(y) => crate::devops::pages::layout::scroll_next(y),
         Act::DoraRefresh => {
             if matches!(
                 repo.devops.ship.dora.source,

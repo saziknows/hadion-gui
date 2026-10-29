@@ -13,6 +13,7 @@ use gitvis_core::devops::workbench::{git, git_raw, output_text};
 
 use super::{Act, Msg, ui as wui};
 use crate::devops::ctx::Ctx;
+use crate::devops::pages::layout;
 use crate::format;
 use crate::state::{Action, RepoState};
 use crate::theme::{pal, size};
@@ -581,7 +582,11 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                         .leading(kit::Leading::Dot(dot))
                         .subtitle(&sub)
                         .meta(&meta)
-                        .badges(&b),
+                        .badges(&crate::devops::pages::layout::fit_badges(
+                            ui,
+                            rect.width(),
+                            &b,
+                        )),
                     selected.as_deref() == Some(e.wt.path.as_str()),
                 );
                 if resp.clicked() {
@@ -764,11 +769,13 @@ fn detail(
             );
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
+                // Room for the Lock button beside it.
+                let iw = (layout::input_width(ui, 320.0 + 70.0) - 70.0).max(80.0);
                 form::input(
                     ui,
                     ("wb_wt_lock", &e.wt.path),
                     &mut w.lock_reason,
-                    InputOpts::new("Reason (optional)").width(320.0),
+                    InputOpts::new("Reason (optional)").width(iw),
                 );
                 if form::button(ui, "Lock", enabled).clicked() {
                     actions.push(Act::LockWorktree(e.wt.path.clone()).into());
@@ -817,7 +824,7 @@ fn detail(
     kit::section(ui, "Remove", None);
     kit::secondary(
         ui,
-        "Deletes the folder and git's record of it; the branch stays. Uncommitted changes are listed in the confirmation.",
+        "Deletes the folder and git's record of it; the branch stays.\nUncommitted changes are listed in the confirmation.",
     );
     if form::danger(ui, "Remove worktree…", enabled).clicked() {
         actions.push(Act::RemoveWorktree(e.wt.path.clone()).into());
@@ -843,7 +850,7 @@ fn overview(
     kit::title(ui, "Worktrees of this repository");
     kit::secondary(
         ui,
-        "Each worktree is a folder with its own checkout; they share one history, so a branch can only be checked out in one of them at a time. Select one for its details and actions, double-click to open it as a tab.",
+        "Each worktree is a folder with its own checkout; they share one history, so a branch can only be checked out in one of them at a time.\nSelect one for its details and actions; double-click to open it as a tab.",
     );
     ui.add_space(4.0);
     crate::views::insights::stats(
@@ -865,7 +872,8 @@ fn overview(
         .cloned()
         .collect();
     form::card(ui, Tone::Neutral, |ui| {
-        ui.horizontal(|ui| {
+        let iw = layout::input_width(ui, 360.0);
+        ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 16.0;
             for (m, label) in [
                 (Mode::NewBranch, "New branch"),
@@ -885,7 +893,7 @@ fn overview(
                         ui,
                         "wb_wt_new_branch",
                         &mut w.new_branch,
-                        InputOpts::new("feature/login").mono().width(360.0),
+                        InputOpts::new("feature/login").mono().width(iw),
                     );
                 });
                 form::field(
@@ -897,7 +905,7 @@ fn overview(
                             ui,
                             "wb_wt_start",
                             &mut w.start,
-                            InputOpts::new("HEAD").mono().width(360.0),
+                            InputOpts::new("HEAD").mono().width(iw),
                         );
                     },
                 );
@@ -917,7 +925,7 @@ fn overview(
                             }
                             let opts: Vec<(String, String)> =
                                 free.iter().map(|b| (b.clone(), b.clone())).collect();
-                            form::select(ui, "wb_wt_existing", &mut w.existing, &opts, 360.0);
+                            form::select(ui, "wb_wt_existing", &mut w.existing, &opts, iw);
                         }
                     },
                 );
@@ -933,7 +941,7 @@ fn overview(
                             ui,
                             "wb_wt_commit",
                             &mut w.commit,
-                            InputOpts::new("HEAD or v1.2.0").mono().width(360.0),
+                            InputOpts::new("HEAD or v1.2.0").mono().width(iw),
                         );
                     },
                 );
@@ -974,7 +982,7 @@ fn overview(
     kit::section(ui, "Prune", None);
     kit::secondary(
         ui,
-        "git keeps a record of every worktree; when a folder is deleted by hand the record stays. Prune removes those records (never files).",
+        "git keeps a record of every worktree; when a folder is deleted by hand the record stays.\nPrune removes those records (never files).",
     );
     match &w.prune {
         None => {

@@ -61,8 +61,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
             ui.add(egui::Spinner::new().size(14.0));
         }
     });
-    let mut offset = repo.devops.ship.scroll_to.take();
-    sui::scroll_page(ui, "ship_dora_page", &mut offset, |ui| {
+    sui::scroll_page(ui, "ship_dora_page", |ui| {
         controls(ui, repo, actions);
         let st = &repo.devops.ship;
         let d = &st.dora;
@@ -735,12 +734,14 @@ fn rows(ui: &mut Ui, repo: &RepoState, rep: &Report, actions: &mut Vec<Action>) 
             ]
         })
         .collect();
-    ins::grid(ui, "ship_dora_rows", &cols, &cells, true, |i, resp| {
-        if resp.clicked()
-            && let Some(sha) = &shown[i].sha
-        {
-            actions.push(Act::JumpTo(sha.clone()).into());
-        }
+    crate::devops::pages::layout::wide(ui, "ship_dora_rows", 860.0, |ui| {
+        ins::grid(ui, "ship_dora_rows", &cols, &cells, true, |i, resp| {
+            if resp.clicked()
+                && let Some(sha) = &shown[i].sha
+            {
+                actions.push(Act::JumpTo(sha.clone()).into());
+            }
+        });
     });
     ins::more(ui, rep.rows.len(), shown.len());
 }

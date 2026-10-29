@@ -133,7 +133,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
     }
     let st = &repo.devops.ship;
     if st.envs.ok().is_none() {
-        kit::scroll_page(ui, "ship_envs_state", |ui| {
+        crate::devops::pages::layout::page(ui, "ship_envs_state", |ui| {
             sui::loaded(
                 ui,
                 &st.envs,
@@ -154,7 +154,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         let st = &mut repo.devops.ship;
         let urgent =
             st.approvals.err().is_some() || st.approvals.ok().is_some_and(|l| !l.is_empty());
-        kit::scroll_page(ui, "ship_envs_empty", |ui| {
+        crate::devops::pages::layout::page(ui, "ship_envs_empty", |ui| {
             if urgent {
                 approvals_section(ui, st, now, actions);
             }
@@ -255,6 +255,8 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                 |ui, rect, resp, i| {
                     let r = &rows[i];
                     let p = *pal(ui);
+                    let fitted =
+                        crate::devops::pages::layout::fit_badges(ui, rect.width(), &r.badges);
                     let row = Row::new(&r.name)
                         .leading(Leading::Icon(
                             Icon::Cloud,
@@ -262,7 +264,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                         ))
                         .subtitle(&r.subtitle)
                         .meta(&r.meta)
-                        .badges(&r.badges)
+                        .badges(&fitted)
                         .dimmed(r.dimmed);
                     kit::paint_row(ui, rect, &row, selected.as_deref() == Some(r.name.as_str()));
                     if resp.clicked() {
@@ -388,10 +390,12 @@ fn where_section(ui: &mut Ui, repo: &RepoState, now: i64, actions: &mut Vec<Acti
             vec![ins::text(name.clone()), commit, rf, when, by, behind, ahead]
         })
         .collect();
-    ins::grid(ui, "ship_env_where", &cols, &rows, true, |i, resp| {
-        if resp.clicked() {
-            actions.push(Act::SelectEnv(Some(names[i].clone())).into());
-        }
+    crate::devops::pages::layout::wide(ui, "ship_env_where", 760.0, |ui| {
+        ins::grid(ui, "ship_env_where", &cols, &rows, true, |i, resp| {
+            if resp.clicked() {
+                actions.push(Act::SelectEnv(Some(names[i].clone())).into());
+            }
+        });
     });
     if st.env_local_loading {
         kit::loading(ui, "Comparing deployed commits with local history…");
@@ -861,34 +865,37 @@ fn env_detail(ui: &mut Ui, repo: &mut RepoState, env: &str, now: i64, actions: &
             ]
         })
         .collect();
-    ins::grid(ui, "ship_env_history", &cols, &rows, true, |i, resp| {
-        let d = shown[i];
-        if resp.clicked() {
-            actions.push(Act::JumpTo(d.sha.clone()).into());
-        }
-        resp.context_menu(|ui| {
-            if ui.button("Copy commit id").clicked() {
-                actions.push(Action::Copy(d.sha.clone()));
-                ui.close();
+    crate::devops::pages::layout::wide(ui, "ship_env_history", 860.0, |ui| {
+        ins::grid(ui, "ship_env_history", &cols, &rows, true, |i, resp| {
+            let d = shown[i];
+            if resp.clicked() {
+                actions.push(Act::JumpTo(d.sha.clone()).into());
             }
-            if let Some(run) = d.run_id()
-                && ui.button(format!("Show run {run}")).clicked()
-            {
-                actions.push(Action::OpenRun { run, job: None });
-                ui.close();
-            }
-            if d.effective().succeeded() && ui.button("Redeploy this commit here…").clicked() {
-                actions.push(
-                    Act::Deploy {
-                        sha: d.sha.clone(),
-                        env: d.environment.clone(),
-                        description: format!("Redeploy {} (gitvis)", short(&d.sha)),
-                        title: format!("Deploy {} to {} again?", short(&d.sha), d.environment),
-                    }
-                    .into(),
-                );
-                ui.close();
-            }
+            resp.context_menu(|ui| {
+                if ui.button("Copy commit id").clicked() {
+                    actions.push(Action::Copy(d.sha.clone()));
+                    ui.close();
+                }
+                if let Some(run) = d.run_id()
+                    && ui.button(format!("Show run {run}")).clicked()
+                {
+                    actions.push(Action::OpenRun { run, job: None });
+                    ui.close();
+                }
+                if d.effective().succeeded() && ui.button("Redeploy this commit here…").clicked()
+                {
+                    actions.push(
+                        Act::Deploy {
+                            sha: d.sha.clone(),
+                            env: d.environment.clone(),
+                            description: format!("Redeploy {} (gitvis)", short(&d.sha)),
+                            title: format!("Deploy {} to {} again?", short(&d.sha), d.environment),
+                        }
+                        .into(),
+                    );
+                    ui.close();
+                }
+            });
         });
     });
     ins::more(ui, list.len(), shown.len());

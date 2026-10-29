@@ -175,15 +175,24 @@ pub fn one_per_line(text: &str) -> String {
 /// A list with a hanging indent: wrapped lines start under the text, not
 /// under the bullet.
 pub fn bullets(ui: &mut Ui, items: &[&str]) {
+    marked(ui, items, |_| "•".to_owned());
+}
+
+/// Numbered steps with a hanging indent.
+pub fn steps(ui: &mut Ui, items: &[&str]) {
+    marked(ui, items, |i| format!("{}.", i + 1));
+}
+
+fn marked(ui: &mut Ui, items: &[&str], marker: impl Fn(usize) -> String) {
     let p = *pal(ui);
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.y = 5.0;
-        for t in items {
+        for (i, t) in items.iter().enumerate() {
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ui.add_sized(
-                    vec2(16.0, 18.0),
-                    Label::new(RichText::new("•").size(size::BODY).color(p.text_3)),
+                    vec2(20.0, 18.0),
+                    Label::new(RichText::new(marker(i)).size(size::BODY).color(p.text_2)),
                 );
                 ui.vertical(|ui| {
                     let w = ui.available_width().min(kit::PROSE);

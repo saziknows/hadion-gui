@@ -383,23 +383,25 @@ fn probe_table(ui: &mut Ui, k: &KubeState, cfg: &KubeConfig, actions: &mut Vec<A
         })
         .collect();
     let names: Vec<String> = cfg.contexts.iter().map(|c| c.name.clone()).collect();
-    grid(
-        ui,
-        "k8s_probes",
-        &[
-            Col::text("Context"),
-            Col::text("API server"),
-            Col::text("Status"),
-            Col::num("Took"),
-        ],
-        &rows,
-        true,
-        |r, resp| {
-            if resp.clicked() {
-                actions.push(Act::KubeContext(names[r].clone()).into());
-            }
-        },
-    );
+    crate::devops::pages::layout::wide(ui, "k8s_contexts", 560.0, |ui| {
+        grid(
+            ui,
+            "k8s_probes",
+            &[
+                Col::text("Context"),
+                Col::text("API server"),
+                Col::text("Status"),
+                Col::num("Took"),
+            ],
+            &rows,
+            true,
+            |r, resp| {
+                if resp.clicked() {
+                    actions.push(Act::KubeContext(names[r].clone()).into());
+                }
+            },
+        );
+    });
     let errors: Vec<(&str, &str)> = cfg
         .contexts
         .iter()
@@ -566,7 +568,11 @@ fn workload_list(ui: &mut Ui, cx: &Cx, k: &mut KubeState, actions: &mut Vec<Acti
                     .leading(Leading::Dot(color))
                     .subtitle(sub)
                     .meta(&meta)
-                    .badges(badges),
+                    .badges(&crate::devops::pages::layout::fit_badges(
+                        ui,
+                        rect.width(),
+                        badges,
+                    )),
                 sel.as_ref() == Some(key),
             );
             if resp.clicked() {
@@ -637,27 +643,29 @@ fn overview(ui: &mut Ui, cx: &Cx, k: &KubeState, actions: &mut Vec<Action>) {
                     .map(|x| (x.kind, x.name.clone()))
             })
             .collect();
-        grid(
-            ui,
-            "k8s_failing",
-            &[
-                Col::text("Pod"),
-                Col::text("Reason"),
-                Col::num("Restarts"),
-                Col::text("Last termination"),
-                Col::num("Age"),
-            ],
-            &rows,
-            true,
-            |r, resp| {
-                if resp.clicked()
-                    && let Some(key) = &owners[r]
-                {
-                    actions.push(Act::KubeSelect(Some(key.clone())).into());
-                    actions.push(Act::KubePod(Some(failing[r].0.name.clone())).into());
-                }
-            },
-        );
+        crate::devops::pages::layout::wide(ui, "k8s_failing", 640.0, |ui| {
+            grid(
+                ui,
+                "k8s_failing",
+                &[
+                    Col::text("Pod"),
+                    Col::text("Reason"),
+                    Col::num("Restarts"),
+                    Col::text("Last termination"),
+                    Col::num("Age"),
+                ],
+                &rows,
+                true,
+                |r, resp| {
+                    if resp.clicked()
+                        && let Some(key) = &owners[r]
+                    {
+                        actions.push(Act::KubeSelect(Some(key.clone())).into());
+                        actions.push(Act::KubePod(Some(failing[r].0.name.clone())).into());
+                    }
+                },
+            );
+        });
     }
     kit::section(ui, "Workloads", Some(w.len()));
     if w.is_empty() {
@@ -685,25 +693,27 @@ fn overview(ui: &mut Ui, cx: &Cx, k: &KubeState, actions: &mut Vec<Action>) {
         .collect();
     let keys: Vec<(kube::WorkloadKind, String)> =
         vis.iter().map(|x| (x.kind, x.name.clone())).collect();
-    grid(
-        ui,
-        "k8s_overview",
-        &[
-            Col::text("Name"),
-            Col::text("Kind"),
-            Col::text("Rollout"),
-            Col::num("Ready"),
-            Col::text("Image"),
-            Col::num("Age"),
-        ],
-        &rows,
-        true,
-        |r, resp| {
-            if resp.clicked() {
-                actions.push(Act::KubeSelect(Some(keys[r].clone())).into());
-            }
-        },
-    );
+    crate::devops::pages::layout::wide(ui, "k8s_workloads", 700.0, |ui| {
+        grid(
+            ui,
+            "k8s_overview",
+            &[
+                Col::text("Name"),
+                Col::text("Kind"),
+                Col::text("Rollout"),
+                Col::num("Ready"),
+                Col::text("Image"),
+                Col::num("Age"),
+            ],
+            &rows,
+            true,
+            |r, resp| {
+                if resp.clicked() {
+                    actions.push(Act::KubeSelect(Some(keys[r].clone())).into());
+                }
+            },
+        );
+    });
     kit::section(ui, "Other contexts", None);
     if let Some(Ok(cfg)) = &k.config {
         probe_table(ui, k, cfg, actions);
@@ -1104,32 +1114,34 @@ fn pod_table(ui: &mut Ui, cx: &Cx, k: &KubeState, pods: &[&Pod], actions: &mut V
         })
         .collect();
     let names: Vec<String> = pods.iter().map(|p| p.name.clone()).collect();
-    grid(
-        ui,
-        "k8s_pods",
-        &[
-            Col::text("Pod"),
-            Col::text("Status"),
-            Col::num("Ready"),
-            Col::num("Restarts"),
-            Col::num("Age"),
-            Col::text("Node"),
-            Col::text("Last termination"),
-        ],
-        &rows,
-        true,
-        |r, resp| {
-            if resp.clicked() {
-                actions.push(Act::KubePod(Some(names[r].clone())).into());
-            }
-            resp.context_menu(|ui| {
-                if ui.button("Copy pod name").clicked() {
-                    actions.push(Action::Copy(names[r].clone()));
-                    ui.close();
+    crate::devops::pages::layout::wide(ui, "k8s_pods", 760.0, |ui| {
+        grid(
+            ui,
+            "k8s_pods",
+            &[
+                Col::text("Pod"),
+                Col::text("Status"),
+                Col::num("Ready"),
+                Col::num("Restarts"),
+                Col::num("Age"),
+                Col::text("Node"),
+                Col::text("Last termination"),
+            ],
+            &rows,
+            true,
+            |r, resp| {
+                if resp.clicked() {
+                    actions.push(Act::KubePod(Some(names[r].clone())).into());
                 }
-            });
-        },
-    );
+                resp.context_menu(|ui| {
+                    if ui.button("Copy pod name").clicked() {
+                        actions.push(Action::Copy(names[r].clone()));
+                        ui.close();
+                    }
+                });
+            },
+        );
+    });
 }
 
 fn pod_detail(ui: &mut Ui, cx: &Cx, k: &KubeState, p: &Pod, actions: &mut Vec<Action>) {
@@ -1306,21 +1318,23 @@ fn events_table(ui: &mut Ui, cx: &Cx, id: &str, ev: &[Event]) {
             ]
         })
         .collect();
-    grid(
-        ui,
-        id,
-        &[
-            Col::text("Type"),
-            Col::text("Reason"),
-            Col::text("Message"),
-            Col::text("Object"),
-            Col::num("Count"),
-            Col::num("Last seen"),
-        ],
-        &rows,
-        false,
-        |_, _| {},
-    );
+    crate::devops::pages::layout::wide(ui, "k8s_events", 760.0, |ui| {
+        grid(
+            ui,
+            id,
+            &[
+                Col::text("Type"),
+                Col::text("Reason"),
+                Col::text("Message"),
+                Col::text("Object"),
+                Col::num("Count"),
+                Col::num("Last seen"),
+            ],
+            &rows,
+            false,
+            |_, _| {},
+        );
+    });
     if ev.len() > 40 {
         common::note(ui, &format!("and {} more", ev.len() - 40));
     }

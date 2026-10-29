@@ -13,6 +13,7 @@ use gitvis_core::devops::workbench::tasks::{Discovery, Source, Task, discover};
 use super::{Act, Msg, RunRecord, State, ui as wui};
 use crate::devops::console::{Console, ConsoleRun};
 use crate::devops::ctx::Ctx;
+use crate::devops::pages::explain;
 use crate::format;
 use crate::state::{Action, RepoState, Settings};
 use crate::theme::{pal, semibold, size};
@@ -374,19 +375,38 @@ pub fn show(
             .iter()
             .map(|p| format!("{}: {}", p.file, p.message))
             .collect();
-        wui::empty_pane(ui, |ui| {
+        crate::devops::pages::layout::page(ui, "wb_tasks_none", |ui| {
+            // A file that could not be read explains the empty list: it
+            // comes first.
+            for pr in &problems {
+                kit::callout(ui, Tone::Warning, "Could not read a file", pr);
+            }
             if kit::empty_state(
                 ui,
                 Icon::Terminal,
                 "No tasks found",
-                "gitvis looks for package.json scripts, Makefile targets, justfile recipes, Taskfile tasks, Cargo, composer, deno, Go, .NET, Gradle, Maven, Python and docker compose files in this folder and two levels below. Add one, then scan again.",
+                "Nothing in this folder or two levels below defines a task.\nAdd one, then scan again.",
                 Some((Icon::Rerun, "Scan again")),
             ) {
                 actions.push(Act::DiscoverTasks.into());
             }
-            for pr in &problems {
-                kit::callout(ui, Tone::Warning, "Could not read a file", pr);
-            }
+            ui.add_space(12.0);
+            ui.vertical_centered(|ui| {
+                ui.set_max_width(440.0);
+                explain::details(ui, "wb_tasks_sources", "What gitvis looks for", false, |ui| {
+                    explain::bullets(
+                        ui,
+                        &[
+                            "package.json scripts",
+                            "Makefile targets",
+                            "justfile recipes",
+                            "Taskfile tasks",
+                            "Cargo, composer, deno, Go, .NET, Gradle, Maven and Python projects",
+                            "docker compose files",
+                        ],
+                    );
+                });
+            });
         });
         return;
     }
@@ -603,7 +623,11 @@ fn task_list(
                                 .leading(kit::Leading::Dot(dot))
                                 .subtitle(&command)
                                 .meta(&meta)
-                                .badges(&badges),
+                                .badges(&crate::devops::pages::layout::fit_badges(
+                                    ui,
+                                    rect.width(),
+                                    &badges,
+                                )),
                             on,
                         );
                         if resp.hovered() {
@@ -868,17 +892,19 @@ fn detail(
                 ]
             })
             .collect();
-        kit::table(
-            ui,
-            &[
-                Col::text("When"),
-                Col::text("Status"),
-                Col::num("Duration"),
-                Col::num("Exit code"),
-                Col::text("Arguments"),
-            ],
-            &rows,
-        );
+        crate::devops::pages::layout::wide(ui, "wb_task_runs", 600.0, |ui| {
+            kit::table(
+                ui,
+                &[
+                    Col::text("When"),
+                    Col::text("Status"),
+                    Col::num("Duration"),
+                    Col::num("Exit code"),
+                    Col::text("Arguments"),
+                ],
+                &rows,
+            );
+        });
         if records.len() > 15 {
             kit::muted(ui, &format!("and {} older runs", records.len() - 15));
         }
@@ -992,18 +1018,20 @@ fn overview(ui: &mut Ui, wb: &State, console: &Console, actions: &mut Vec<Action
             ]
         })
         .collect();
-    kit::table(
-        ui,
-        &[
-            Col::text("Folder"),
-            Col::text("Name"),
-            Col::text("Kinds"),
-            Col::text("Package manager"),
-            Col::text("Workspace"),
-            Col::num("Tasks"),
-        ],
-        &rows,
-    );
+    crate::devops::pages::layout::wide(ui, "wb_tools_installed", 600.0, |ui| {
+        kit::table(
+            ui,
+            &[
+                Col::text("Folder"),
+                Col::text("Name"),
+                Col::text("Kinds"),
+                Col::text("Package manager"),
+                Col::text("Workspace"),
+                Col::num("Tasks"),
+            ],
+            &rows,
+        );
+    });
     if !wb.tasks.tools.is_empty() {
         kit::section(ui, "Tools", Some(wb.tasks.tools.len()));
         let mut tools: Vec<(&Tool, &Option<Installed>)> = wb.tasks.tools.iter().collect();
@@ -1023,15 +1051,17 @@ fn overview(ui: &mut Ui, wb: &State, console: &Console, actions: &mut Vec<Action
                 ],
             })
             .collect();
-        kit::table(
-            ui,
-            &[
-                Col::text("Tool"),
-                Col::text("Version"),
-                Col::text("Path or how to install"),
-            ],
-            &rows,
-        );
+        crate::devops::pages::layout::wide(ui, "wb_tools_table", 600.0, |ui| {
+            kit::table(
+                ui,
+                &[
+                    Col::text("Tool"),
+                    Col::text("Version"),
+                    Col::text("Path or how to install"),
+                ],
+                &rows,
+            );
+        });
     }
     ui.add_space(6.0);
     kit::muted(

@@ -411,11 +411,11 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
                 ui,
                 Tone::Neutral,
                 "This repository does not use Git LFS",
-                "Git LFS keeps large files (images, videos, datasets, builds) out of the repository: git stores a small pointer and the content lives on the LFS server. To start, track a pattern below and commit .gitattributes; Set up LFS adds the hooks that upload the content on push.",
+                "Git LFS keeps large files (images, videos, datasets, builds) out of the repository: git stores a small pointer and the content lives on the LFS server.\nTo start, track a pattern below and commit .gitattributes.\nSet up LFS adds the hooks that upload the content on push.",
             );
         }
         setup(ui, &o, busy, actions);
-        kit::stats(
+        crate::views::insights::stats(
             ui,
             &[
                 Stat::new("Tracked patterns", format::count(o.patterns.len())),
@@ -481,9 +481,9 @@ fn patterns(ui: &mut Ui, s: &mut Lfs, o: &Overview, busy: bool, actions: &mut Ve
     let p = *pal(ui);
     kit::section(ui, "Tracked patterns", Some(o.patterns.len()));
     if o.patterns.is_empty() {
-        kit::muted(
+        kit::secondary(
             ui,
-            "No pattern sends files through LFS yet. Track one below (for example *.psd or assets/**).",
+            "No pattern sends files through LFS yet.\nTrack one below, for example *.psd or assets/**.",
         );
     }
     for pat in &o.patterns {
@@ -522,12 +522,13 @@ fn patterns(ui: &mut Ui, s: &mut Lfs, o: &Overview, busy: bool, actions: &mut Ve
         );
     }
     ui.add_space(4.0);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
+        let iw = crate::devops::pages::layout::input_width(ui, 220.0);
         form::input(
             ui,
             "gp_lfs_pattern",
             &mut s.pattern,
-            InputOpts::new("*.psd").width(220.0).mono(),
+            InputOpts::new("*.psd").width(iw).mono(),
         );
         form::checkbox(ui, &mut s.lockable, "Lockable");
         if form::button(ui, "Track…", !busy && !s.pattern.trim().is_empty()).clicked() {
@@ -712,9 +713,9 @@ fn locks(ui: &mut Ui, s: &mut Lfs, settings: &Settings, busy: bool, actions: &mu
     }
     match &s.locks {
         None => {
-            kit::muted(
+            kit::secondary(
                 ui,
-                "Locks live on the LFS server: Load locks asks it (network). Lockable files are read-only until you lock them.",
+                "Locks live on the LFS server: Load locks asks it (network).\nLockable files are read-only until you lock them.",
             );
         }
         Some(Err(e)) => {

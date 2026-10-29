@@ -29,8 +29,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
             }
         },
     );
-    let mut offset = repo.devops.ship.scroll_to.take();
-    sui::scroll_page(ui, "ship_where_page", &mut offset, |ui| {
+    sui::scroll_page(ui, "ship_where_page", |ui| {
         // The question.
         let st = &mut repo.devops.ship;
         let mut go = false;

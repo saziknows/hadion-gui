@@ -12,6 +12,7 @@ use gitvis_core::devops::govern::protection::{self, ProtectionForm};
 use super::control::ANALYZE_DEBOUNCE;
 use super::widgets;
 use super::{Act, CoState, State};
+use crate::devops::pages::{explain, layout};
 use crate::format;
 use crate::state::{Action, RepoState};
 use crate::theme::{pal, size};
@@ -104,7 +105,7 @@ pub fn protection(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
         },
     );
     let title_branch = prot_branch.clone();
-    kit::scroll_page(ui, "gov_prot", |ui| {
+    crate::devops::pages::layout::page(ui, "gov_prot", |ui| {
         if title_branch.is_empty() {
             if access.loading || protected.loading {
                 widgets::loading(ui, "Reading the default and protected branches…");
@@ -168,20 +169,17 @@ pub fn protection(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
                             ui,
                             Tone::Accent,
                             "New protection rule",
-                            "GitHub's recommended starting point: a pull request with one approval, stale approvals dismissed, no force pushes, no deletions. Adjust and review.",
+                            "GitHub's recommended starting point: a pull request with one approval, stale approvals dismissed, no force pushes, no deletions.\nAdjust it, then review.",
                         );
                     }
                     form_cards(ui, edit, true, context_buf, &seen);
                     let changes = protection::changes(current.as_ref(), edit);
                     if !changes.is_empty() {
-                        kit::muted(
-                            ui,
-                            &format!(
-                                "{}: {}",
-                                format::plural(changes.len(), "change", "changes"),
-                                changes.join("; ")
-                            ),
-                        );
+                        // One change per line, not a `;`-separated run.
+                        ui.add_space(4.0);
+                        kit::subtitle(ui, &format::plural(changes.len(), "change", "changes"));
+                        let items: Vec<&str> = changes.iter().map(String::as_str).collect();
+                        explain::bullets(ui, &items);
                     }
                     form::actions_row(ui, |ui| {
                         if form::primary(ui, "Review and save…", true).clicked() {
@@ -206,8 +204,9 @@ pub fn protection(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
         kit::section(ui, &format!("Rules in effect on {title_branch}"), None);
         kit::secondary(
             ui,
-            "From every ruleset that targets the branch (repository and organisation), readable with read access: this is what GitHub enforces besides classic protection.",
+            "What GitHub enforces besides classic protection: the rules of every ruleset that targets the branch (repository and organisation).",
         );
+        kit::secondary(ui, "Read access is enough to see them.");
         if rules.loading {
             kit::loading(ui, "Reading the rules…");
         } else if let Some(e) = &rules.error {
@@ -255,7 +254,7 @@ pub fn protection(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
             widgets::denied(ui, gh.as_ref(), acc, Feature::Rulesets, e, actions);
         } else if let Some(list) = rulesets.ok() {
             if list.is_empty() {
-                kit::muted(
+                kit::secondary(
                     ui,
                     "No rulesets. Rulesets are managed on GitHub (Settings → Rules → Rulesets); gitvis shows them read-only.",
                 );
@@ -287,27 +286,29 @@ pub fn protection(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
                         ]
                     })
                     .collect();
-                grid(
-                    ui,
-                    "gov_prot_rulesets",
-                    &[
-                        Col::text("Ruleset"),
-                        Col::text("Target"),
-                        Col::text("Enforcement"),
-                        Col::text("Source"),
-                        Col::text("Updated"),
-                    ],
-                    &cells,
-                    true,
-                    |i, resp| {
-                        if resp.clicked()
-                            && let Some(r) = list.get(i)
-                            && !r.html_url.is_empty()
-                        {
-                            actions.push(Action::OpenUrl(r.html_url.clone()));
-                        }
-                    },
-                );
+                crate::devops::pages::layout::wide(ui, "gov_prot_rulesets", 640.0, |ui| {
+                    grid(
+                        ui,
+                        "gov_prot_rulesets",
+                        &[
+                            Col::text("Ruleset"),
+                            Col::text("Target"),
+                            Col::text("Enforcement"),
+                            Col::text("Source"),
+                            Col::text("Updated"),
+                        ],
+                        &cells,
+                        true,
+                        |i, resp| {
+                            if resp.clicked()
+                                && let Some(r) = list.get(i)
+                                && !r.html_url.is_empty()
+                            {
+                                actions.push(Action::OpenUrl(r.html_url.clone()));
+                            }
+                        },
+                    );
+                });
             }
         }
     });
@@ -372,7 +373,7 @@ fn protection_summary(ui: &mut Ui, p: &ProtectionForm, admin: bool) -> bool {
                     .show(ui)
                     .clicked();
             } else {
-                kit::muted(ui, "Read-only: changing it needs the admin role.");
+                kit::secondary(ui, "Read-only: changing it needs the admin role.");
             }
         },
     );
@@ -399,7 +400,7 @@ fn form_cards(
                         let opts: Vec<(u8, &str)> =
                             [(0, "0"), (1, "1"), (2, "2"), (3, "3"), (4, "4"), (5, "5"), (6, "6")]
                                 .to_vec();
-                        if let Some(n) = kit::segmented(ui, &opts, f.approvals) {
+                        if let Some(n) = layout::segmented_on_card(ui, &opts, f.approvals) {
                             f.approvals = n;
                         }
                     });
@@ -415,10 +416,10 @@ fn form_cards(
                         "Require approval of the most recent push",
                     );
                     if let Some(d) = &f.dismissal_restrictions {
-                        kit::muted(ui, &format!("Who can dismiss reviews: {}", d.describe()));
+                        kit::secondary(ui, &format!("Who can dismiss reviews: {}", d.describe()));
                     }
                     if let Some(b) = &f.bypass_allowances {
-                        kit::muted(ui, &format!("Allowed to bypass: {}", b.describe()));
+                        kit::secondary(ui, &format!("Allowed to bypass: {}", b.describe()));
                     }
                 });
             }
@@ -469,7 +470,7 @@ fn form_cards(
                         });
                     }
                     if f.contexts.is_empty() {
-                        kit::muted(ui, "No required checks yet: merging is not blocked by any check.");
+                        kit::secondary(ui, "No required checks yet: merging is not blocked by any check.");
                     }
                 });
             }
@@ -512,7 +513,7 @@ fn form_cards(
                         r.describe()
                     ),
                 ),
-                None => kit::muted(
+                None => kit::secondary(
                     ui,
                     "No push restriction: everyone with write access (organisation repositories can restrict this on GitHub).",
                 ),
@@ -613,7 +614,7 @@ pub fn codeowners(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
             _ => actions.push(Act::AnalyzeCodeowners.into()),
         }
     }
-    kit::scroll_page(ui, "gov_co", |ui| {
+    crate::devops::pages::layout::page(ui, "gov_co", |ui| {
         if co.file.loading && co.file.ok().is_none() {
             widgets::loading(ui, "Reading CODEOWNERS and the tracked files…");
             return;
@@ -738,21 +739,21 @@ fn overview_tiles(ui: &mut Ui, co: &CoState, has_gh: bool) {
 
 fn who_owns(ui: &mut Ui, co: &mut CoState, actions: &mut Vec<Action>) {
     kit::section(ui, "Who owns this path", None);
+    // The frame adds its padding and border to the width.
+    let w = (ui.available_width() - 24.0).min(520.0);
     let resp = form::input(
         ui,
         "gov_co_test",
         &mut co.test_path,
-        form::InputOpts::new("src/main.rs or docs/")
-            .mono()
-            .width(520.0),
+        form::InputOpts::new("src/main.rs or docs/").mono().width(w),
     );
     if resp.changed() {
         actions.push(Act::TestPath(co.test_path.clone()).into());
     }
     let (Some(l), Some(p)) = (&co.lookup, &co.parsed) else {
-        kit::muted(
+        kit::secondary(
             ui,
-            "Type a file or directory path: the matching rules are listed, and the last one decides.",
+            "Type a file or directory path: the rules that match it are listed, and the last one decides.",
         );
         return;
     };
@@ -762,13 +763,14 @@ fn who_owns(ui: &mut Ui, co: &mut CoState, actions: &mut Vec<Action>) {
         l.path.clone()
     };
     if l.is_dir {
-        kit::muted(
+        kit::secondary(
             ui,
             &format!(
-                "A directory: the rules below are those of {subject} (an imaginary file named {}); its existing files are listed further down.",
+                "A directory: the rules below are those of {subject} (an imaginary file named {}).",
                 codeowners::PROBE
             ),
         );
+        kit::secondary(ui, "Its existing files are listed further down.");
     }
     if l.matching.is_empty() {
         kit::callout(
@@ -858,19 +860,21 @@ fn who_owns(ui: &mut Ui, co: &mut CoState, actions: &mut Vec<Action>) {
                 ],
             })
             .collect();
-        grid(
-            ui,
-            "gov_co_below",
-            &[
-                Col::num("Files"),
-                Col::text("Decided by"),
-                Col::text("Owners"),
-                Col::text("Where"),
-            ],
-            &cells,
-            false,
-            |_, _| {},
-        );
+        crate::devops::pages::layout::wide(ui, "gov_co_below", 560.0, |ui| {
+            grid(
+                ui,
+                "gov_co_below",
+                &[
+                    Col::num("Files"),
+                    Col::text("Decided by"),
+                    Col::text("Owners"),
+                    Col::text("Where"),
+                ],
+                &cells,
+                false,
+                |_, _| {},
+            );
+        });
     }
 }
 
@@ -878,7 +882,11 @@ fn editor(ui: &mut Ui, co: &mut CoState) {
     kit::section(ui, "Editor", None);
     kit::secondary(
         ui,
-        "Problems below update as you type; the file checks against the tracked files run once typing pauses. Saving writes the file in the working tree (commit and push it for GitHub to use it).",
+        "Problems below update as you type; the checks against the tracked files run once typing pauses.",
+    );
+    kit::secondary(
+        ui,
+        "Saving writes the file in the working tree: commit and push it for GitHub to use it.",
     );
     let rows = (co.text.lines().count() + 2).clamp(8, 32);
     let resp = form::code(ui, "gov_co_editor", &mut co.text, rows);
@@ -1054,14 +1062,16 @@ fn problem_list(
         } else {
             &[Col::num("Line"), Col::text("Rule")]
         };
-        grid(
-            ui,
-            &format!("gov_co_problems_{title}"),
-            cols,
-            &cells,
-            false,
-            |_, _| {},
-        );
+        crate::devops::pages::layout::wide(ui, "gov_co_problems", 560.0, |ui| {
+            grid(
+                ui,
+                &format!("gov_co_problems_{title}"),
+                cols,
+                &cells,
+                false,
+                |_, _| {},
+            );
+        });
         crate::views::insights::more(ui, items.len(), 60);
     }
 }
@@ -1124,9 +1134,16 @@ fn rules_table(ui: &mut Ui, co: &CoState) {
         .ok()
         .filter(|_| co.analysis_gen == co.generation);
     kit::section(ui, "Rules", Some(p.rules.len()));
-    kit::secondary(
+    explain::terms(
         ui,
-        "Matches: tracked files the pattern matches. Decides: files whose owners this rule sets (it is the last match).",
+        90.0,
+        &[
+            ("Matches", "Tracked files the pattern matches."),
+            (
+                "Decides",
+                "Files whose owners this rule sets: it is their last match.",
+            ),
+        ],
     );
     let cells: Vec<Vec<Cell>> = p
         .rules
@@ -1158,20 +1175,22 @@ fn rules_table(ui: &mut Ui, co: &CoState) {
             ]
         })
         .collect();
-    grid(
-        ui,
-        "gov_co_rules",
-        &[
-            Col::num("Line"),
-            Col::text("Pattern"),
-            Col::text("Owners"),
-            Col::num("Matches"),
-            Col::num("Decides"),
-        ],
-        &cells,
-        false,
-        |_, _| {},
-    );
+    crate::devops::pages::layout::wide(ui, "gov_co_rules", 600.0, |ui| {
+        grid(
+            ui,
+            "gov_co_rules",
+            &[
+                Col::num("Line"),
+                Col::text("Pattern"),
+                Col::text("Owners"),
+                Col::num("Matches"),
+                Col::num("Decides"),
+            ],
+            &cells,
+            false,
+            |_, _| {},
+        );
+    });
     crate::views::insights::more(ui, p.rules.len(), 400);
     let owners = p.owners();
     if !owners.is_empty() {

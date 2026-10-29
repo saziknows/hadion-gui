@@ -216,8 +216,7 @@ pub fn span(secs: i64) -> String {
     }
 }
 
-/// A scrolling page with a scroll offset the script driver can set
-/// (`ship-scroll N`), taken once.
-pub fn scroll_page(ui: &mut Ui, id: &str, offset: &mut Option<f32>, add: impl FnOnce(&mut Ui)) {
-    crate::devops::pages::layout::page_at(ui, id, offset, add);
+/// A scrolling page (the script driver's `ship-scroll N` scrolls it).
+pub fn scroll_page(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
+    crate::devops::pages::layout::page(ui, id, add);
 }

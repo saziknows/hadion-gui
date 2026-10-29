@@ -306,7 +306,11 @@ fn package_list(ui: &mut Ui, cx: &Cx, pkg: &mut PkgState, actions: &mut Vec<Acti
                     .leading(Leading::Icon(Icon::Package, p.text_2))
                     .subtitle(sub)
                     .meta(meta)
-                    .badges(badges),
+                    .badges(&crate::devops::pages::layout::fit_badges(
+                        ui,
+                        rect.width(),
+                        badges,
+                    )),
                 selected.as_deref() == Some(name.as_str()),
             );
             if resp.clicked() {
@@ -464,7 +468,7 @@ fn versions(
     let untagged = vs.iter().filter(|v| v.tags().is_empty()).count();
     let newest_commit = matched.iter().flatten().find_map(|m| m.commit);
     let newest_dist = newest_commit.map(|id| refs.distance(cx.snap, id));
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             Stat::new("versions listed", format::count(vs.len())),
@@ -545,24 +549,26 @@ fn versions(
         })
         .collect();
     let ids: Vec<u64> = vs.iter().take(MAX_ROWS).map(|v| v.id).collect();
-    grid(
-        ui,
-        "pkg_versions",
-        &[
-            Col::text("Tags"),
-            Col::text("Digest"),
-            Col::text("Commit"),
-            Col::text("Relation"),
-            Col::num("Pushed"),
-        ],
-        &rows,
-        true,
-        |r, resp| {
-            if resp.clicked() {
-                actions.push(Act::PkgVersion(Some(ids[r])).into());
-            }
-        },
-    );
+    crate::devops::pages::layout::wide(ui, "pkg_versions", 640.0, |ui| {
+        grid(
+            ui,
+            "pkg_versions",
+            &[
+                Col::text("Tags"),
+                Col::text("Digest"),
+                Col::text("Commit"),
+                Col::text("Relation"),
+                Col::num("Pushed"),
+            ],
+            &rows,
+            true,
+            |r, resp| {
+                if resp.clicked() {
+                    actions.push(Act::PkgVersion(Some(ids[r])).into());
+                }
+            },
+        );
+    });
 }
 
 #[allow(clippy::too_many_arguments)]

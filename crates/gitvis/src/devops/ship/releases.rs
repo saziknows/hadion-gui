@@ -109,8 +109,7 @@ pub fn show(
                 github_remote,
                 ..
             } = repo;
-            let mut offset = devops.ship.scroll_to.take();
-            sui::scroll_page(ui, "ship_release_form_page", &mut offset, |ui| {
+            sui::scroll_page(ui, "ship_release_form_page", |ui| {
                 publish_form(
                     ui,
                     &mut devops.ship,
@@ -122,7 +121,7 @@ pub fn show(
             return;
         }
         if empty {
-            kit::scroll_page(ui, "ship_releases_empty", |ui| {
+            crate::devops::pages::layout::page(ui, "ship_releases_empty", |ui| {
                 if kit::empty_state(
                     ui,
                     Icon::Tag,
@@ -135,7 +134,7 @@ pub fn show(
             });
             return;
         }
-        kit::scroll_page(ui, "ship_releases_state", |ui| {
+        crate::devops::pages::layout::page(ui, "ship_releases_state", |ui| {
             sui::loaded(
                 ui,
                 &st.releases,
@@ -189,12 +188,10 @@ pub fn show(
         selected.map(|s| s.to_string()).unwrap_or_default()
     };
     let mut filter = std::mem::take(&mut repo.devops.ship.filter);
-    let offset = repo.devops.ship.scroll_to.take();
-    crate::devops::pages::layout::split_keyed_at(
+    crate::devops::pages::layout::split_keyed(
         ui,
         "ship_releases",
         &key,
-        offset,
         actions,
         |ui, actions| {
             kit::list_header(ui, "Releases", Some(total), |_| {});
@@ -248,6 +245,8 @@ pub fn show(
                     } else {
                         ""
                     };
+                    let fitted =
+                        crate::devops::pages::layout::fit_badges(ui, rect.width(), &r.badges);
                     let row = Row::new(&r.title)
                         .leading(Leading::Icon(
                             Icon::Tag,
@@ -255,7 +254,7 @@ pub fn show(
                         ))
                         .subtitle(&r.subtitle)
                         .meta(meta)
-                        .badges(&r.badges)
+                        .badges(&fitted)
                         .dimmed(r.dimmed);
                     kit::paint_row(ui, rect, &row, Some(r.id) == selected);
                     if resp.clicked() {
@@ -530,19 +529,10 @@ fn detail(
                 ]
             })
             .collect();
-        ins::grid(ui, "ship_assets", &cols, &rows, true, |i, resp| {
-            let a = &r.assets[i];
-            if resp.clicked() {
-                actions.push(
-                    Act::Download {
-                        tag: r.tag_name.clone(),
-                        asset: a.name.clone(),
-                    }
-                    .into(),
-                );
-            }
-            resp.context_menu(|ui| {
-                if ui.button("Download to a folder…").clicked() {
+        crate::devops::pages::layout::wide(ui, "ship_assets", 680.0, |ui| {
+            ins::grid(ui, "ship_assets", &cols, &rows, true, |i, resp| {
+                let a = &r.assets[i];
+                if resp.clicked() {
                     actions.push(
                         Act::Download {
                             tag: r.tag_name.clone(),
@@ -550,18 +540,29 @@ fn detail(
                         }
                         .into(),
                     );
-                    ui.close();
                 }
-                if ui.button("Copy download URL").clicked() {
-                    actions.push(Action::Copy(a.browser_download_url.clone()));
-                    ui.close();
-                }
-                if let Some(d) = &a.digest
-                    && ui.button("Copy digest").clicked()
-                {
-                    actions.push(Action::Copy(d.clone()));
-                    ui.close();
-                }
+                resp.context_menu(|ui| {
+                    if ui.button("Download to a folder…").clicked() {
+                        actions.push(
+                            Act::Download {
+                                tag: r.tag_name.clone(),
+                                asset: a.name.clone(),
+                            }
+                            .into(),
+                        );
+                        ui.close();
+                    }
+                    if ui.button("Copy download URL").clicked() {
+                        actions.push(Action::Copy(a.browser_download_url.clone()));
+                        ui.close();
+                    }
+                    if let Some(d) = &a.digest
+                        && ui.button("Copy digest").clicked()
+                    {
+                        actions.push(Action::Copy(d.clone()));
+                        ui.close();
+                    }
+                });
             });
         });
         kit::secondary(

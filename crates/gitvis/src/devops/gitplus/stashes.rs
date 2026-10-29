@@ -654,7 +654,11 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                         .leading(kit::Leading::Icon(Icon::Stash, p.text_3))
                         .subtitle(&sub)
                         .meta(&meta)
-                        .badges(&b),
+                        .badges(&crate::devops::pages::layout::fit_badges(
+                            ui,
+                            rect.width(),
+                            &b,
+                        )),
                     !form_open && selected.as_deref() == Some(e.sha.as_str()),
                 );
                 if resp.clicked() {
@@ -688,7 +692,7 @@ fn overview(ui: &mut Ui, list: &[StashEntry], now: i64) {
         .sum();
     let oldest = list.iter().map(|e| e.time).min().unwrap_or(now);
     let branches: BTreeSet<&str> = list.iter().filter_map(|e| e.branch.as_deref()).collect();
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             Stat::new("Stashes", format::count(list.len())),
@@ -700,11 +704,20 @@ fn overview(ui: &mut Ui, list: &[StashEntry], now: i64) {
     );
     kit::secondary(ui, "Select a stash to see its changes, file by file.");
     kit::section(ui, "Apply, pop or branch", None);
-    kit::callout(
+    crate::devops::pages::explain::terms(
         ui,
-        Tone::Neutral,
-        "Which one to use",
-        "Apply puts the changes back and keeps the stash, so you can apply it elsewhere too. Pop applies and drops it. Branch creates a branch at the commit the stash was made on and applies it there: the safe choice when the code has moved on and applying would conflict.",
+        90.0,
+        &[
+            (
+                "Apply",
+                "Puts the changes back and keeps the stash, so you can apply it elsewhere too.",
+            ),
+            ("Pop", "Applies and drops it."),
+            (
+                "Branch",
+                "Creates a branch at the commit the stash was made on and applies it there.\nThe safe choice when the code has moved on and applying would conflict.",
+            ),
+        ],
     );
     if now - oldest > 30 * 86_400 {
         kit::callout(
@@ -817,12 +830,13 @@ fn detail(
         }
     });
     kit::section(ui, "Branch from it", None);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
+        let iw = crate::devops::pages::layout::input_width(ui, 260.0);
         form::input(
             ui,
             ("gp_stash_branch", e.sha.as_str()),
             &mut s.branch_name,
-            InputOpts::new("new-branch-name").width(260.0).mono(),
+            InputOpts::new("new-branch-name").width(iw).mono(),
         );
         if form::button(
             ui,

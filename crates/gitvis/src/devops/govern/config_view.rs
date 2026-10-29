@@ -134,13 +134,13 @@ pub fn environments(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>
     );
     if let Some(e) = &list.error {
         let e = e.clone();
-        kit::scroll_page(ui, "gov_env_err", |ui| {
+        crate::devops::pages::layout::page(ui, "gov_env_err", |ui| {
             widgets::denied(ui, gh.as_ref(), acc, Feature::Environments, &e, actions);
         });
         return;
     }
     let Some(all) = list.ok() else {
-        kit::scroll_page(ui, "gov_env_wait", |ui| {
+        crate::devops::pages::layout::page(ui, "gov_env_wait", |ui| {
             widgets::loading(ui, "Reading environments…");
         });
         return;
@@ -429,13 +429,14 @@ fn env_detail(
     }
     if is_admin {
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+            let iw = crate::devops::pages::layout::input_width(ui, 260.0);
             form::input(
                 ui,
                 ("gov_policy_new", &e.name),
                 policy_buf,
-                form::InputOpts::new("release/* or v*").mono().width(260.0),
+                form::InputOpts::new("release/* or v*").mono().width(iw),
             );
             if form::radio(ui, !*policy_tag, "Branch") {
                 *policy_tag = false;
@@ -690,7 +691,7 @@ pub fn secrets(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
         .as_ref()
         .map(|(o, r)| format!("{o}/{r}"))
         .unwrap_or_default();
-    kit::scroll_page(ui, "gov_secrets", |ui| {
+    crate::devops::pages::layout::page(ui, "gov_secrets", |ui| {
         scope_chips(ui, &scopes, &scope, true, actions);
         if let Some(f) = secret_form {
             secret_form_card(ui, f, &full, actions);
@@ -1005,7 +1006,7 @@ pub fn variables(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
             }
         },
     );
-    kit::scroll_page(ui, "gov_vars", |ui| {
+    crate::devops::pages::layout::page(ui, "gov_vars", |ui| {
         scope_chips(ui, &scopes, &scope, false, actions);
         if let Some(f) = variable_form {
             variable_form_card(ui, f, actions);

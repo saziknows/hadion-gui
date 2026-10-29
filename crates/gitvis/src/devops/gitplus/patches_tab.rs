@@ -605,7 +605,7 @@ fn create(ui: &mut Ui, p: &mut Patches, branch: &str, busy: bool, actions: &mut 
     form::card(ui, Tone::Neutral, |ui| {
         kit::secondary(
             ui,
-            "git format-patch writes one mail-formatted file per commit, with its author, date and message: send it, attach it to an issue, or apply it elsewhere with git am.",
+            "git format-patch writes one mail-formatted file per commit, with its author, date and message.\nSend it, attach it to an issue, or apply it elsewhere with git am.",
         );
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -625,11 +625,12 @@ fn create(ui: &mut Ui, p: &mut Patches, branch: &str, busy: bool, actions: &mut 
                     "A..B is the commits in B that are not in A; one revision (v1.0) means its commits up to HEAD.",
                 ),
                 |ui| {
+                    let iw = crate::devops::pages::layout::input_width(ui, 320.0);
                     form::input(
                         ui,
                         "gp_patch_range",
                         &mut p.range,
-                        InputOpts::new("main..feature").mono().width(320.0),
+                        InputOpts::new("main..feature").mono().width(iw),
                     )
                 },
             );
@@ -777,9 +778,9 @@ fn apply_section(
         }
     });
     if p.files.is_empty() {
-        kit::muted(
+        kit::secondary(
             ui,
-            "Choose .patch, .diff or .mbox files: gitvis checks each one against this repository before anything is applied.",
+            "Choose .patch, .diff or .mbox files.\ngitvis checks each one against this repository before anything is applied.",
         );
         return;
     }

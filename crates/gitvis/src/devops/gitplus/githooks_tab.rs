@@ -20,6 +20,7 @@ use gitvis_core::devops::workbench::shell::sh_path;
 use super::{Act, Msg, ui as gui};
 use crate::devops::console::{Console, ConsoleRun};
 use crate::devops::ctx::Ctx;
+use crate::devops::pages::explain;
 use crate::format;
 use crate::state::{Action, RepoState, ToastKind};
 use crate::theme::{pal, size};
@@ -946,7 +947,9 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
     let selected = h.selected.clone();
     gui::list_pane(ui, "gp_hooks_list", 380.0, |ui| {
         kit::list_header(ui, "Hooks", Some(l.files.len()), |ui| {
-            if IconButton::text("Overview").compact().show(ui).clicked() {
+            // The same "back to the overview" link as the other list panes,
+            // shown while a hook is selected.
+            if selected.is_some() && kit::link(ui, "Overview").clicked() {
                 actions.push(Act::SelectHook(None).into());
             }
         });
@@ -996,7 +999,11 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
                         .leading(kit::Leading::Dot(dot))
                         .subtitle(&sub)
                         .meta(&format::bytes(f.size as usize))
-                        .badges(&b)
+                        .badges(&crate::devops::pages::layout::fit_badges(
+                            ui,
+                            rect.width(),
+                            &b,
+                        ))
                         .mono()
                         .dimmed(f.sample),
                     selected.as_deref() == Some(f.file.as_str()),
@@ -1123,7 +1130,7 @@ fn overview(
     kit::title(ui, "Hooks");
     let enabled = l.files.iter().filter(|f| f.enabled).count();
     let samples = l.files.iter().filter(|f| f.sample).count();
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             Stat::new("Enabled hooks", format::count(enabled)),
@@ -1180,8 +1187,26 @@ fn secret_check(
         |ui| {
             kit::body(
                 ui,
-                "Install the Exposure page's secret scan as the pre-commit hook: before each commit, the added lines of the staged changes are checked, and a high or critical secret (API keys, tokens, private keys, passwords) stops the commit. Findings are printed redacted with file:line and rule; git commit --no-verify skips the check once.",
+                "The Exposure page's secret scan as the pre-commit hook: a commit with a secret in it does not go through.",
             );
+            explain::details(ui, "gp_secret_hook_how", "How it works", false, |ui| {
+                explain::terms(
+                    ui,
+                    150.0,
+                    &[
+                        (
+                            "Checks",
+                            "The added lines of the staged changes, before each commit.",
+                        ),
+                        (
+                            "Stops the commit",
+                            "On a high or critical secret: API keys, tokens, private keys, passwords.",
+                        ),
+                        ("Prints", "Each finding redacted, with file:line and rule."),
+                        ("Skip once", "git commit --no-verify"),
+                    ],
+                );
+            });
             ui.add_space(4.0);
             match installed {
                 Some(f) => {
@@ -1261,7 +1286,7 @@ fn secret_check(
                 None => {
                     let existing = l.files.iter().any(|f| f.file == "pre-commit");
                     if existing {
-                        kit::muted(
+                        kit::secondary(
                             ui,
                             &format!(
                                 "A pre-commit hook exists: it is kept as {} and runs before the check.",
@@ -1294,9 +1319,10 @@ fn precommit_card(
     form::card(ui, Tone::Neutral, |ui| {
         match &l.precommit {
             None => {
+                kit::secondary(ui, "No .pre-commit-config.yaml in this repository.");
                 kit::secondary(
                     ui,
-                    "No .pre-commit-config.yaml in this repository. The pre-commit framework runs linters and formatters from many languages as git hooks; add the file to use it.",
+                    "The pre-commit framework runs linters and formatters from many languages as git hooks; add the file to use it.",
                 );
             }
             Some((path, Err(e))) => kit::callout(
@@ -1483,7 +1509,7 @@ fn semgrep_card(ui: &mut Ui, h: &mut Hooks, console: &Console, actions: &mut Vec
                     tiles.push(Stat::new(sev.as_str(), format::count(*n)));
                 }
                 tiles.push(Stat::new("Files scanned", format::count(s.scanned)));
-                kit::stats(ui, &tiles);
+                crate::views::insights::stats(ui, &tiles);
                 if !s.top_rules.is_empty() {
                     kit::subtitle(ui, "Top rules");
                     let items: Vec<(String, u32)> = s
@@ -1553,6 +1579,6 @@ fn new_hook(ui: &mut Ui, h: &mut Hooks, l: &Listing, busy: bool, actions: &mut V
         }
     });
     if let Some(d) = core::describe(&h.new_hook) {
-        kit::muted(ui, &format!("Runs on: {d}."));
+        kit::secondary(ui, &format!("Runs on: {d}."));
     }
 }

@@ -16,6 +16,7 @@ use gitvis_core::{Oid, Pending};
 
 use super::{Act, Msg, ui as wui};
 use crate::devops::ctx::Ctx;
+use crate::devops::pages::{explain, layout};
 use crate::format;
 use crate::state::{Action, RepoState, Settings};
 use crate::theme::{Palette, pal, radius, semibold, size};
@@ -372,7 +373,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                     ui,
                     Icon::Edit,
                     "Choose where the rebase starts",
-                    "Type a branch, tag or commit as the base, or pick a suggestion. The commits after it, up to HEAD, become the plan. In the history graph, right-click a commit and choose Interactive rebase from here.",
+                    "Type a branch, tag or commit as the base, or pick a suggestion.\nThe commits after it, up to HEAD, become the plan.\nIn the history graph: right-click a commit, Interactive rebase from here.",
                     None,
                 );
             }
@@ -390,21 +391,18 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
 
 fn base_bar(ui: &mut Ui, r: &mut super::rebase::Rebase, actions: &mut Vec<Action>) {
     let p = *pal(ui);
-    ui.horizontal(|ui| {
+    // The label is centred on the input (form::row), and the input gives
+    // way in a narrow window instead of pushing the button off the page.
+    let w = (ui.available_width() - 44.0 - 150.0).clamp(160.0, 320.0);
+    form::row(ui, 36.0, "Base", |ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
-        ui.label(
-            RichText::new("Base")
-                .size(size::SMALL)
-                .family(crate::theme::medium())
-                .color(p.text_2),
-        );
         let resp = form::input(
             ui,
             "wb_rebase_base",
             &mut r.base_input,
             InputOpts::new("Branch, tag or commit, e.g. origin/main or HEAD~5")
                 .mono()
-                .width(320.0),
+                .width(w),
         );
         let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         if (form::primary(
@@ -506,7 +504,7 @@ fn editor(
             Tone::Warning,
             "Already pushed: you will need to force-push",
             &format!(
-                "{} of the {} rewritten commits are on {}. After the rebase the branch and its remote disagree; push with --force-with-lease, and tell anyone who has the old commits.",
+                "{} of the {} rewritten commits are on {}.\nAfter the rebase the branch and its remote disagree: push with --force-with-lease, and tell anyone who has the old commits.",
                 pushed_rewritten,
                 rewritten.len(),
                 if l.remote_branches.is_empty() {
@@ -523,7 +521,7 @@ fn editor(
             Tone::Neutral,
             "Merge commits are flattened",
             &format!(
-                "{} merge commit{} in the range {} not in the plan: like git rebase without --rebase-merges, the rebase replays the merged commits one by one and the merges disappear.",
+                "{} merge commit{} in the range {} not in the plan.\nLike git rebase without --rebase-merges, the rebase replays the merged commits one by one and the merges disappear.",
                 l.merges_skipped,
                 if l.merges_skipped == 1 { "" } else { "s" },
                 if l.merges_skipped == 1 { "is" } else { "are" }
@@ -535,7 +533,7 @@ fn editor(
             ui,
             Tone::Neutral,
             "The base is not an ancestor of HEAD",
-            "The commits of HEAD that the base does not have are replayed on top of it: this also moves the branch onto the base.",
+            "The commits of HEAD that the base does not have are replayed on top of it.\nThis also moves the branch onto the base.",
         );
     }
     if dirty > conflicts && conflicts == 0 {
@@ -561,8 +559,23 @@ fn editor(
     });
     kit::secondary(
         ui,
-        "Click a row, then press p r e s f d to pick, reword, edit, squash, fix up or drop; ↑ ↓ move the focus, Alt+↑ ↓ move the commit. Drag a row by its handle to reorder it.",
+        "Pick a step for each commit; drag a row by its handle to reorder it.",
     );
+    explain::details(ui, "wb_rebase_keys", "Keyboard", false, |ui| {
+        explain::terms(
+            ui,
+            110.0,
+            &[
+                ("Click a row", "Focuses it for the keys below."),
+                (
+                    "p r e s f d",
+                    "Pick, reword, edit, squash, fix up or drop the focused commit.",
+                ),
+                ("↑ ↓", "Move the focus."),
+                ("Alt+↑ ↓", "Move the commit."),
+            ],
+        );
+    });
     plan_rows(ui, r, now, in_graph, actions);
 
     if r.plan.is_noop() && errors.len() == 1 {
@@ -690,6 +703,43 @@ fn plan_rows(
             })
             .show(ui, |ui| {
                 ui.push_id(id, |ui| {
+                    // One line on a wide pane. On a narrow one the subject
+                    // and the details go under the steps: side by side they
+                    // were drawn over each other.
+                    let wide = ui.available_width() >= 900.0;
+                    let meta = format!(
+                        "{}  ·  {}  ·  {} file{}  +{} −{}",
+                        row.commit.author,
+                        format::relative(row.commit.time, now),
+                        row.commit.files,
+                        if row.commit.files == 1 { "" } else { "s" },
+                        row.commit.added,
+                        row.commit.deleted
+                    );
+                    let subject = {
+                        let s = if row.step == Step::Reword {
+                            row.message.lines().next().unwrap_or("").to_owned()
+                        } else {
+                            row.commit.subject.clone()
+                        };
+                        let t = RichText::new(s).size(size::BODY);
+                        match row.step {
+                            Step::Drop => t.color(p.text_3).strikethrough(),
+                            Step::Fixup => t.color(p.text_2),
+                            _ => t.color(p.text),
+                        }
+                    };
+                    // A click on the subject focuses the row for the
+                    // keyboard.
+                    let subject_label = |ui: &mut Ui, text: RichText| -> bool {
+                        ui.allocate_ui_with_layout(
+                            vec2(ui.available_width(), 24.0),
+                            Layout::left_to_right(Align::Center),
+                            |ui| ui.add(Label::new(text).truncate().sense(Sense::click())),
+                        )
+                        .inner
+                        .clicked()
+                    };
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
                         let g = grip(ui, p.text_3);
@@ -711,7 +761,7 @@ fn plan_rows(
                         if folded {
                             ui.label(RichText::new("↳").size(size::BODY).color(p.purple));
                         }
-                        if let Some(s) = kit::segmented(ui, &steps, row.step) {
+                        if let Some(s) = layout::segmented_on_card(ui, &steps, row.step) {
                             actions.push(Act::RebaseStep(i, s).into());
                         }
                         let sha_color = if in_graph(&row.commit.sha) {
@@ -751,53 +801,52 @@ fn plan_rows(
                             {
                                 actions.push(Act::RebaseMove(i, i - 1).into());
                             }
+                            if !wide {
+                                return;
+                            }
                             if row.commit.pushed {
                                 kit::badge(ui, "Pushed", Tone::Warning);
                             }
-                            ui.label(
-                                RichText::new(format!(
-                                    "{}  ·  {}  ·  {} file{}  +{} −{}",
-                                    row.commit.author,
-                                    format::relative(row.commit.time, now),
-                                    row.commit.files,
-                                    if row.commit.files == 1 { "" } else { "s" },
-                                    row.commit.added,
-                                    row.commit.deleted
-                                ))
-                                .size(size::SMALL)
-                                .color(p.text_3),
-                            );
+                            ui.label(RichText::new(&meta).size(size::SMALL).color(p.text_3));
                             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                                let subject = if row.step == Step::Reword {
-                                    row.message.lines().next().unwrap_or("").to_owned()
-                                } else {
-                                    row.commit.subject.clone()
-                                };
-                                let mut text = RichText::new(subject).size(size::BODY);
-                                text = match row.step {
-                                    Step::Drop => text.color(p.text_3).strikethrough(),
-                                    Step::Fixup => text.color(p.text_2),
-                                    _ => text.color(p.text),
-                                };
-                                // A click on the subject focuses the row
-                                // for the keyboard.
-                                let resp = ui
-                                    .allocate_ui_with_layout(
-                                        vec2(ui.available_width(), 24.0),
-                                        Layout::left_to_right(Align::Center),
-                                        |ui| {
-                                            ui.add(
-                                                Label::new(text).truncate().sense(Sense::click()),
-                                            )
-                                        },
-                                    )
-                                    .inner;
-                                if resp.clicked() {
+                                if subject_label(ui, subject.clone()) {
                                     actions.push(Act::RebaseFocus(Some(i)).into());
                                 }
                             });
                         });
                     });
+                    if !wide {
+                        ui.horizontal(|ui| {
+                            ui.add_space(44.0);
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = 0.0;
+                                ui.horizontal(|ui| {
+                                    if row.commit.pushed {
+                                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                            kit::badge(ui, "Pushed", Tone::Warning);
+                                            ui.with_layout(
+                                                Layout::left_to_right(Align::Center),
+                                                |ui| {
+                                                    if subject_label(ui, subject.clone()) {
+                                                        actions
+                                                            .push(Act::RebaseFocus(Some(i)).into());
+                                                    }
+                                                },
+                                            );
+                                        });
+                                    } else if subject_label(ui, subject.clone()) {
+                                        actions.push(Act::RebaseFocus(Some(i)).into());
+                                    }
+                                });
+                                ui.add(
+                                    Label::new(
+                                        RichText::new(&meta).size(size::SMALL).color(p.text_3),
+                                    )
+                                    .truncate(),
+                                );
+                            });
+                        });
+                    }
                     if row.step == Step::Reword {
                         ui.add_space(2.0);
                         let msg = &mut r.plan.rows[i].message;
@@ -816,7 +865,7 @@ fn plan_rows(
                     if row.step == Step::Edit {
                         ui.horizontal(|ui| {
                             ui.add_space(44.0);
-                            kit::muted(
+                            kit::secondary(
                                 ui,
                                 "The rebase stops after this commit: amend it (stage changes and commit with Amend), then Continue from the bar at the top.",
                             );

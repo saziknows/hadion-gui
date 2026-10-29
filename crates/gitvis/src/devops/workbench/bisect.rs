@@ -17,6 +17,7 @@ use gitvis_core::devops::workbench::{git_line, git_raw, output_text};
 use super::{Act, Msg, ui as wui};
 use crate::devops::console::{Console, ConsoleRun};
 use crate::devops::ctx::Ctx;
+use crate::devops::pages::explain;
 use crate::format;
 use crate::state::{Action, RepoState, Selection};
 use crate::theme::{pal, size};
@@ -601,7 +602,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
                     ui.add(egui::Spinner::new().size(14.0));
                 }
             });
-            kit::muted(
+            kit::secondary(
                 ui,
                 &format!(
                     "Runs git bisect {} / {} / skip on HEAD ({}), then checks out the next commit.",
@@ -631,11 +632,21 @@ fn start_form(
     kit::title(ui, "Find the commit that broke it");
     kit::body(
         ui,
-        "Give a bad commit (one that has the problem, usually HEAD) and a good one (an older commit without it). git checks out the commit halfway between them; you say good or bad, and it halves the range again until one commit is left. A test command can answer for you.",
+        "A binary search through history for the first commit with the problem.",
     );
+    explain::steps(
+        ui,
+        &[
+            "Give a bad commit (one that has the problem, usually HEAD) and a good one (an older commit without it).",
+            "git checks out the commit halfway between them; you say good or bad.",
+            "It halves the range again until one commit is left.",
+        ],
+    );
+    kit::secondary(ui, "A test command can answer for you.");
     ui.add_space(6.0);
     form::card(ui, Tone::Neutral, |ui| {
-        let w = 360.0;
+        // Room for the "Use <commit>" button beside the input.
+        let w = (ui.available_width() - 150.0).clamp(160.0, 360.0);
         form::field(
             ui,
             "Bad commit",
@@ -753,8 +764,20 @@ fn run_section(
     kit::section(ui, "Automatic run", None);
     kit::secondary(
         ui,
-        "git bisect run checks out each candidate and runs the command: exit 0 good, 125 skip, 1–127 bad, 128 or more stops the run.",
+        "git bisect run checks out each candidate and runs the command; its exit code decides.",
     );
+    explain::details(ui, "wb_bisect_codes", "Exit codes", false, |ui| {
+        explain::terms(
+            ui,
+            110.0,
+            &[
+                ("0", "Good"),
+                ("125", "Skip (it cannot be tested)"),
+                ("1–127", "Bad"),
+                ("128 or more", "Stops the run"),
+            ],
+        );
+    });
     let running = b
         .run_id
         .and_then(|id| console.get(id))
@@ -825,26 +848,28 @@ fn log_table(
         })
         .collect();
     let shas: Vec<String> = info.log.entries.iter().map(|e| e.sha.clone()).collect();
-    crate::views::insights::grid(
-        ui,
-        "wb_bisect_log",
-        &[
-            Col::num("#"),
-            Col::text("Verdict"),
-            Col::text("Commit"),
-            Col::text("Subject"),
-        ],
-        &rows,
-        true,
-        |r, resp| {
-            if resp.clicked()
-                && graph_ids.contains(&shas[r])
-                && let Ok(oid) = Oid::from_str(&shas[r])
-            {
-                actions.push(Action::JumpTo(oid));
-            }
-        },
-    );
+    crate::devops::pages::layout::wide(ui, "wb_bisect_log", 520.0, |ui| {
+        crate::views::insights::grid(
+            ui,
+            "wb_bisect_log",
+            &[
+                Col::num("#"),
+                Col::text("Verdict"),
+                Col::text("Commit"),
+                Col::text("Subject"),
+            ],
+            &rows,
+            true,
+            |r, resp| {
+                if resp.clicked()
+                    && graph_ids.contains(&shas[r])
+                    && let Ok(oid) = Oid::from_str(&shas[r])
+                {
+                    actions.push(Action::JumpTo(oid));
+                }
+            },
+        );
+    });
     if let Some(start) = &info.log.start {
         ui.add_space(4.0);
         kit::muted(ui, &format!("Started with {start}"));

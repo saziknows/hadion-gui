@@ -127,7 +127,7 @@ pub fn show_ship(
     let tab = repo.devops.ship_tab;
     let order: Vec<ShipTab> = NAV.iter().flat_map(|(_, t)| t.iter().copied()).collect();
     let mut clicked: Option<ShipTab> = None;
-    kit::page_with_nav(
+    crate::devops::pages::layout::page_with_nav(
         ui,
         "ship_nav",
         |ui| {

@@ -966,8 +966,14 @@ fn scan_tf(cx: &mut Ctx, repo: &mut RepoState) {
     });
 }
 
+/// A root for sentences and titles: its directory, or "the repository
+/// root" (a bare "." reads as a stray full stop).
 fn root_display(root: &str) -> &str {
-    if root.is_empty() { "." } else { root }
+    if root.is_empty() {
+        "the repository root"
+    } else {
+        root
+    }
 }
 
 fn run_tf(cx: &mut Ctx, repo: &mut RepoState, root: String, cmd: Command) {
