@@ -6,6 +6,16 @@ All notable changes to Hadion are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-30
+
+The first release with downloads; 0.1.0 below lists what Hadion does.
+
+### Fixed
+
+- Release packaging: 0.1.0 was published without its zip, installer and checksums, because
+  GitHub's immutable releases refuse files added after publishing. Releases are now created as
+  drafts, filled, then published.
+
 ## [0.1.0] - 2026-10-29
 
 The first public release.
@@ -35,5 +45,6 @@ The first public release.
   mode, desktop notifications, repository groups, issue-tracker links, in-app updates and crash
   reports. Icons from the Lucide set; every page fits windows down to 900 × 560.
 
-[Unreleased]: https://github.com/saziknows/hadion-gui/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/saziknows/hadion-gui/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/saziknows/hadion-gui/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/saziknows/hadion-gui/releases/tag/v0.1.0
