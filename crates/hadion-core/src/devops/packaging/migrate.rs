@@ -6,11 +6,21 @@
 use std::io;
 use std::path::Path;
 
-/// Copy `old` to `new` when `new` does not exist and `old` is a folder.
-/// The copy is made beside `new` and renamed into place, so an interrupted
-/// copy is never mistaken for a finished one. Returns whether it copied.
+/// Copy `old` to `new` when `new` does not exist (or is an empty folder)
+/// and `old` is a folder. The copy is made beside `new` and renamed into
+/// place, so an interrupted copy is never mistaken for a finished one.
+/// Returns whether it copied.
 pub fn carry_over(old: &Path, new: &Path) -> io::Result<bool> {
-    if new.exists() || !old.is_dir() {
+    if !old.is_dir() {
+        return Ok(false);
+    }
+    // eframe creates its storage folder when it starts, scripted runs
+    // included, so an empty one holds nothing to keep. `remove_dir` refuses
+    // a folder that is no longer empty.
+    if std::fs::read_dir(new).is_ok_and(|mut d| d.next().is_none()) {
+        let _ = std::fs::remove_dir(new);
+    }
+    if new.exists() {
         return Ok(false);
     }
     let parent = new
@@ -87,6 +97,22 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(new.join("data").join("app.ron")).unwrap(),
             "(newer)"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn an_empty_new_folder_is_replaced() {
+        let d = temp("empty");
+        let old = d.join("gitvis");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("app.ron"), "(settings)").unwrap();
+        let new = d.join("hadion");
+        std::fs::create_dir_all(&new).unwrap();
+        assert!(carry_over(&old, &new).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(new.join("app.ron")).unwrap(),
+            "(settings)"
         );
         let _ = std::fs::remove_dir_all(&d);
     }
