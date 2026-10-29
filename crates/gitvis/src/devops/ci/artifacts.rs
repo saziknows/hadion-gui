@@ -218,6 +218,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
             );
         },
         |ui, actions| {
+            widgets::fit_detail(ui);
             let Some(l) = list else {
                 kit::title(ui, "Artifacts");
                 widgets::loaded(
@@ -259,7 +260,7 @@ fn overview(
     kit::title(ui, "Artifacts");
     kit::secondary(
         ui,
-        "Files uploaded by workflow runs with actions/upload-artifact. They count against the repository's Actions storage until they expire; delete large or stale ones, or download one to look at it.",
+        "Files workflow runs uploaded with actions/upload-artifact. They count against the repository's Actions storage until they expire.",
     );
     let size: u64 = items
         .iter()

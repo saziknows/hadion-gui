@@ -190,24 +190,21 @@ pub(super) fn body(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
                     bottom: 28,
                 })
                 .show(ui, |ui| {
-                    ui.set_max_width(kit::DETAIL_MAX + 240.0);
+                    ui.set_max_width(ui.available_width().min(kit::DETAIL_MAX + 240.0));
                     ui.spacing_mut().item_spacing.y = 8.0;
                     add(ui)
                 });
         });
 }
 
-/// `refreshing…` / `fetched 3m ago (12:03:11)` / rate limit.
-pub(super) fn fetched_line(state: &State, now: i64) -> String {
+/// `fetching…` / `fetched 3m ago`, then the rate limit: subtitle parts a
+/// page header may drop when its buttons need the room.
+pub(super) fn fetched_parts(state: &State, now: i64) -> Vec<String> {
     let mut parts = Vec::new();
     if state.loading {
         parts.push("fetching…".to_owned());
     } else if let Some(e) = state.fetched_epoch {
-        parts.push(format!(
-            "fetched {} ({})",
-            format::relative(e, now),
-            format::clock(e)
-        ));
+        parts.push(format!("fetched {}", format::relative(e, now)));
     } else {
         parts.push("not fetched yet".to_owned());
     }
@@ -218,18 +215,51 @@ pub(super) fn fetched_line(state: &State, now: i64) -> String {
             format::count(r.limit as usize)
         ));
     }
-    parts.join("  ·  ")
+    parts
 }
 
-/// Refresh button (or spinner) for a page header's right side.
-pub(super) fn refresh_button(ui: &mut Ui, state: &State, actions: &mut Vec<Action>) {
+/// A Home page header whose subtitle gives way to its buttons on a narrow
+/// window (`controls_w` is their width); what it drops is listed in the
+/// Refresh button's tooltip.
+pub(super) fn header_fit(
+    ui: &mut Ui,
+    title: &str,
+    parts: &[String],
+    controls_w: f32,
+    state: &State,
+    actions: &mut Vec<Action>,
+    extra: impl FnOnce(&mut Ui, &mut Vec<Action>),
+) {
+    let (subtitle, dropped) = crate::views::github::fit_subtitle(ui, title, parts, controls_w);
+    kit::page_header(ui, title, &subtitle, |ui| {
+        extra(ui, actions);
+        refresh_button(ui, state, &dropped, actions);
+    });
+}
+
+/// Refresh button (or spinner) for a page header's right side. `more`
+/// are subtitle parts the header had no room for.
+pub(super) fn refresh_button(
+    ui: &mut Ui,
+    state: &State,
+    more: &[String],
+    actions: &mut Vec<Action>,
+) {
+    let mut tip = "Fetch notifications and the four searches again (2 requests)".to_owned();
+    if let Some(e) = state.fetched_epoch {
+        tip.push_str(&format!("\nLast fetched at {}", format::clock(e)));
+    }
+    for m in more {
+        tip.push('\n');
+        tip.push_str(m);
+    }
     if state.loading {
         ui.add_space(6.0);
         ui.add(egui::Spinner::new().size(14.0));
         ui.add_space(6.0);
     } else if IconButton::new(Icon::Fetch, "Refresh")
         .show(ui)
-        .on_hover_text("Fetch notifications and the four searches again (2 requests)")
+        .on_hover_text(tip)
         .clicked()
     {
         actions.push(Act::Refresh.into());
@@ -261,7 +291,8 @@ fn overview(
     if let Some(l) = &state.login {
         sub.push(format!("GitHub: @{l}"));
     }
-    kit::page_header(ui, "Home", &sub.join("  ·  "), |ui| {
+    // "Fetch all", "Refresh" and their gaps.
+    header_fit(ui, "Home", &sub, 230.0, state, actions, |ui, actions| {
         let busy = state.fetching();
         if busy {
             ui.add_space(6.0);
@@ -275,7 +306,6 @@ fn overview(
         {
             actions.push(Act::FetchAll.into());
         }
-        refresh_button(ui, state, actions);
     });
     body(ui, "home_overview", |ui| {
         tiles(ui, state, repos, failed);
@@ -283,7 +313,7 @@ fn overview(
         kit::section(ui, "Open repositories", Some(repos.len()));
         kit::secondary(
             ui,
-            "Click a repository to open its history. CI, pull requests and failed runs come from the GitHub data each repository already loaded; nothing extra is fetched here.",
+            "Click a repository to open its history. Nothing is fetched for this page: it shows what each repository already loaded.",
         );
         ui.add_space(space::XS);
         cards(ui, state, repos, active, now, actions);
@@ -431,13 +461,16 @@ fn outcome_line(ui: &mut Ui, o: &gitvis_core::devops::home::fetch::Outcome) {
     });
 }
 
+/// Where each number on the overview comes from: folded away by default,
+/// one source per row.
 fn sources(ui: &mut Ui, state: &State, now: i64) {
-    kit::section(ui, "Where this comes from", None);
-    let mut lines = vec![
-        "Repositories: the snapshot each tab already loaded (libgit2 refs, git status), its GitHub runs and pull requests, its Exposure and Insights state.".to_owned(),
-        format!(
-            "Inbox: gh api notifications?all=false&per_page=50 and one GraphQL search ({}), {}.",
-            match state.search.as_ref().and_then(|s| s.rate.clone()) {
+    crate::views::github::details_section(
+        ui,
+        "home_sources",
+        "Where this comes from",
+        state.sources_open,
+        |ui| {
+            let search_cost = match state.search.as_ref().and_then(|s| s.rate.clone()) {
                 Some(r) => format!(
                     "cost {}, {} of {} points left",
                     r.cost,
@@ -445,20 +478,37 @@ fn sources(ui: &mut Ui, state: &State, now: i64) {
                     format::count(r.limit as usize)
                 ),
                 None => "cost 1".to_owned(),
-            },
-            super::view::fetched_line(state, now)
-        ),
-        format!(
-            "Failed runs: runs on your branches (you started them, or they ran on the head branch of your pull request) in the last {} hours.",
-            super::FAILED_WINDOW_SECS / 3600
-        ),
-    ];
-    if state.login.is_none() {
-        lines.push("Your GitHub login is not known yet, so \"mine\" counts stay at zero until the inbox is fetched.".into());
-    }
-    for l in lines {
-        kit::secondary(ui, &l);
-    }
+            };
+            kit::kv(ui, 120.0, |kv| {
+                kv.text(
+                    "Repositories",
+                    "What each open tab already loaded: branches and status, its GitHub runs and pull requests, its Exposure and Insights results.",
+                );
+                kv.text(
+                    "Notifications",
+                    kit::mono("gh api notifications?all=false&per_page=50"),
+                );
+                kv.text(
+                    "Searches",
+                    format!("One GraphQL search for all four lists ({search_cost})"),
+                );
+                kv.text("Last fetch", fetched_parts(state, now).join(", "));
+                kv.text(
+                    "Failed runs",
+                    format!(
+                        "Runs you started, or that ran on the head branch of one of your pull requests, in the last {} hours.",
+                        super::FAILED_WINDOW_SECS / 3600
+                    ),
+                );
+            });
+            if state.login.is_none() {
+                kit::secondary(
+                    ui,
+                    "Your GitHub login is not known yet, so the \"mine\" counts stay at zero until the inbox is fetched.",
+                );
+            }
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -503,6 +553,8 @@ enum RemoteLine {
         loading: bool,
         error: Option<String>,
         ci: Option<(Outcome, String)>,
+        /// HEAD is on no remote branch, so GitHub has no CI for it.
+        unpushed: bool,
         prs: Option<usize>,
         mine: usize,
         failed: usize,
@@ -533,8 +585,13 @@ fn summarize(r: &RepoState, login: &str, failed: &[FailedRun], i: usize, now: i6
         .filter(|p| *p != Pending::None)
         .map(|p| p.label());
     let remote = if let Some((o, n)) = &r.github_remote {
-        let ci = snap
-            .and_then(|s| s.head.target())
+        let head_id = snap.and_then(|s| s.head.target());
+        let unpushed = head_id.is_some_and(|h| {
+            gitvis_core::github::not_on_github(&h.to_string())
+                == Some(gitvis_core::github::NotOnGitHub::Unpushed)
+        });
+        let ci = head_id
+            .filter(|_| !unpushed)
             .and_then(|h| r.ci.get(&h))
             .map(|c| (c.outcome, c.summary.clone()));
         let mine_failed: Vec<&FailedRun> = failed.iter().filter(|f| f.repo == i).collect();
@@ -555,6 +612,7 @@ fn summarize(r: &RepoState, login: &str, failed: &[FailedRun], i: usize, now: i6
                         .collect()
                 }),
             ci,
+            unpushed,
             prs: r.github.as_ref().map(|g| g.prs.len()),
             mine: r
                 .github
@@ -908,6 +966,7 @@ fn card(ui: &Ui, rect: Rect, s: &Summary, active: bool, hovered: bool, now: i64)
             loading,
             error,
             ci,
+            unpushed,
             prs,
             mine,
             failed,
@@ -918,6 +977,8 @@ fn card(ui: &Ui, rect: Rect, s: &Summary, active: bool, hovered: bool, now: i64)
                 parts.push(("loading GitHub data…".into(), body.clone(), p.text_2));
             } else if let Some(e) = error {
                 parts.push((format!("GitHub: {e}"), body.clone(), p.danger));
+            } else if *unpushed {
+                parts.push(("HEAD is not on GitHub yet".into(), body.clone(), p.text_2));
             } else {
                 match ci {
                     Some((o, summary)) => {

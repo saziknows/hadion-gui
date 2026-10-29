@@ -18,7 +18,7 @@ mod workflows;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -303,6 +303,54 @@ pub enum CacheSel {
     Ref(String),
 }
 
+/// Progress reads of a watched job: soon after a step changes, then less
+/// often while one step keeps running (a 40-minute build step costs one
+/// request a minute).
+pub const POLL_MIN: Duration = Duration::from_secs(10);
+pub const POLL_MAX: Duration = Duration::from_secs(60);
+/// Below this many API requests left, watching pauses.
+pub const POLL_FLOOR: u32 = 100;
+/// Tries to download a finished job's log: GitHub publishes it a few
+/// seconds after the job ends and answers HTTP 404 until then.
+pub const LOG_TRIES: u32 = 6;
+pub const LOG_RETRY: Duration = Duration::from_secs(5);
+
+/// A running or queued job shown in the log viewer. Its progress is read
+/// again while the viewer shows it, and its log is downloaded once it
+/// finishes (GitHub publishes a job's log only then).
+#[derive(Clone, Debug)]
+pub struct JobWatch {
+    pub run: u64,
+    pub job: u64,
+    /// When the last progress read finished (or started, while in flight).
+    pub polled: Instant,
+    pub in_flight: bool,
+    /// The wait before the next read.
+    pub interval: Duration,
+    /// Status and step progress at the last read, to see whether it moved.
+    pub progress: String,
+    /// The last read failed.
+    pub error: Option<String>,
+}
+
+/// GitHub has no log for this job: it is running or queued (the log is
+/// published when it finishes), or it never ran. Asking would fail with
+/// HTTP 404, so the log viewer shows its progress or a note instead.
+pub fn no_log_yet(job: &Job) -> bool {
+    job.outcome().is_running() || job.never_ran()
+}
+
+/// What a progress read compares: the job's status and how far its steps got.
+pub fn progress_key(job: &Job) -> String {
+    format!(
+        "{}/{}/{}/{}",
+        job.status,
+        job.conclusion.as_deref().unwrap_or(""),
+        job.steps_done(),
+        job.current_step().map(|s| s.number).unwrap_or(0)
+    )
+}
+
 /// `act` and Docker on this machine.
 #[derive(Clone, Debug, Default)]
 pub struct Tools {
@@ -339,6 +387,8 @@ pub struct State {
     /// Runs with a change in flight, and what it is.
     pub busy_runs: HashMap<u64, String>,
     pub busy_jobs: HashSet<u64>,
+    /// The running job in the log viewer, if any.
+    pub watch: Option<JobWatch>,
     pub compare: Option<CompareState>,
     // Workflows tab.
     pub local: Load<LocalInfo>,
@@ -425,6 +475,25 @@ pub enum Act {
     LoadRunArtifacts {
         run: u64,
         force: bool,
+    },
+    /// Show a job in the log viewer without downloading its log: it has
+    /// none yet (running, queued) or never will (never started), and
+    /// asking GitHub would only fail with HTTP 404.
+    OpenJob {
+        run: u64,
+        job: u64,
+    },
+    /// Read the progress of a running job the log viewer shows (the view
+    /// asks while it is on screen).
+    PollJob {
+        run: u64,
+        job: u64,
+    },
+    /// Download the log of a watched job that has finished.
+    FetchLog {
+        run: u64,
+        job: u64,
+        attempt: u32,
     },
     /// The confirmed change.
     Send(Change),
@@ -544,6 +613,9 @@ pub enum ScriptCmd {
     AskRerunDebug,
     /// Re-run the N-th job of the selected run (stops at the confirmation).
     AskRerunJob(usize),
+    /// Show the N-th job of the selected run the way its Log button does
+    /// (a running job shows its progress; the log is not requested).
+    ShowJob(usize),
     /// Point the Run locally form at the N-th job.
     ActJob(usize),
     /// Scroll the workflow detail to a section.
@@ -573,6 +645,22 @@ pub enum Msg {
     RunArtifacts {
         run: u64,
         result: Result<Vec<Artifact>, String>,
+    },
+    /// A watched job's progress: the run's jobs (or only that job, for a
+    /// run with more than 100), and the run once the job has finished.
+    JobPolled {
+        run: u64,
+        job: u64,
+        single: bool,
+        jobs: Result<Vec<Job>, String>,
+        run_data: Option<Result<Box<WorkflowRun>, String>>,
+    },
+    /// The log of a watched job that finished.
+    JobLog {
+        run: u64,
+        job: u64,
+        attempt: u32,
+        result: Result<Box<gitvis_core::joblog::JobLog>, String>,
     },
     GreenFound {
         bad: u64,
@@ -669,6 +757,42 @@ impl Msg {
                     plural(a.len(), "artifact", "artifacts"),
                     plural_bytes(a.iter().map(|x| x.size_in_bytes as usize).sum())
                 )),
+                Err(e) => Err(e.clone()),
+            },
+            Msg::JobPolled { job, jobs, .. } => match jobs {
+                Ok(list) => Ok(match list.iter().find(|j| j.id == *job) {
+                    Some(j) if j.outcome().is_running() => match j.current_step() {
+                        Some(s) => format!(
+                            "{}: step {} of {} ({})",
+                            j.outcome().label(),
+                            s.number,
+                            j.steps.len(),
+                            s.name
+                        ),
+                        None => j.outcome().label().to_owned(),
+                    },
+                    Some(j) => format!("finished: {}", j.outcome().label()),
+                    None => format!("job {job} is no longer listed"),
+                }),
+                Err(e) => Err(e.clone()),
+            },
+            Msg::JobLog {
+                attempt, result, ..
+            } => match result {
+                Ok(log) => Ok(format!(
+                    "{} · {} errors · {} warnings · {}",
+                    plural(log.lines.len(), "line", "lines"),
+                    log.errors.len(),
+                    log.warnings.len(),
+                    plural_bytes(log.bytes)
+                )),
+                // GitHub publishes the log a few seconds after the job ends.
+                Err(e) if gitvis_core::github::is_not_found(e) && attempt + 1 < LOG_TRIES => {
+                    Ok(format!(
+                        "not published yet, trying again in {} s",
+                        LOG_RETRY.as_secs()
+                    ))
+                }
                 Err(e) => Err(e.clone()),
             },
             Msg::GreenFound { result, .. } => match result {
@@ -869,7 +993,9 @@ pub fn on_page_shown(cx: &mut Ctx, repo: &mut RepoState) {
 /// `cache N`, `cache-refs`,
 /// `lint-file N`, `cancel-picked`, `rerun-picked`, `delete-run`,
 /// `rerun-debug`, `rerun-job N`, `ask-dispatch`, `ask-delete`, `ask-delete-closed` (these
-/// stop at their confirmation), `check-prs` and `download-artifact N DIR`.
+/// stop at their confirmation), `check-prs`, `download-artifact N DIR` and
+/// `show-job N` (the N-th job's Log button: a running job shows its
+/// progress instead of requesting a log GitHub does not have yet).
 pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
     use crate::state::Page;
     let page = Action::ShowPage(Page::GitHub);
@@ -898,6 +1024,7 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
         "delete-run" => vec![page, s(ScriptCmd::AskDeleteRun)],
         "rerun-debug" => vec![page, s(ScriptCmd::AskRerunDebug)],
         "rerun-job" => vec![page, s(ScriptCmd::AskRerunJob(n()?))],
+        "show-job" => vec![page, tab(Tab::Runs), s(ScriptCmd::ShowJob(n()?))],
         "ask-dispatch" => vec![page, s(ScriptCmd::AskDispatch)],
         "ask-delete" => vec![page, s(ScriptCmd::AskDelete)],
         "check-prs" => vec![page, tab(Tab::Caches), Act::CheckPrStates.into()],

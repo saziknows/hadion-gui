@@ -44,7 +44,7 @@ fn gh_missing(ui: &mut Ui, actions: &mut Vec<Action>) {
     use gitvis_core::devops::tools::Tool;
     detail_area(ui, |ui| {
         Frame::NONE.inner_margin(Margin::same(28)).show(ui, |ui| {
-            ui.set_max_width(kit::PROSE);
+            ui.set_max_width(ui.available_width().min(kit::PROSE));
             kit::title(ui, &format!("{} ({}) is not installed", Tool::Gh.name(), Tool::Gh.program()));
             ui.add_space(4.0);
             kit::body(
@@ -111,7 +111,11 @@ fn header(
     let mode = st.mode;
     let issues_off = st.meta().has_issues == Some(false);
     let gh_ok = st.gh_ok != Some(false);
-    kit::page_header(ui, "Review", &sub.join("  ·  "), |ui| {
+    let options = [(Mode::Prs, "Pull requests"), (Mode::Issues, "Issues")];
+    // The "New …" button, two icon buttons, the switch and their gaps.
+    let controls_w = segmented_width(ui, &options) + 190.0 + 2.0 * 30.0 + 22.0;
+    let (subtitle, dropped) = crate::views::github::fit_subtitle(ui, "Review", &sub, controls_w);
+    kit::page_header(ui, "Review", &subtitle, |ui| {
         let (label, act) = match mode {
             Mode::Prs => ("New pull request", Act::NewPr),
             Mode::Issues => ("New issue", Act::NewIssue),
@@ -131,9 +135,17 @@ fn header(
             ui.add_space(6.0);
         } else if IconButton::icon(Icon::Fetch)
             .show(ui)
-            .on_hover_text(match mode {
-                Mode::Prs => "Refresh the list and the selected pull request",
-                Mode::Issues => "Refresh the list and the selected issue",
+            .on_hover_text({
+                let what = match mode {
+                    Mode::Prs => "Refresh the list and the selected pull request",
+                    Mode::Issues => "Refresh the list and the selected issue",
+                };
+                // What the subtitle had no room for.
+                if dropped.is_empty() {
+                    what.to_owned()
+                } else {
+                    format!("{what}\n\n{}", dropped.join("\n"))
+                }
             })
             .clicked()
         {
@@ -156,7 +168,6 @@ fn header(
             )));
         }
         ui.add_space(6.0);
-        let options = [(Mode::Prs, "Pull requests"), (Mode::Issues, "Issues")];
         let w = segmented_width(ui, &options);
         ui.allocate_ui_with_layout(vec2(w, 28.0), Layout::left_to_right(Align::Center), |ui| {
             if let Some(m) = kit::segmented(ui, &options, mode) {
@@ -182,13 +193,15 @@ pub fn segmented_width<T>(ui: &Ui, options: &[(T, &str)]) -> f32 {
     labels + 2.0 * options.len().saturating_sub(1) as f32 + 4.0
 }
 
-/// The list pane on the left.
+/// The list pane on the left. It never takes more than 45% of the page,
+/// so the detail (and its tabs) keep room on a narrow window.
 pub fn list_pane(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
     let p = *pal(ui);
+    let w = ui.available_width();
     egui::Panel::left(id)
         .resizable(true)
-        .default_size(400.0)
-        .size_range(300.0..=720.0)
+        .default_size((w * 0.36).clamp(300.0, 400.0))
+        .size_range(300.0..=(w * 0.45).clamp(300.0, 720.0))
         .frame(Frame::NONE.fill(p.panel).inner_margin(Margin {
             left: 8,
             right: 8,
@@ -237,7 +250,7 @@ pub fn scroll_pane(
                 bottom: 28,
             })
             .show(ui, |ui| {
-                ui.set_max_width(kit::DETAIL_MAX);
+                ui.set_max_width(ui.available_width().min(kit::DETAIL_MAX));
                 ui.spacing_mut().item_spacing.y = 8.0;
                 add(ui)
             });
@@ -289,9 +302,10 @@ fn prs_page(
     detail_area(ui, |ui| {
         let st = &repo.devops.review;
         if st.form_open && st.new_pr.is_some() {
-            // AI and other areas' tools for the new pull request.
+            // AI and other areas' tools for the new pull request (kept from
+            // widening the form under them on a narrow window).
             if let Some(h) = crate::devops::hooks::HookCx::of(repo, settings) {
-                crate::devops::hooks::new_pr_tools(ui, &h, actions);
+                widgets::contained(ui, |ui| crate::devops::hooks::new_pr_tools(ui, &h, actions));
             }
             forms::new_pr(ui, repo, now, actions);
             return;
@@ -552,7 +566,7 @@ fn pr_detail(
             bottom: 8,
         }))
         .show(ui, |ui| {
-            ui.set_max_width(kit::DETAIL_MAX + 40.0);
+            ui.set_max_width(ui.available_width().min(kit::DETAIL_MAX + 40.0));
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(18.0, 22.0), egui::Sense::hover());
                 icons::paint(
@@ -690,7 +704,9 @@ fn pr_detail(
                 scroll_pane(ui, ("rv_conv", n), |ui| {
                     // AI summary, issue links and other areas' blocks.
                     if let Some(h) = crate::devops::hooks::HookCx::of(repo, settings) {
-                        crate::devops::hooks::pr_tools(ui, &h, n, actions);
+                        widgets::contained(ui, |ui| {
+                            crate::devops::hooks::pr_tools(ui, &h, n, actions)
+                        });
                     }
                     conversation::show(ui, repo, n, now, actions);
                 });

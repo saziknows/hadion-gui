@@ -4,7 +4,8 @@
 //! Every call is recorded as an [`ApiCall`] (command, size, time, remaining
 //! rate limit) so the UI can show exactly what was asked of GitHub.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::Instant;
 
 use serde::Deserialize;
@@ -350,6 +351,28 @@ impl Job {
             self.completed?
         };
         Some((e - s).max(0))
+    }
+
+    /// Finished without ever reaching a runner (skipped by a condition,
+    /// cancelled while queued): GitHub has no log for it.
+    pub fn never_ran(&self) -> bool {
+        !self.outcome().is_running() && self.steps.is_empty() && self.runner.is_none()
+    }
+
+    /// The step running now; between two steps, the next one to run.
+    pub fn current_step(&self) -> Option<&Step> {
+        self.steps
+            .iter()
+            .find(|s| s.outcome() == Outcome::InProgress)
+            .or_else(|| self.steps.iter().find(|s| s.outcome().is_running()))
+    }
+
+    /// Steps that have finished (passed, failed or skipped).
+    pub fn steps_done(&self) -> usize {
+        self.steps
+            .iter()
+            .filter(|s| !s.outcome().is_running())
+            .count()
     }
 }
 
@@ -1091,6 +1114,9 @@ fn pr_from_raw(p: RawPr) -> PullRequest {
 
 /// Open pull requests, recent workflow runs and the workflow list.
 pub fn fetch(dir: &Path, owner: &str, repo: &str, calls: &mut Vec<ApiCall>) -> Result<GitHubData> {
+    // Runs after every push, fetch and pull: commits pushed since are on
+    // GitHub now.
+    recheck_unpushed(dir);
     let prs: Vec<RawPr> = json(
         &api(
             dir,
@@ -1240,7 +1266,131 @@ pub fn fetch_annotations(
         .collect())
 }
 
+/// One job of a run, with its steps (polled while it runs).
+pub fn fetch_job(
+    dir: &Path,
+    owner: &str,
+    repo: &str,
+    job_id: u64,
+    calls: &mut Vec<ApiCall>,
+) -> Result<Job> {
+    let raw: RawJob = json(
+        &api(
+            dir,
+            &format!("repos/{owner}/{repo}/actions/jobs/{job_id}"),
+            &[],
+            calls,
+        )?,
+        "job",
+    )?;
+    Ok(raw.into_job())
+}
+
+/// Did a request fail with `HTTP 404`? (A job log GitHub has not
+/// published: the job is still running, never started, or the log expired.)
+pub fn is_not_found(error: &str) -> bool {
+    error.contains("HTTP 404")
+}
+
+/// GitHub's answer for a commit it does not have.
+fn is_unknown_commit(error: &str) -> bool {
+    error.contains("No commit found") || error.contains("HTTP 422")
+}
+
+// ---------------------------------------------------------------------------
+// Commits that are not on GitHub
+// ---------------------------------------------------------------------------
+
+/// Why a commit has no checks because GitHub does not have it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotOnGitHub {
+    /// No remote-tracking branch contains it: it has not been pushed.
+    /// GitHub was not asked.
+    Unpushed,
+    /// GitHub answered "No commit found" although a remote branch has it
+    /// (another remote, or a push GitHub has not processed).
+    Unknown,
+}
+
+/// Commits [`fetch_check_runs`] found are not on GitHub: `(repository,
+/// SHA, why)`. The commit panel asks [`not_on_github`] so it can say why
+/// there are no checks; [`fetch`] (which runs after every push) drops the
+/// commits a remote branch has since received.
+static NOT_ON_GITHUB: Mutex<Vec<(PathBuf, String, NotOnGitHub)>> = Mutex::new(Vec::new());
+
+/// Why GitHub has no checks for `sha`, when the last [`fetch_check_runs`]
+/// found it is not on GitHub.
+pub fn not_on_github(sha: &str) -> Option<NotOnGitHub> {
+    let list = NOT_ON_GITHUB.lock().ok()?;
+    list.iter()
+        .find(|(_, s, _)| s == sha)
+        .map(|(_, _, why)| *why)
+}
+
+fn mark_not_on_github(dir: &Path, sha: &str, why: Option<NotOnGitHub>) {
+    let Ok(mut list) = NOT_ON_GITHUB.lock() else {
+        return;
+    };
+    list.retain(|(_, s, _)| s != sha);
+    if let Some(why) = why {
+        // A few hundred is plenty: one entry per local commit looked at.
+        if list.len() >= 512 {
+            list.remove(0);
+        }
+        list.push((dir.to_path_buf(), sha.to_owned(), why));
+    }
+}
+
+/// Forget the unpushed commits of `dir` that a remote branch now has.
+fn recheck_unpushed(dir: &Path) {
+    let shas: Vec<String> = match NOT_ON_GITHUB.lock() {
+        Ok(list) => list
+            .iter()
+            .filter(|(d, _, why)| d == dir && *why == NotOnGitHub::Unpushed)
+            .map(|(_, s, _)| s.clone())
+            .collect(),
+        Err(_) => return,
+    };
+    for sha in shas {
+        if on_remote_branch(dir, &sha) != Some(false) {
+            mark_not_on_github(dir, &sha, None);
+        }
+    }
+}
+
+/// Is `sha` on a remote-tracking branch, by local git? `git rev-list -n 1
+/// SHA --not --remotes` prints the commit when no remote branch contains
+/// it. `None` when git cannot tell (an object it does not have), and when a
+/// local branch tracks a pull request ref: `gh pr checkout` of a fork's
+/// pull request leaves its commits on GitHub without a remote-tracking
+/// branch, so only GitHub can answer.
+pub fn on_remote_branch(dir: &Path, sha: &str) -> Option<bool> {
+    let out = cli::run(
+        dir,
+        &["rev-list", "-n", "1", sha, "--not", "--remotes"],
+        None,
+    )
+    .ok()?;
+    if String::from_utf8_lossy(&out.stdout).trim().is_empty() {
+        return Some(true);
+    }
+    // No remote branch has it. Unless a branch follows a pull request ref.
+    let tracks_pr = cli::run(
+        dir,
+        &["config", "--get-regexp", r"^branch\..*\.merge$"],
+        None,
+    )
+    .map(|o| String::from_utf8_lossy(&o.stdout).contains("refs/pull/"))
+    .unwrap_or(false);
+    if tracks_pr { None } else { Some(false) }
+}
+
 /// Every check run on a commit, from Actions and from other CI apps.
+///
+/// A commit that is not on GitHub has none, and that is not an error: one
+/// on no remote-tracking branch is answered locally without asking GitHub,
+/// and GitHub's "No commit found" (HTTP 422) becomes an empty list. Both
+/// are remembered for [`not_on_github`].
 pub fn fetch_check_runs(
     dir: &Path,
     owner: &str,
@@ -1248,15 +1398,36 @@ pub fn fetch_check_runs(
     sha: &str,
     calls: &mut Vec<ApiCall>,
 ) -> Result<Vec<CheckRun>> {
-    let raw: RawCheckRuns = json(
-        &api(
-            dir,
-            &format!("repos/{owner}/{repo}/commits/{sha}/check-runs?per_page=100"),
-            &[],
-            calls,
-        )?,
-        "check runs",
-    )?;
+    let started = Instant::now();
+    let pushed = on_remote_branch(dir, sha);
+    if pushed == Some(false) {
+        // Recorded so the activity log shows what decided it.
+        calls.push(ApiCall {
+            command: format!("git rev-list -n 1 {sha} --not --remotes"),
+            elapsed_ms: started.elapsed().as_millis() as u64,
+            bytes: 0,
+            rate: None,
+            error: None,
+            input: None,
+        });
+        mark_not_on_github(dir, sha, Some(NotOnGitHub::Unpushed));
+        return Ok(Vec::new());
+    }
+    let body = match api(
+        dir,
+        &format!("repos/{owner}/{repo}/commits/{sha}/check-runs?per_page=100"),
+        &[],
+        calls,
+    ) {
+        Ok(b) => b,
+        Err(e) if is_unknown_commit(&e.to_string()) => {
+            mark_not_on_github(dir, sha, Some(NotOnGitHub::Unknown));
+            return Ok(Vec::new());
+        }
+        Err(e) => return Err(e),
+    };
+    mark_not_on_github(dir, sha, None);
+    let raw: RawCheckRuns = json(&body, "check runs")?;
     let mut out: Vec<CheckRun> = raw
         .check_runs
         .into_iter()
@@ -2115,6 +2286,138 @@ pub fn fetch_secret_alerts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `git args…` in `dir`, panicking on failure; returns stdout.
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .expect("git runs");
+        assert!(out.status.success(), "git {args:?} failed");
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    }
+
+    #[test]
+    fn unpushed_commits_are_known_locally() {
+        let dir = std::env::temp_dir().join(format!(
+            "gitvis-unpushed-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q", "-b", "main"]);
+        for (k, v) in [
+            ("user.name", "Test"),
+            ("user.email", "test@example.com"),
+            ("commit.gpgsign", "false"),
+        ] {
+            git(&dir, &["config", k, v]);
+        }
+        git(&dir, &["commit", "-q", "--allow-empty", "-m", "pushed"]);
+        let pushed = git(&dir, &["rev-parse", "HEAD"]);
+        // What a push leaves behind: a remote-tracking branch at the commit.
+        git(&dir, &["update-ref", "refs/remotes/origin/main", &pushed]);
+        git(&dir, &["commit", "-q", "--allow-empty", "-m", "local"]);
+        let local = git(&dir, &["rev-parse", "HEAD"]);
+
+        assert_eq!(on_remote_branch(&dir, &pushed), Some(true));
+        assert_eq!(on_remote_branch(&dir, &local), Some(false));
+        assert_eq!(on_remote_branch(&dir, &"0".repeat(40)), None);
+
+        // No GitHub request for the local commit: an empty list, the git
+        // command that decided it, and the reason for the commit panel.
+        let mut calls = Vec::new();
+        let checks = fetch_check_runs(&dir, "o", "r", &local, &mut calls).unwrap();
+        assert!(checks.is_empty());
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].command.starts_with("git rev-list"));
+        assert_eq!(not_on_github(&local), Some(NotOnGitHub::Unpushed));
+        assert_eq!(not_on_github(&pushed), None);
+
+        // Pushed since: the next overview refresh forgets it.
+        git(&dir, &["update-ref", "refs/remotes/origin/main", &local]);
+        recheck_unpushed(&dir);
+        assert_eq!(not_on_github(&local), None);
+
+        // A branch following a pull request ref (gh pr checkout of a fork):
+        // only GitHub can tell.
+        git(&dir, &["commit", "-q", "--allow-empty", "-m", "pr head"]);
+        let pr = git(&dir, &["rev-parse", "HEAD"]);
+        git(&dir, &["config", "branch.main.merge", "refs/pull/7/head"]);
+        assert_eq!(on_remote_branch(&dir, &pr), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn job_progress() {
+        let step = |n: u32, status: &str, conclusion: Option<&str>| Step {
+            number: n,
+            name: format!("step {n}"),
+            status: status.into(),
+            conclusion: conclusion.map(Into::into),
+            started: None,
+            completed: None,
+        };
+        let mut job = Job {
+            id: 1,
+            run_id: 2,
+            name: "build".into(),
+            status: "in_progress".into(),
+            conclusion: None,
+            started: Some(100),
+            completed: None,
+            runner: Some("runner 1".into()),
+            runner_group: None,
+            labels: vec!["ubuntu-latest".into()],
+            url: String::new(),
+            attempt: 1,
+            steps: vec![
+                step(1, "completed", Some("success")),
+                step(2, "completed", Some("skipped")),
+                step(3, "in_progress", None),
+                step(4, "pending", None),
+            ],
+        };
+        assert_eq!(job.current_step().map(|s| s.number), Some(3));
+        assert_eq!(job.steps_done(), 2);
+        assert!(!job.never_ran());
+        // Between two steps the next one is "current".
+        job.steps[2] = step(3, "completed", Some("success"));
+        assert_eq!(job.current_step().map(|s| s.number), Some(4));
+        // Skipped by a condition: no steps, no runner, no log.
+        let skipped = Job {
+            status: "completed".into(),
+            conclusion: Some("skipped".into()),
+            runner: None,
+            steps: Vec::new(),
+            ..job.clone()
+        };
+        assert!(skipped.never_ran());
+        // Still queued is not "never ran": it may run yet.
+        let queued = Job {
+            status: "queued".into(),
+            ..skipped
+        };
+        assert!(!queued.never_ran());
+    }
+
+    #[test]
+    fn not_found_errors() {
+        assert!(is_not_found(
+            "The specified blob does not exist. (HTTP 404)"
+        ));
+        assert!(is_not_found("HTTP 404"));
+        assert!(!is_not_found("Bad credentials (HTTP 401)"));
+        assert!(is_unknown_commit(
+            "No commit found for SHA: 4e8c (HTTP 422)\nSee https://docs.github.com/rest"
+        ));
+        assert!(!is_unknown_commit("Bad credentials (HTTP 401)"));
+    }
 
     #[test]
     fn repo_info_and_alerts_parse() {

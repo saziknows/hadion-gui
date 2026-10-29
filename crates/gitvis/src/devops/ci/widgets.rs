@@ -208,6 +208,17 @@ pub fn tool_missing(ui: &mut Ui, tool: Tool, why: &str) -> bool {
     again
 }
 
+/// Call first in a `kit::split_keyed` detail. The kit caps the detail at
+/// `kit::DETAIL_MAX` with `set_max_width`, and egui places that width
+/// without clamping it, so on a narrow window the detail was wider than
+/// what is on screen: text ran off the right edge and right-aligned
+/// buttons were out of view. This narrows it back to the visible part
+/// (the right margin of the kit's frame is 28 points).
+pub fn fit_detail(ui: &mut Ui) {
+    let visible = ui.clip_rect().right() - 28.0 - ui.max_rect().left();
+    ui.set_max_width(visible.clamp(160.0, kit::DETAIL_MAX));
+}
+
 /// Title on the left, buttons on the right (added right to left: the first
 /// one ends up rightmost).
 pub fn header(ui: &mut Ui, title: &str, buttons: impl FnOnce(&mut Ui)) {

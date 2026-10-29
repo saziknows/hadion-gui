@@ -11,7 +11,7 @@ use gitvis_core::devops::ci::{history, model, requests, workflow};
 use gitvis_core::devops::gh::{Gh, Request};
 use gitvis_core::devops::proc::{ProcSpec, run_capture};
 use gitvis_core::devops::tools::{self, Tool};
-use gitvis_core::github::{WorkflowRun, gh_program};
+use gitvis_core::github::{Job, WorkflowRun, gh_program};
 
 use super::{
     Act, ActState, Analysis, ArtifactList, CacheList, CacheSel, Change, CompareReport,
@@ -20,7 +20,7 @@ use super::{
 use crate::devops::console::ConsoleRun;
 use crate::devops::ctx::Ctx;
 use crate::format;
-use crate::state::{Action, RepoState, ToastKind};
+use crate::state::{Action, LogDoc, LogState, RepoState, ToastKind};
 
 /// Failing jobs whose logs a comparison diffs, at most.
 pub const COMPARE_MAX_JOBS: usize = 5;
@@ -159,6 +159,9 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         Act::AskDeleteLogs(run) => ask_delete_logs(cx, repo, run),
         Act::AskDeleteRun(run) => ask_delete_run(cx, repo, run),
         Act::LoadRunArtifacts { run, force } => load_run_artifacts(cx, repo, run, force),
+        Act::OpenJob { run, job } => open_job(repo, run, job),
+        Act::PollJob { run, job } => poll_job(cx, repo, run, job),
+        Act::FetchLog { run, job, attempt } => fetch_log(cx, repo, run, job, attempt),
         Act::Send(change) => send(cx, repo, change),
         // --------------------------------------------------------- Compare
         Act::CompareOpen(run) => compare_open(cx, repo, run, false),
@@ -600,6 +603,231 @@ fn ask_delete_run(cx: &mut Ctx, repo: &RepoState, run: u64) {
         vec![(run, requests::delete_run(&gh, run))],
         true,
     );
+}
+
+// ---------------------------------------------------------------------------
+// Running jobs: watched while the log viewer shows them
+// ---------------------------------------------------------------------------
+
+/// Select a job in the log viewer without downloading its log. Its log
+/// state becomes "not asked for" (`loading: false, doc: None`), which also
+/// stops the app from requesting it when the run's jobs come in; the view
+/// asks for it once the job has finished.
+fn open_job(repo: &mut RepoState, run: u64, job: u64) {
+    let detail = repo.gh_page.runs.entry(run).or_default();
+    detail.selected_job = Some(job);
+    detail.expanded.insert(job);
+    let keep = detail
+        .logs
+        .get(&job)
+        .is_some_and(|s| s.loading || matches!(s.doc, Some(Ok(_))));
+    if !keep {
+        detail.logs.insert(
+            job,
+            LogState {
+                loading: false,
+                doc: None,
+            },
+        );
+    }
+}
+
+/// Read the watched job's progress: the run's jobs (one request for up to
+/// 100), or only this job for bigger runs; the run too once the job ended.
+fn poll_job(cx: &mut Ctx, repo: &mut RepoState, run: u64, job: u64) {
+    let ci = &mut repo.devops.ci;
+    match ci.watch.as_mut() {
+        Some(w) if w.run == run && w.job == job => {
+            if w.in_flight {
+                return;
+            }
+            w.in_flight = true;
+            w.polled = Instant::now();
+        }
+        _ => {
+            ci.watch = Some(super::JobWatch {
+                run,
+                job,
+                polled: Instant::now(),
+                in_flight: true,
+                interval: super::POLL_MIN,
+                progress: String::new(),
+                error: None,
+            });
+        }
+    }
+    let single = repo
+        .gh_page
+        .runs
+        .get(&run)
+        .is_some_and(|d| d.jobs().len() > 100);
+    let started = cx.gh_read(format!("Progress of job {job}"), move |gh, log| {
+        let jobs = if single {
+            gitvis_core::github::fetch_job(gh.dir(), &gh.owner, &gh.repo, job, &mut log.calls)
+                .map(|j| vec![j])
+        } else {
+            core::fetch_jobs(gh, run, &mut log.calls)
+        }
+        .map_err(|e| e.to_string());
+        let finished = jobs
+            .as_ref()
+            .ok()
+            .and_then(|l| l.iter().find(|j| j.id == job))
+            .is_some_and(|j| !j.outcome().is_running());
+        let run_data = finished.then(|| {
+            core::fetch_run(gh, run, &mut log.calls)
+                .map(Box::new)
+                .map_err(|e| e.to_string())
+        });
+        Msg::JobPolled {
+            run,
+            job,
+            single,
+            jobs,
+            run_data,
+        }
+    });
+    if !started && let Some(w) = repo.devops.ci.watch.as_mut() {
+        w.in_flight = false;
+    }
+}
+
+/// Download a finished job's log here (not through the app's log request)
+/// so the few seconds GitHub takes to publish it are retried quietly.
+fn fetch_log(cx: &mut Ctx, repo: &mut RepoState, run: u64, job: u64, attempt: u32) {
+    let detail = repo.gh_page.runs.entry(run).or_default();
+    if attempt == 0
+        && detail
+            .logs
+            .get(&job)
+            .is_some_and(|s| s.loading || matches!(s.doc, Some(Ok(_))))
+    {
+        return;
+    }
+    detail.logs.insert(
+        job,
+        LogState {
+            loading: true,
+            doc: None,
+        },
+    );
+    cx.gh_read(format!("Log of job {job}"), move |gh, log| {
+        let result =
+            gitvis_core::github::fetch_job_log(gh.dir(), &gh.owner, &gh.repo, job, &mut log.calls)
+                .map(|raw| Box::new(gitvis_core::joblog::parse(&raw)))
+                .map_err(|e| e.to_string());
+        Msg::JobLog {
+            run,
+            job,
+            attempt,
+            result,
+        }
+    });
+}
+
+fn job_polled(
+    repo: &mut RepoState,
+    run: u64,
+    job: u64,
+    single: bool,
+    jobs: Result<Vec<Job>, String>,
+    run_data: Option<Result<Box<WorkflowRun>, String>>,
+) {
+    if let Some(Ok(r)) = run_data
+        && let Some(d) = repo.github.as_mut()
+    {
+        d.upsert_run(*r);
+    }
+    let detail = repo.gh_page.runs.entry(run).or_default();
+    let (progress, error) = match jobs {
+        Ok(list) => {
+            let progress = list.iter().find(|j| j.id == job).map(super::progress_key);
+            if single {
+                if let (Some(Ok(all)), Some(new)) = (&mut detail.jobs, list.into_iter().next())
+                    && let Some(slot) = all.iter_mut().find(|j| j.id == new.id)
+                {
+                    *slot = new;
+                }
+            } else {
+                detail.jobs = Some(Ok(list));
+            }
+            detail.jobs_at = Some(Instant::now());
+            (progress, None)
+        }
+        Err(e) => (None, Some(e)),
+    };
+    let Some(w) = repo
+        .devops
+        .ci
+        .watch
+        .as_mut()
+        .filter(|w| w.run == run && w.job == job)
+    else {
+        return;
+    };
+    w.in_flight = false;
+    w.polled = Instant::now();
+    w.error = error;
+    w.interval = match progress {
+        Some(p) if p != w.progress => {
+            w.progress = p;
+            super::POLL_MIN
+        }
+        Some(_) => (w.interval * 2).min(super::POLL_MAX),
+        None => super::POLL_MAX,
+    };
+}
+
+fn job_log(
+    cx: &mut Ctx,
+    repo: &mut RepoState,
+    run: u64,
+    job: u64,
+    attempt: u32,
+    result: Result<Box<gitvis_core::joblog::JobLog>, String>,
+) {
+    let filter = repo.gh_page.log_filter.clone();
+    let detail = repo.gh_page.runs.entry(run).or_default();
+    let doc = match result {
+        Ok(log) => {
+            let mut doc = LogDoc::new(*log);
+            doc.set_filter(&filter);
+            if let Some(&first) = doc.log.errors.first() {
+                doc.scroll_to = Some(first);
+            }
+            Ok(doc)
+        }
+        Err(e) if gitvis_core::github::is_not_found(&e) && attempt + 1 < super::LOG_TRIES => {
+            cx.after(
+                super::LOG_RETRY,
+                Act::FetchLog {
+                    run,
+                    job,
+                    attempt: attempt + 1,
+                },
+            );
+            return;
+        }
+        Err(e) => Err(e),
+    };
+    detail.logs.insert(
+        job,
+        LogState {
+            loading: false,
+            doc: Some(doc),
+        },
+    );
+    // The watch ends with its log (or the last answer about it), so a log
+    // GitHub never publishes is not asked for again and again.
+    if repo
+        .devops
+        .ci
+        .watch
+        .as_ref()
+        .is_some_and(|w| w.run == run && w.job == job)
+    {
+        repo.devops.ci.watch = None;
+    }
 }
 
 fn load_run_artifacts(cx: &mut Ctx, repo: &mut RepoState, run: u64, force: bool) {
@@ -1946,6 +2174,19 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                 .or_default()
                 .finish(result);
         }
+        Msg::JobPolled {
+            run,
+            job,
+            single,
+            jobs,
+            run_data,
+        } => job_polled(repo, run, job, single, jobs, run_data),
+        Msg::JobLog {
+            run,
+            job,
+            attempt,
+            result,
+        } => job_log(cx, repo, run, job, attempt, result),
         Msg::GreenFound { bad, result } => {
             let Some(c) = repo.devops.ci.compare.as_mut().filter(|c| c.bad == bad) else {
                 return;
@@ -2223,6 +2464,29 @@ fn run_script(cx: &mut Ctx, repo: &mut RepoState, cmd: ScriptCmd) {
             }
         }
         ScriptCmd::ScrollTo(s) => repo.devops.ci.scroll_to = Some(s),
+        ScriptCmd::ShowJob(n) => {
+            let Some(run) = repo.gh_page.selected_run else {
+                return;
+            };
+            let job = repo
+                .gh_page
+                .runs
+                .get(&run)
+                .and_then(|d| d.jobs().get(n))
+                .cloned();
+            // What the job's Log button does.
+            if let Some(job) = job {
+                if super::no_log_yet(&job) {
+                    open_job(repo, run, job.id);
+                } else {
+                    cx.action(Action::ShowLog {
+                        run,
+                        job: job.id,
+                        step: None,
+                    });
+                }
+            }
+        }
         ScriptCmd::AskRerunJob(n) => {
             let Some(run) = repo.gh_page.selected_run else {
                 return;

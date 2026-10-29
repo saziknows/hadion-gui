@@ -154,13 +154,18 @@ fn capture(call: &Call, dir: &Path, calls: &mut Vec<ApiCall>) -> Captured {
     }
 }
 
-/// `az version -o tsv` prints three tab-separated versions (cli, core,
-/// telemetry): keep the first.
+/// The Azure CLI's version: `az version -o tsv` prints three tab-separated
+/// versions (cli, core, telemetry) and `az --version` starts with
+/// `azure-cli   2.91.0`; keep the first token that is a version (taking
+/// the first token showed "azure-cli azure-cli").
 pub fn clean_version(t: Tool, v: &str) -> String {
     match t {
-        Tool::Az => match v.split_whitespace().next() {
-            Some(first) if !first.is_empty() => format!("azure-cli {first}"),
-            _ => v.to_owned(),
+        Tool::Az => match v
+            .split_whitespace()
+            .find(|w| w.starts_with(|c: char| c.is_ascii_digit()))
+        {
+            Some(version) => format!("azure-cli {version}"),
+            None => v.trim().to_owned(),
         },
         _ => v.trim().to_owned(),
     }
@@ -294,6 +299,11 @@ mod tests {
         assert_eq!(tool(ForgeKind::Azure), Tool::Az);
         assert_eq!(
             clean_version(Tool::Az, &["2.91.0", "2.91.0", "1.1.0"].join("\t")),
+            "azure-cli 2.91.0"
+        );
+        // The first line of `az --version`.
+        assert_eq!(
+            clean_version(Tool::Az, "azure-cli                         2.91.0\r"),
             "azure-cli 2.91.0"
         );
         assert_eq!(clean_version(Tool::Glab, " glab 1.46.1 "), "glab 1.46.1");

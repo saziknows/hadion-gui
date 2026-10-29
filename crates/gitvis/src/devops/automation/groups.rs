@@ -588,15 +588,22 @@ pub fn page(ui: &mut Ui, repos: &[RepoState], settings: &Settings, actions: &mut
         actions.push(Act::GroupStatus.into());
     }
     let total: usize = groups.iter().map(|g| g.repos.len()).sum();
-    let subtitle = if groups.is_empty() {
-        "Repositories you work on together: open them at once, see them side by side, fetch, pull or branch in all".to_owned()
+    // Short: the "What groups do" note under it explains the rest (the old
+    // sentence repeated it and ran under the buttons on a narrow window).
+    let parts: Vec<String> = if groups.is_empty() {
+        vec!["Repositories you work on together".to_owned()]
     } else {
-        format!(
-            "{} · {} · saved with your settings",
-            format::plural(groups.len(), "group", "groups"),
-            format::plural(total, "repository", "repositories")
-        )
+        vec![
+            format!(
+                "{}, {}",
+                format::plural(groups.len(), "group", "groups"),
+                format::plural(total, "repository", "repositories")
+            ),
+            "saved with your settings".to_owned(),
+        ]
     };
+    // "New group", "Refresh" and their gaps.
+    let (subtitle, _) = crate::views::github::fit_subtitle(ui, "Groups", &parts, 230.0);
     kit::page_header(ui, "Groups", &subtitle, |ui| {
         if IconButton::new(Icon::Plus, "New group")
             .primary(groups.is_empty())
@@ -673,7 +680,7 @@ fn body(ui: &mut Ui, scroll_end: bool, add: impl FnOnce(&mut Ui)) {
                     bottom: 28,
                 })
                 .show(ui, |ui| {
-                    ui.set_max_width(kit::DETAIL_MAX + 240.0);
+                    ui.set_max_width(ui.available_width().min(kit::DETAIL_MAX + 240.0));
                     ui.spacing_mut().item_spacing.y = 8.0;
                     add(ui);
                     if scroll_end {

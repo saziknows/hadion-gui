@@ -6,16 +6,14 @@
 use std::collections::HashSet;
 
 use egui::text::{LayoutJob, TextFormat};
-use egui::{
-    Align, Align2, Color32, FontId, Frame, Layout, Margin, Rect, RichText, Sense, Ui, pos2, vec2,
-};
+use egui::{Align, Align2, Color32, FontId, Frame, Layout, Margin, Rect, Sense, Ui, pos2, vec2};
 
 use gitvis_core::devops::forge::trace::{Line, LineKind};
 
 use super::{Act, LogState};
 use crate::format;
 use crate::state::Action;
-use crate::theme::{Tone, medium, pal, semibold, size};
+use crate::theme::{Tone, medium, pal, size};
 use crate::views::icons::{self, Icon, IconButton};
 use crate::views::kit;
 
@@ -135,6 +133,8 @@ pub fn viewer(
         )),
         _ => None,
     };
+    // Toolbar: the controls are laid out first (right to left); the job's
+    // name and numbers take what is left and are cut, never overlapped.
     Frame::NONE
         .inner_margin(Margin {
             left: 16,
@@ -143,45 +143,10 @@ pub fn viewer(
             bottom: 6,
         })
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                icons::show(ui, Icon::List, 14.0, p.text_2);
-                ui.label(
-                    RichText::new(title)
-                        .size(size::BODY)
-                        .family(semibold())
-                        .color(p.text_strong),
-                );
-                if let Some((lines, errors, warnings, bytes, sections, matched)) = stats {
-                    ui.label(
-                        RichText::new(format!(
-                            "{} lines  ·  {}  ·  {}",
-                            format::count(lines),
-                            format::bytes(bytes),
-                            format::plural(sections, "section", "sections")
-                        ))
-                        .size(size::SMALL)
-                        .color(p.text_3),
-                    );
-                    if errors > 0 {
-                        kit::badge(ui, &format::plural(errors, "error", "errors"), Tone::Danger);
-                    }
-                    if warnings > 0 {
-                        kit::badge(
-                            ui,
-                            &format::plural(warnings, "warning", "warnings"),
-                            Tone::Warning,
-                        );
-                    }
-                    if !filter.trim().is_empty() {
-                        ui.label(
-                            RichText::new(format!("{} matching", format::count(matched)))
-                                .size(size::SMALL)
-                                .color(p.text_2),
-                        );
-                    }
-                }
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.allocate_ui_with_layout(
+                vec2(ui.available_width(), 28.0),
+                Layout::right_to_left(Align::Center),
+                |ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     if IconButton::icon(Icon::Close)
                         .compact()
@@ -200,14 +165,6 @@ pub fn viewer(
                     {
                         actions.push(Action::OpenUrl(web.to_owned()));
                     }
-                    if IconButton::icon(Icon::Copy)
-                        .compact()
-                        .show(ui)
-                        .on_hover_text("Copy the shown lines")
-                        .clicked()
-                    {
-                        copy_all = true;
-                    }
                     if IconButton::icon(Icon::Fetch)
                         .compact()
                         .show(ui)
@@ -216,55 +173,101 @@ pub fn viewer(
                     {
                         actions.push(Act::ShowLog { pipeline, key }.into());
                     }
-                    ui.add_space(4.0);
-                    icons::divider(ui, 16.0);
-                    ui.add_space(4.0);
-                    if IconButton::text("Unfold")
-                        .compact()
-                        .show(ui)
-                        .on_hover_text("Expand every section")
-                        .clicked()
-                    {
-                        fold = Some(false);
-                    }
-                    if IconButton::text("Fold")
-                        .compact()
-                        .show(ui)
-                        .on_hover_text("Collapse every section")
-                        .clicked()
-                    {
-                        fold = Some(true);
-                    }
-                    if stats.is_some_and(|s| s.1 > 0) {
-                        if IconButton::icon(Icon::ChevronDown)
+                    if let Some(s) = stats {
+                        if IconButton::icon(Icon::Copy)
                             .compact()
                             .show(ui)
-                            .on_hover_text("Next error")
+                            .on_hover_text("Copy the shown lines")
                             .clicked()
                         {
-                            jump = Some(1);
+                            copy_all = true;
                         }
-                        if IconButton::icon(Icon::ChevronUp)
-                            .compact()
-                            .show(ui)
-                            .on_hover_text("Previous error")
-                            .clicked()
-                        {
-                            jump = Some(-1);
+                        ui.add_space(4.0);
+                        icons::divider(ui, 16.0);
+                        ui.add_space(4.0);
+                        if s.4 > 0 {
+                            if IconButton::text("Unfold")
+                                .compact()
+                                .show(ui)
+                                .on_hover_text("Expand every section")
+                                .clicked()
+                            {
+                                fold = Some(false);
+                            }
+                            if IconButton::text("Fold")
+                                .compact()
+                                .show(ui)
+                                .on_hover_text("Collapse every section")
+                                .clicked()
+                            {
+                                fold = Some(true);
+                            }
                         }
+                        if s.1 > 0 {
+                            if IconButton::icon(Icon::ChevronDown)
+                                .compact()
+                                .show(ui)
+                                .on_hover_text("Next error")
+                                .clicked()
+                            {
+                                jump = Some(1);
+                            }
+                            if IconButton::icon(Icon::ChevronUp)
+                                .compact()
+                                .show(ui)
+                                .on_hover_text("Previous error")
+                                .clicked()
+                            {
+                                jump = Some(-1);
+                            }
+                        }
+                        ui.add_space(4.0);
+                        let w = (ui.available_width() - 160.0).clamp(110.0, 240.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(w, 26.0),
+                            Layout::left_to_right(Align::Center),
+                            |ui| {
+                                ui.set_max_width(w - 8.0);
+                                kit::search_box(ui, "forge_log_filter", filter, "Filter lines");
+                            },
+                        );
                     }
-                    ui.add_space(4.0);
-                    let w = ui.available_width().clamp(120.0, 240.0);
-                    ui.allocate_ui_with_layout(
-                        vec2(w, 26.0),
-                        Layout::left_to_right(Align::Center),
-                        |ui| {
-                            ui.set_max_width(w - 8.0);
-                            kit::search_box(ui, "forge_log_filter", filter, "Filter lines");
-                        },
-                    );
-                });
-            });
+                    ui.add_space(12.0);
+                    ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                        let mut facts = String::new();
+                        let mut badges = Vec::new();
+                        if let Some((lines, errors, warnings, bytes, sections, matched)) = stats {
+                            facts = if filter.trim().is_empty() {
+                                format!(
+                                    "{} lines, {}, {}",
+                                    format::count(lines),
+                                    format::bytes(bytes),
+                                    format::plural(sections, "section", "sections")
+                                )
+                            } else {
+                                format!(
+                                    "{} of {} lines",
+                                    format::count(matched),
+                                    format::count(lines)
+                                )
+                            };
+                            if errors > 0 {
+                                badges.push((
+                                    format::plural(errors, "error", "errors"),
+                                    Tone::Danger,
+                                ));
+                            }
+                            if warnings > 0 {
+                                badges.push((
+                                    format::plural(warnings, "warning", "warnings"),
+                                    Tone::Warning,
+                                ));
+                            }
+                        }
+                        crate::views::github::toolbar_title(ui, title, &facts, &badges);
+                    });
+                },
+            );
         });
     kit::hairline(ui);
 

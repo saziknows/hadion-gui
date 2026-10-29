@@ -221,7 +221,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
                             bottom: 28,
                         })
                         .show(ui, |ui| {
-                            ui.set_max_width(kit::DETAIL_MAX);
+                            ui.set_max_width(ui.available_width().min(kit::DETAIL_MAX));
                             ui.spacing_mut().item_spacing.y = 8.0;
                             form_view(ui, act, &files, tools.as_ref(), &workdir, actions);
                             kit::section(ui, "Local runs", Some(act.runs.len()));
@@ -325,8 +325,21 @@ fn form_view(
     kit::title(ui, "Run a job locally");
     kit::secondary(
         ui,
-        "act reads the workflow file, pulls a runner image and runs the job's steps in Docker on this machine. Nothing is sent to GitHub; secrets come from a dotenv file whose path is passed with --secret-file.",
+        "act runs the job's steps in Docker on this machine, from the workflow file and a runner image. Nothing is sent to GitHub.",
     );
+    crate::views::github::details_section(ui, "ci_act_how", "How it works", false, |ui| {
+        kit::kv(ui, 100.0, |kv| {
+            kv.text(
+                "Workflow",
+                "read from .github/workflows in this working tree",
+            );
+            kv.text("Runner", "a Docker image standing in for GitHub's runner");
+            kv.text(
+                "Secrets",
+                "from a dotenv file (NAME=value per line) passed with --secret-file; only its path is kept",
+            );
+        });
+    });
     ui.add_space(space::S);
     if files.is_empty() {
         kit::muted(ui, "There are no workflow files to run.");
@@ -339,7 +352,13 @@ fn form_view(
             .map(|f| (f.path.clone(), format!("{}  ({})", f.name, f.file_name())))
             .collect();
         form::field(ui, "Workflow", None, |ui| {
-            if form::select(ui, "ci_act_wf", &mut act.workflow, &wf_options, 420.0) {
+            if form::select(
+                ui,
+                "ci_act_wf",
+                &mut act.workflow,
+                &wf_options,
+                ui.available_width().min(420.0),
+            ) {
                 act.job.clear();
                 act.inputs.clear();
             }
@@ -364,7 +383,13 @@ fn form_view(
                 "Job",
                 Some("-j JOB: the job and the jobs it needs"),
                 |ui| {
-                    form::select(ui, "ci_act_job", &mut act.job, &jobs, 420.0);
+                    form::select(
+                        ui,
+                        "ci_act_job",
+                        &mut act.job,
+                        &jobs,
+                        ui.available_width().min(420.0),
+                    );
                 },
             );
             let mut events: Vec<String> = f
@@ -383,7 +408,13 @@ fn form_view(
                 act.event = events.first().cloned().unwrap_or_else(|| "push".to_owned());
             }
             form::field(ui, "Event", Some("The event act simulates"), |ui| {
-                form::select(ui, "ci_act_event", &mut act.event, &ev, 260.0);
+                form::select(
+                    ui,
+                    "ci_act_event",
+                    &mut act.event,
+                    &ev,
+                    ui.available_width().min(260.0),
+                );
             });
             if act.event == "workflow_dispatch"
                 && let Some(inputs) = f.dispatch.as_ref().filter(|i| !i.is_empty())

@@ -10,7 +10,7 @@ use gitvis_core::devops::home::runs::Why;
 use gitvis_core::devops::home::search::{Bucket, Item, checks_label, decision_label};
 use gitvis_core::devops::home::{RepoGroup, group_by_repo};
 
-use super::view::{body, fetched_line, refresh_button};
+use super::view::{body, fetched_parts};
 use super::{Act, FailedRun, State, Tab, Target, failed_runs, open_names, repo_index};
 use crate::format;
 use crate::state::{Action, RepoState};
@@ -149,26 +149,41 @@ fn target_key(t: &Target) -> String {
 // Shared pieces
 // ---------------------------------------------------------------------------
 
+/// An inbox page header: the subtitle gives way to the buttons on a narrow
+/// window (`extra_w` is the width of `extra`'s buttons); `web_tip` is the
+/// link button's tooltip.
+#[allow(clippy::too_many_arguments)]
 fn header(
     ui: &mut Ui,
     title: &str,
-    subtitle: &str,
+    parts: &[String],
+    extra_w: f32,
     web: &str,
+    web_tip: &str,
     state: &State,
     actions: &mut Vec<Action>,
     extra: impl FnOnce(&mut Ui, &mut Vec<Action>),
 ) {
-    kit::page_header(ui, title, subtitle, |ui| {
-        extra(ui, actions);
-        if IconButton::icon(Icon::External)
-            .show(ui)
-            .on_hover_text(format!("Open {web}"))
-            .clicked()
-        {
-            actions.push(Action::OpenUrl(web.to_owned()));
-        }
-        refresh_button(ui, state, actions);
-    });
+    // The link and "Refresh" buttons, and the gaps.
+    let controls_w = extra_w + 150.0;
+    super::view::header_fit(
+        ui,
+        title,
+        parts,
+        controls_w,
+        state,
+        actions,
+        |ui, actions| {
+            extra(ui, actions);
+            if IconButton::icon(Icon::External)
+                .show(ui)
+                .on_hover_text(web_tip)
+                .clicked()
+            {
+                actions.push(Action::OpenUrl(web.to_owned()));
+            }
+        },
+    );
 }
 
 /// Loading, error and "nothing fetched" states shared by the inbox tabs.
@@ -323,18 +338,20 @@ pub(super) fn notifications(
 ) {
     let all = state.notifications.as_ref().map(|n| n.len()).unwrap_or(0);
     let unread = state.unread();
-    let sub = format!(
-        "{} fetched, {} unread  ·  {}",
+    let mut sub = vec![format!(
+        "{} fetched, {} unread",
         format::count(all),
-        format::count(unread),
-        fetched_line(state, now)
-    );
+        format::count(unread)
+    )];
+    sub.extend(fetched_parts(state, now));
     let can_mark_all = state.notifications.is_some() && unread > 0 && !state.marking_all;
     header(
         ui,
         "Notifications",
         &sub,
+        160.0,
         "https://github.com/notifications",
+        "Open your notifications on GitHub",
         state,
         actions,
         |ui, actions| {
@@ -546,18 +563,29 @@ pub(super) fn search(
 ) {
     let Some(b) = tab.bucket() else { return };
     let found = state.search.as_ref().map(|s| s.bucket(b).clone());
-    let sub = match &found {
-        Some(f) => format!(
-            "{} of {} shown  ·  {}  ·  {}",
+    let mut sub = Vec::new();
+    if let Some(f) = &found {
+        sub.push(format!(
+            "{} of {} shown",
             format::count(f.items.len()),
-            format::count(f.total as usize),
-            b.query(),
-            fetched_line(state, now)
-        ),
-        None => format!("{}  ·  {}", b.query(), fetched_line(state, now)),
-    };
+            format::count(f.total as usize)
+        ));
+    }
+    sub.extend(fetched_parts(state, now));
     let web = b.web_url();
-    header(ui, b.label(), &sub, &web, state, actions, |_, _| {});
+    // The search itself is for the curious: on the link, not in the subtitle.
+    let tip = format!("Open this search on GitHub\n{}", b.query());
+    header(
+        ui,
+        b.label(),
+        &sub,
+        0.0,
+        &web,
+        &tip,
+        state,
+        actions,
+        |_, _| {},
+    );
     let error = state.search_error.clone();
     let have = found.is_some();
     body(ui, &format!("home_search_{tab:?}"), |ui| {
@@ -736,20 +764,35 @@ pub(super) fn failed(
 ) {
     let still = failed.iter().filter(|f| !f.failure.superseded).count();
     let with_gh = repos.iter().filter(|r| r.github.is_some()).count();
-    let sub = format!(
-        "{} still failing, {} fixed since  ·  from the runs of {} loaded  ·  last {} hours",
-        still,
-        failed.len() - still,
-        format::plural(with_gh, "repository", "repositories"),
-        super::FAILED_WINDOW_SECS / 3600
+    let sub = vec![
+        format!(
+            "{} still failing, {} fixed since",
+            still,
+            failed.len() - still
+        ),
+        format!("last {} hours", super::FAILED_WINDOW_SECS / 3600),
+        format!(
+            "from the runs of {} loaded",
+            format::plural(with_gh, "repository", "repositories")
+        ),
+    ];
+    super::view::header_fit(
+        ui,
+        "Failed runs on your branches",
+        &sub,
+        120.0,
+        state,
+        actions,
+        |_, _| {},
     );
-    kit::page_header(ui, "Failed runs on your branches", &sub, |ui| {
-        refresh_button(ui, state, actions);
-    });
     body(ui, "home_failed", |ui| {
         kit::secondary(
             ui,
-            "A run is yours when you started it, or when it ran on the head branch of one of your open pull requests. Runs come from each open repository's loaded GitHub data (its newest workflow runs); no extra requests are made.",
+            "A run is yours when you started it, or when it ran on the head branch of one of your open pull requests.",
+        );
+        kit::secondary(
+            ui,
+            "The runs come from each open repository's newest workflow runs, already loaded: this page makes no requests of its own.",
         );
         if state.login.is_none() {
             if state.loading {

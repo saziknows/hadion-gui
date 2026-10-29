@@ -131,7 +131,13 @@ pub fn new_pr(ui: &mut Ui, repo: &mut RepoState, _now: i64, actions: &mut Vec<Ac
                 if bases.is_empty() {
                     form::text(ui, "rv_new_pr_base", &mut f.base, "Base branch");
                 } else {
-                    if form::select(ui, "rv_new_pr_base_sel", &mut f.base, &bases, 280.0) {
+                    if form::select(
+                        ui,
+                        "rv_new_pr_base_sel",
+                        &mut f.base,
+                        &bases,
+                        ui.available_width().min(280.0),
+                    ) {
                         actions.push(Act::SetBase(f.base.clone()).into());
                     }
                 }
