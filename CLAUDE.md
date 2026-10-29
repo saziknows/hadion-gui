@@ -132,7 +132,9 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   body, or only its size for `Request::withheld()`), and error messages carry GitHub's `message`, every
   `errors[]` entry and `(HTTP nnn)`. `devops::proc` (`ProcSpec` with env / stdin / `with_color`,
   `resolve` through PATHEXT so `npm` finds `npm.cmd`, `run_streaming`, `run_capture` with timeout,
-  `kill_tree`). `devops::tools` (`Tool`, `available`, `detect` (cached version), `install_hint`).
+  `kill_tree`: `taskkill /T` on Windows, `kill -s TERM -- -PGID` elsewhere; without the `--`,
+  procps-ng 4.0.4 (Ubuntu 24.04) signals every process of the user, which ended a whole WSL session).
+  `devops::tools` (`Tool`, `available`, `detect` (cached version), `install_hint`).
   `HADION_GH` overrides the `gh` executable (a recording test double).
 - Views: `views/form.rs` (inputs with stable ids, `field`, `row`, `checkbox`, `radio`, `select`, `tags`,
   `primary` / `button` / `danger`, `actions_row`, `card`, `error`), `views/console.rs` (`output`,

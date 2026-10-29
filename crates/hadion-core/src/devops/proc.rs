@@ -261,12 +261,32 @@ pub fn kill_tree(pid: u32) {
     }
     #[cfg(not(windows))]
     {
+        let Some(args) = group_kill_args(pid) else {
+            return;
+        };
         let _ = Command::new("kill")
-            .args(["-TERM", &format!("-{pid}")])
+            .args(args)
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
     }
+}
+
+/// `kill` arguments that signal the process group `pid` leads (every child
+/// is started as a group leader). The `--` matters: procps-ng 4.0.4
+/// (Ubuntu 24.04) reads `kill -TERM -1234` as a signal to every process of
+/// the user, which ended whole sessions. Groups 0 (our own) and 1 (`-1`,
+/// everything) are never signalled.
+#[cfg_attr(windows, allow(dead_code))]
+fn group_kill_args(pid: u32) -> Option<[String; 4]> {
+    (pid > 1).then(|| {
+        [
+            "-s".to_owned(),
+            "TERM".to_owned(),
+            "--".to_owned(),
+            format!("-{pid}"),
+        ]
+    })
 }
 
 /// Split a chunk of output into lines; a line rewritten with `\r`
@@ -503,6 +523,39 @@ mod tests {
         assert!(d.contains("standard input: 7 bytes, not logged"));
         assert!(!d.contains("hunter2"));
         assert!(!d.contains("abc"));
+    }
+
+    #[test]
+    fn group_kill_ends_options_and_never_targets_everything() {
+        assert_eq!(
+            group_kill_args(4321).unwrap(),
+            ["-s", "TERM", "--", "-4321"].map(String::from)
+        );
+        assert!(group_kill_args(0).is_none());
+        assert!(group_kill_args(1).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_tree_ends_only_the_target_group() {
+        use std::os::unix::process::CommandExt;
+        let spawn = || {
+            Command::new("sleep")
+                .arg("30")
+                .process_group(0)
+                .spawn()
+                .unwrap()
+        };
+        let (mut target, mut bystander) = (spawn(), spawn());
+        kill_tree(target.id());
+        let ended = target.wait().unwrap();
+        assert!(!ended.success());
+        assert!(
+            bystander.try_wait().unwrap().is_none(),
+            "the bystander died"
+        );
+        let _ = bystander.kill();
+        let _ = bystander.wait();
     }
 
     #[test]
