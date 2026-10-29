@@ -297,7 +297,7 @@ pub fn empty_state(
     let mut clicked = false;
     ui.add_space((ui.available_height() * 0.22).min(180.0));
     ui.vertical_centered(|ui| {
-        ui.set_max_width(440.0);
+        ui.set_max_width(ui.available_width().min(440.0));
         icons::show(ui, icon, 30.0, p.text_3);
         ui.add_space(space::M);
         ui.label(
@@ -1291,28 +1291,86 @@ pub fn page_header(
             bottom: 10,
         })
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
+            // The actions sit right of the title; when the window is too
+            // narrow for both, they move to a row of their own under it. Their
+            // width is last frame's (they are laid out after the decision).
+            // Either way a title or subtitle that still does not fit is cut
+            // (the full text shows on hover) instead of running under them.
+            let title = RichText::new(title_text)
+                .size(size::HEADING)
+                .family(semibold())
+                .color(p.text_strong);
+            let subtitle = RichText::new(subtitle_text)
+                .size(size::SMALL)
+                .color(p.text_2);
+            let title_font = egui::FontId::new(size::HEADING, semibold());
+            let sub_font = egui::FontId::proportional(size::SMALL);
+            let (title_w, title_h, sub_h) = ui.fonts_mut(|f| {
+                (
+                    f.layout_no_wrap(title_text.to_owned(), title_font.clone(), p.text_strong)
+                        .size()
+                        .x,
+                    f.row_height(&title_font),
+                    f.row_height(&sub_font),
+                )
+            });
+            let mut height = title_h;
+            if !subtitle_text.is_empty() {
+                height += 2.0 + sub_h;
+            }
+            let height = height.max(ui.spacing().interact_size.y);
+            let width_id = egui::Id::unique(("page_header_actions", title_text));
+            let actions_w = ui.data(|d| d.get_temp::<f32>(width_id)).unwrap_or(0.0);
+            let stacked =
+                actions_w > 0.0 && ui.available_width() < actions_w + space::M + title_w.min(240.0);
+            let title_block = |ui: &mut Ui| {
+                ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                    ui.set_min_width(ui.available_width());
                     ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.label(
-                        RichText::new(title_text)
-                            .size(size::HEADING)
-                            .family(semibold())
-                            .color(p.text_strong),
-                    );
+                    ui.add(Label::new(title.clone()).truncate());
                     if !subtitle_text.is_empty() {
-                        ui.label(
-                            RichText::new(subtitle_text)
-                                .size(size::SMALL)
-                                .color(p.text_2),
-                        );
+                        ui.add(Label::new(subtitle.clone()).truncate());
                     }
                 });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    actions_ui(ui)
-                });
-            });
+            };
+            let measured = if stacked {
+                ui.allocate_ui_with_layout(
+                    vec2(ui.available_width(), height),
+                    Layout::left_to_right(Align::Center),
+                    title_block,
+                );
+                ui.add_space(space::S);
+                ui.allocate_ui_with_layout(
+                    vec2(ui.available_width(), ui.spacing().interact_size.y),
+                    Layout::right_to_left(Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let start = ui.cursor().right();
+                        actions_ui(ui);
+                        start - ui.cursor().right()
+                    },
+                )
+                .inner
+            } else {
+                ui.allocate_ui_with_layout(
+                    vec2(ui.available_width(), height),
+                    Layout::right_to_left(Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let start = ui.cursor().right();
+                        actions_ui(ui);
+                        let used = start - ui.cursor().right();
+                        ui.add_space(space::M);
+                        title_block(ui);
+                        used
+                    },
+                )
+                .inner
+            };
+            if (measured - actions_w).abs() > 0.5 {
+                ui.data_mut(|d| d.insert_temp(width_id, measured));
+                ui.ctx().request_repaint();
+            }
         });
     hairline(ui);
 }
@@ -1358,7 +1416,7 @@ pub fn split_keyed(
                             bottom: 28,
                         })
                         .show(ui, |ui| {
-                            ui.set_max_width(DETAIL_MAX);
+                            ui.set_max_width(ui.available_width().min(DETAIL_MAX));
                             ui.spacing_mut().item_spacing.y = 8.0;
                             detail_ui(ui, actions)
                         });
