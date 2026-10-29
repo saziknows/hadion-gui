@@ -2525,6 +2525,11 @@ impl GitVis {
                                 self.request_load(i, pending_full || refresh == Refresh::Full);
                                 if network {
                                     self.maybe_fetch_github(i, true);
+                                    // A push can put the selected commit on
+                                    // GitHub: ask for its checks again.
+                                    if let Selection::Commit(id) = self.repos[i].selection {
+                                        self.ensure_checks(i, id, true);
+                                    }
                                 }
                             }
                         } else {
@@ -2846,7 +2851,9 @@ impl GitVis {
                 }
                 Cmd::Theme => self.apply(ctx, Action::ToggleTheme),
                 Cmd::Window(w, h) => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)))
+                    // A maximised window ignores a new size: restore it first.
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
                 }
                 Cmd::Collapse(key) => {
                     if let Some(r) = self.repos.get_mut(i)
