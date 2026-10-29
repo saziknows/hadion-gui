@@ -1259,9 +1259,15 @@ pub fn page_with_nav(
     content: impl FnOnce(&mut Ui),
 ) {
     let p = *pal(ui);
+    // A narrower column on small windows leaves the content its room.
+    let nav_w = if ui.available_width() < 1100.0 {
+        196.0
+    } else {
+        228.0
+    };
     egui::Panel::left(id)
         .resizable(false)
-        .exact_size(228.0)
+        .exact_size(nav_w)
         .frame(Frame::NONE.fill(p.panel).inner_margin(Margin {
             left: 8,
             right: 8,
@@ -1392,10 +1398,14 @@ pub fn split_keyed(
     detail_ui: impl FnOnce(&mut Ui, &mut Vec<Action>),
 ) {
     let p = *pal(ui);
+    // On a narrow window the list takes less, so the detail stays readable.
+    let avail = ui.available_width();
+    let default_list = (avail * 0.4).clamp(260.0, 420.0);
+    let max_list = (avail * 0.55).clamp(260.0, 760.0);
     egui::Panel::left(id)
         .resizable(true)
-        .default_size(420.0)
-        .size_range(300.0..=760.0)
+        .default_size(default_list)
+        .size_range(240.0..=max_list)
         .frame(Frame::NONE.fill(p.panel).inner_margin(Margin {
             left: 8,
             right: 8,
