@@ -214,7 +214,7 @@ fn header(ui: &mut Ui, cx: &Cx, k: &KubeState, actions: &mut Vec<Action>) {
         parts.join(" · ")
     };
     let loading = k.loading;
-    crate::devops::pages::layout::page_header(ui, "Kubernetes", &sub, |ui| {
+    kit::page_header(ui, "Kubernetes", &sub, |ui| {
         if loading {
             ui.add(egui::Spinner::new().size(14.0));
         }

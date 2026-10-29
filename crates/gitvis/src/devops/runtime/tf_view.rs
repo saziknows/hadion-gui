@@ -265,7 +265,7 @@ fn header(ui: &mut Ui, cx: &Cx, tf: &TfState, actions: &mut Vec<Action>) {
     let both = tf.installed(Binary::Terraform).is_some() && tf.installed(Binary::Tofu).is_some();
     let current = tf.binary();
     let scanning = tf.scanning;
-    crate::devops::pages::layout::page_header(ui, "Terraform", &parts.join(" · "), |ui| {
+    kit::page_header(ui, "Terraform", &parts.join(" · "), |ui| {
         if scanning {
             ui.add(egui::Spinner::new().size(14.0));
         }

@@ -113,7 +113,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         None => "What is deployed where, pending approvals, promote and roll back".to_owned(),
     };
     let can = repo.github_remote.is_some() && st.gh_ok != Some(false);
-    crate::devops::pages::layout::page_header(ui, "Environments", &subtitle, |ui| {
+    kit::page_header(ui, "Environments", &subtitle, |ui| {
         if can
             && IconButton::new(Icon::Rerun, "Refresh")
                 .compact()

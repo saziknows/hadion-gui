@@ -1026,7 +1026,7 @@ fn nav_count(st: &State, t: Tab) -> Option<(usize, Tone)> {
 fn content(ui: &mut egui::Ui, repo: &mut RepoState, console: &Console, actions: &mut Vec<Action>) {
     let tab = repo.devops.govern.tab;
     if tab.needs_github() && repo.github_remote.is_none() {
-        crate::devops::pages::layout::page_header(ui, tab.label(), tab.hint(), |_| {});
+        kit::page_header(ui, tab.label(), tab.hint(), |_| {});
         crate::devops::pages::layout::state_page(ui, "gov_no_remote", |ui| {
             widgets::no_github(ui, repo, tab);
         });

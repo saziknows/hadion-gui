@@ -45,7 +45,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
             "Deployment frequency, lead time, change failure rate and time to restore".to_owned()
         }
     };
-    crate::devops::pages::layout::page_header(ui, "DORA metrics", &subtitle, |ui| {
+    kit::page_header(ui, "DORA metrics", &subtitle, |ui| {
         if IconButton::new(Icon::Rerun, "Refresh")
             .compact()
             .enabled(!d.events.loading && !d.local.loading)

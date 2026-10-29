@@ -84,7 +84,7 @@ pub fn sbom(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
         ..
     } = &mut repo.devops.govern;
     let ready = sbom.ok().is_some();
-    crate::devops::pages::layout::page_header(
+    kit::page_header(
         ui,
         "SBOM",
         "Every locked package in the working tree, as CycloneDX 1.5 or SPDX 2.3, compared with GitHub's dependency graph",
@@ -652,7 +652,7 @@ pub fn images(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mu
         scans,
         ..
     } = &mut repo.devops.govern;
-    crate::devops::pages::layout::page_header(
+    kit::page_header(
         ui,
         "Container images",
         "Dockerfiles and compose files in the working tree, linted locally; image scans on demand",

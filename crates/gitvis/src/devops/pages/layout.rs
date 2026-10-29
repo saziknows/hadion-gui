@@ -8,10 +8,10 @@
 
 use std::hash::Hash;
 
-use egui::{Align, Frame, Label, Layout, Margin, RichText, Ui};
+use egui::{Frame, Margin, Ui};
 
 use crate::state::Action;
-use crate::theme::{pal, semibold, size};
+use crate::theme::pal;
 use crate::views::kit;
 
 /// A scroll offset for the next scrolling frame drawn (the script driver's
@@ -178,101 +178,6 @@ fn scroll(ui: &mut Ui, salt: impl Hash + std::fmt::Debug, max: f32, add: impl Fn
                     });
             });
         });
-}
-
-/// `kit::page_header` that fits a narrow window. The actions sit on the
-/// right while the title keeps room beside them; when it would not (their
-/// width is remembered from the last frame), they move to a row under the
-/// title. The subtitle wraps. In `kit::page_header` a long subtitle pushes
-/// the actions over the edge and widens the page below.
-pub fn page_header(ui: &mut Ui, title: &str, subtitle: &str, actions_ui: impl FnOnce(&mut Ui)) {
-    let p = *pal(ui);
-    Frame::NONE
-        .inner_margin(Margin {
-            left: 24,
-            right: 16,
-            top: 14,
-            bottom: 10,
-        })
-        .show(ui, |ui| {
-            let w = ui.available_width();
-            let id = ui.make_persistent_id(("page_header_actions", title));
-            let actions_w: f32 = ui.data(|d| d.get_temp(id)).unwrap_or(0.0);
-            let title_font = egui::FontId::new(size::HEADING, semibold());
-            let title_w = ui
-                .painter()
-                .layout_no_wrap(title.to_owned(), title_font, egui::Color32::WHITE)
-                .size()
-                .x;
-            // Room the title side needs: the title, and a readable subtitle.
-            let need = title_w.max(if subtitle.is_empty() { 0.0 } else { 300.0 });
-            let one_row = actions_w + 16.0 + need <= w;
-            let text = |ui: &mut Ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                ui.add(
-                    Label::new(
-                        RichText::new(title)
-                            .size(size::HEADING)
-                            .family(semibold())
-                            .color(p.text_strong),
-                    )
-                    .truncate(),
-                );
-                if !subtitle.is_empty() {
-                    ui.add(
-                        Label::new(RichText::new(subtitle).size(size::SMALL).color(p.text_2))
-                            .wrap(),
-                    );
-                }
-            };
-            let measured = if one_row {
-                // Title and one subtitle line: the height the actions
-                // centre on.
-                let h = if subtitle.is_empty() { 26.0 } else { 44.0 };
-                ui.allocate_ui_with_layout(
-                    egui::vec2(w, h),
-                    Layout::right_to_left(Align::Center),
-                    |ui| {
-                        let r = ui
-                            .scope(|ui| {
-                                ui.spacing_mut().item_spacing.x = 6.0;
-                                actions_ui(ui)
-                            })
-                            .response
-                            .rect
-                            .width();
-                        ui.add_space(10.0);
-                        ui.with_layout(Layout::top_down(Align::Min), text);
-                        r
-                    },
-                )
-                .inner
-            } else {
-                ui.with_layout(Layout::top_down(Align::Min), text);
-                ui.add_space(6.0);
-                // A row of their own, still right-aligned (they are written
-                // right to left, the main action first).
-                ui.allocate_ui_with_layout(
-                    egui::vec2(w, 30.0),
-                    Layout::right_to_left(Align::Center),
-                    |ui| {
-                        ui.scope(|ui| {
-                            ui.spacing_mut().item_spacing.x = 6.0;
-                            actions_ui(ui)
-                        })
-                        .response
-                        .rect
-                        .width()
-                    },
-                )
-                .inner
-            };
-            if (measured - actions_w).abs() > 0.5 {
-                ui.data_mut(|d| d.insert_temp(id, measured));
-                ui.ctx().request_repaint();
-            }
-        });
-    kit::hairline(ui);
 }
 
 /// The badges of a list row that fit beside its subtitle: `kit::paint_row`

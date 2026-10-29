@@ -499,42 +499,37 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
         .unwrap_or_default();
     let busy = repo.is_busy();
     let w = &mut repo.devops.workbench.worktrees;
-    crate::devops::pages::layout::page_header(
-        ui,
-        "Worktrees",
-        super::Tab::Worktrees.hint(),
-        |ui| {
-            if IconButton::new(Icon::Rerun, "Refresh")
-                .compact()
-                .enabled(!w.loading)
-                .show(ui)
-                .on_hover_text("git worktree list --porcelain, then git status in each")
-                .clicked()
-            {
-                actions.push(Act::LoadWorktrees.into());
-            }
-            if IconButton::new(Icon::Plus, "Add")
-                .compact()
-                .show(ui)
-                .on_hover_text("Check out a branch or commit in another folder")
-                .clicked()
-            {
-                actions.push(Act::SelectWorktree(None).into());
-            }
-            if let (Some(Ok(l)), Some(at)) = (&w.list, w.at) {
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(format!(
-                        "{}  ·  {}",
-                        format::plural(l.len(), "worktree", "worktrees"),
-                        format::relative(now - at.elapsed().as_secs() as i64, now)
-                    ))
-                    .size(size::SMALL)
-                    .color(p.text_2),
-                );
-            }
-        },
-    );
+    kit::page_header(ui, "Worktrees", super::Tab::Worktrees.hint(), |ui| {
+        if IconButton::new(Icon::Rerun, "Refresh")
+            .compact()
+            .enabled(!w.loading)
+            .show(ui)
+            .on_hover_text("git worktree list --porcelain, then git status in each")
+            .clicked()
+        {
+            actions.push(Act::LoadWorktrees.into());
+        }
+        if IconButton::new(Icon::Plus, "Add")
+            .compact()
+            .show(ui)
+            .on_hover_text("Check out a branch or commit in another folder")
+            .clicked()
+        {
+            actions.push(Act::SelectWorktree(None).into());
+        }
+        if let (Some(Ok(l)), Some(at)) = (&w.list, w.at) {
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(format!(
+                    "{}  ·  {}",
+                    format::plural(l.len(), "worktree", "worktrees"),
+                    format::relative(now - at.elapsed().as_secs() as i64, now)
+                ))
+                .size(size::SMALL)
+                .color(p.text_2),
+            );
+        }
+    });
     let list = match &w.list {
         None => {
             wui::empty_pane(ui, |ui| kit::loading(ui, "Listing worktrees…"));

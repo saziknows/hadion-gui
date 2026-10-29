@@ -69,7 +69,7 @@ pub fn show(
         None => "Published releases and their assets; publish a new one".to_owned(),
     };
     let can = repo.github_remote.is_some() && st.gh_ok != Some(false);
-    crate::devops::pages::layout::page_header(ui, "Releases", &subtitle, |ui| {
+    kit::page_header(ui, "Releases", &subtitle, |ui| {
         if can
             && IconButton::new(Icon::Plus, "New release")
                 .primary(true)

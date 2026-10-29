@@ -368,7 +368,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
     let busy = repo.is_busy() || repo.devops.gitplus.submodules.busy;
     let workdir = repo.workdir.clone();
     let s = &mut repo.devops.gitplus.submodules;
-    crate::devops::pages::layout::page_header(
+    kit::page_header(
         ui,
         "Submodules",
         crate::devops::workbench::Tab::Submodules.hint(),

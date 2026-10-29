@@ -458,7 +458,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
     let busy = repo.is_busy();
     let b = &mut repo.devops.workbench.bisect;
     let active = matches!(&b.info, Some(Ok(i)) if i.active);
-    crate::devops::pages::layout::page_header(ui, "Bisect", super::Tab::Bisect.hint(), |ui| {
+    kit::page_header(ui, "Bisect", super::Tab::Bisect.hint(), |ui| {
         if active
             && IconButton::new(Icon::Close, "Reset")
                 .compact()

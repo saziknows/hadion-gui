@@ -153,7 +153,7 @@ fn header(ui: &mut Ui, cx: &Cx, pkg: &mut PkgState, actions: &mut Vec<Action>) {
     let show_all = pkg.show_all;
     let loading = pkg.loading;
     let has_list = matches!(&pkg.listing, Some(Ok(_)));
-    crate::devops::pages::layout::page_header(ui, "Packages", &sub, |ui| {
+    kit::page_header(ui, "Packages", &sub, |ui| {
         if loading {
             ui.add(egui::Spinner::new().size(14.0));
         }

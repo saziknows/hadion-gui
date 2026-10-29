@@ -18,7 +18,7 @@ use crate::views::{form, kit};
 
 pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &mut Vec<Action>) {
     let now = format::now_secs();
-    crate::devops::pages::layout::page_header(
+    kit::page_header(
         ui,
         "Where is my commit",
         "Which pull request, branches, tags, releases, checks and environments contain a commit",

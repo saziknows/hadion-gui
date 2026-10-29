@@ -61,7 +61,7 @@ pub fn protection(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
         &default,
         protected.ok().map(|v| v.as_slice()).unwrap_or(&[]),
     );
-    crate::devops::pages::layout::page_header(
+    kit::page_header(
         ui,
         "Branch protection",
         "Classic protection rules (admins only) and the rules every ruleset applies",
@@ -562,7 +562,7 @@ pub fn codeowners(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
     let acc = access.ok();
     let path = co.path();
     let exists = co.file.ok().is_some_and(|f| f.path.is_some());
-    crate::devops::pages::layout::page_header(
+    kit::page_header(
         ui,
         "CODEOWNERS",
         &if exists {

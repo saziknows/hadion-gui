@@ -99,7 +99,7 @@ fn header(
     shown: usize,
     actions: &mut Vec<Action>,
 ) {
-    crate::devops::pages::layout::page_header(ui, title, subtitle, |ui| {
+    kit::page_header(ui, title, subtitle, |ui| {
         widgets::refresh(
             ui,
             fetch.loading,

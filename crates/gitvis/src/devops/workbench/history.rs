@@ -210,25 +210,20 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
         .map(|s| s.commits.iter().map(|c| c.id.to_string()).collect())
         .unwrap_or_default();
     let h = &mut repo.devops.workbench.history;
-    crate::devops::pages::layout::page_header(
-        ui,
-        "File history",
-        super::Tab::History.hint(),
-        |ui| {
-            if let Some(Ok(r)) = &h.result {
-                ui.label(
-                    RichText::new(format!(
-                        "{}  ·  {}{}",
-                        format::plural(r.commits.len(), "commit", "commits"),
-                        format::millis(r.elapsed_ms),
-                        if r.truncated { "  ·  capped" } else { "" }
-                    ))
-                    .size(size::SMALL)
-                    .color(p.text_2),
-                );
-            }
-        },
-    );
+    kit::page_header(ui, "File history", super::Tab::History.hint(), |ui| {
+        if let Some(Ok(r)) = &h.result {
+            ui.label(
+                RichText::new(format!(
+                    "{}  ·  {}{}",
+                    format::plural(r.commits.len(), "commit", "commits"),
+                    format::millis(r.elapsed_ms),
+                    if r.truncated { "  ·  capped" } else { "" }
+                ))
+                .size(size::SMALL)
+                .color(p.text_2),
+            );
+        }
+    });
     query_bar(ui, h, actions);
     if h.loading {
         wui::empty_pane(ui, |ui| {
