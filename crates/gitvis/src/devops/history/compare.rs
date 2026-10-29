@@ -242,7 +242,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
     let cmp = match &c.result {
         None => {
             empty(ui, &mut |ui| {
-                widgets::empty_state(
+                kit::empty_state(
                     ui,
                     Icon::Merge,
                     "Pick two revisions",
@@ -727,7 +727,7 @@ fn file_note(f: &numstat::FileStat) -> Option<String> {
 fn file_detail(ui: &mut Ui, c: &Compare, cmp: &Comparison, actions: &mut Vec<Action>) {
     let Some(f) = c.selected.and_then(|i| cmp.files.get(i)) else {
         if cmp.files.is_empty() {
-            widgets::empty_state(
+            kit::empty_state(
                 ui,
                 Icon::Check,
                 "Same content",
@@ -735,7 +735,7 @@ fn file_detail(ui: &mut Ui, c: &Compare, cmp: &Comparison, actions: &mut Vec<Act
                 None,
             );
         } else {
-            widgets::empty_state(
+            kit::empty_state(
                 ui,
                 Icon::List,
                 "Pick a file",
@@ -959,7 +959,7 @@ fn commit_detail(
         list.get(i).map(|c| (side, c))
     });
     let Some((side, c)) = found else {
-        widgets::empty_state(
+        kit::empty_state(
             ui,
             Icon::Graph,
             "Commits on each side",

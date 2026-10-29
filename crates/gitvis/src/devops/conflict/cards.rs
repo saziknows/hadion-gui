@@ -240,7 +240,7 @@ pub fn no_markers(ui: &mut Ui, st: &mut State, busy: bool, actions: &mut Vec<Act
     let Some(s) = st.current() else { return };
     let path = s.path().to_owned();
     page(ui, "conflict_no_markers", |ui| {
-        if crate::devops::history::empty_state(
+        if kit::empty_state(
             ui,
             Icon::Info,
             "No conflict markers left",
@@ -303,7 +303,7 @@ pub fn resolved(
                 None,
             ),
         };
-        let clicked = crate::devops::history::empty_state(
+        let clicked = kit::empty_state(
             ui,
             Icon::Check,
             &title,

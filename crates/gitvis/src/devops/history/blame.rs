@@ -272,7 +272,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
     let show = match &v.result {
         None => {
             empty(ui, &mut |ui| {
-                widgets::empty_state(
+                kit::empty_state(
                     ui,
                     Icon::Clock,
                     "Blame a file",

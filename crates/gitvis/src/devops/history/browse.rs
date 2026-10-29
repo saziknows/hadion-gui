@@ -344,7 +344,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
     let tree = match &b.tree {
         None => {
             empty(ui, &mut |ui| {
-                widgets::empty_state(
+                kit::empty_state(
                     ui,
                     Icon::Folder,
                     "Pick a revision",
@@ -535,7 +535,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         }))
         .show(ui, |ui| {
             let Some(entry) = entry else {
-                widgets::empty_state(
+                kit::empty_state(
                     ui,
                     Icon::Folder,
                     "Pick a file",

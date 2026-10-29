@@ -297,52 +297,6 @@ pub fn paint_file_row(
     }
 }
 
-/// `kit::empty_state` that never gets wider than its pane: the kit's sets
-/// a 440 point column with `set_max_width`, which also *widens* a narrower
-/// pane (a 280 point details panel, a diff pane at the minimum window),
-/// so its text ran past both edges. Returns true when the action was
-/// clicked.
-pub fn empty_state(
-    ui: &mut Ui,
-    icon: crate::views::icons::Icon,
-    title: &str,
-    body: &str,
-    action: Option<(crate::views::icons::Icon, &str)>,
-) -> bool {
-    let p = *pal(ui);
-    let mut clicked = false;
-    ui.add_space((ui.available_height() * 0.22).min(180.0));
-    ui.vertical_centered(|ui| {
-        ui.set_max_width(ui.available_width().min(440.0));
-        crate::views::icons::show(ui, icon, 30.0, p.text_3);
-        ui.add_space(theme::space::M);
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(title)
-                    .size(size::TITLE)
-                    .family(theme::semibold())
-                    .color(p.text_strong),
-            )
-            .wrap(),
-        );
-        if !body.is_empty() {
-            ui.add_space(theme::space::XS);
-            ui.add(
-                egui::Label::new(egui::RichText::new(body).size(size::SMALL).color(p.text_2))
-                    .wrap(),
-            );
-        }
-        if let Some((icon, label)) = action {
-            ui.add_space(theme::space::L);
-            clicked = crate::views::icons::IconButton::new(icon, label)
-                .primary(true)
-                .show(ui)
-                .clicked();
-        }
-    });
-    clicked
-}
-
 /// Numbers as one wrapped line of "value label" pairs: the short-window
 /// form of a row of stat tiles (`insights::stats`), with the same tooltips.
 pub fn compact_stats(ui: &mut Ui, items: &[kit::Stat]) {
