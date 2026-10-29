@@ -1,9 +1,12 @@
 # On a version tag (v0.2.0, v0.3.0-rc.1): build the release on Windows,
 # package it with scripts/package.ps1 and attach the zip (plus the
 # installer when Inno Setup is on the runner) and SHA256SUMS to the GitHub
-# release, creating the release when the tag has none yet. This is the
-# contract the in-app updater reads: hadion-<version>-windows-x86_64.zip
-# and SHA256SUMS on a release tagged v<version>.
+# release. The release is created as a draft with the version's CHANGELOG
+# section as notes, filled, then published: with immutable releases on,
+# GitHub refuses files added after publishing (v0.1.0 went out empty that
+# way). This is the contract the in-app updater reads:
+# hadion-<version>-windows-x86_64.zip and SHA256SUMS on a release tagged
+# v<version>.
 #
 # Actions are pinned to full commit SHAs (verified against the tags on
 # 2026-10-27 with `gh api repos/<action>/git/ref/tags/<tag>`).
@@ -51,6 +54,24 @@ jobs:
       - name: Build and package
         shell: pwsh
         run: ./scripts/package.ps1 -Profile release
+      - name: Release notes from CHANGELOG.md
+        shell: pwsh
+        run: |
+          # This version's section, wrapped lines joined: GitHub shows every
+          # line break of a release body. Without a section GitHub writes notes.
+          $version = $env:TAG.TrimStart('v')
+          $text = Get-Content CHANGELOG.md -Raw -Encoding utf8
+          $m = [regex]::Match($text, "(?ms)^## \[$([regex]::Escape($version))\][^\r\n]*\r?\n(.*?)(?=^## \[|^\[[^\]]+\]:|\z)")
+          if (-not $m.Success) { Write-Host "CHANGELOG.md has no section for $version"; exit 0 }
+          $out = [System.Collections.Generic.List[string]]::new()
+          foreach ($line in ($m.Groups[1].Value.Trim() -split '\r?\n')) {
+            $prev = if ($out.Count) { $out[$out.Count - 1] } else { '' }
+            $joins = $prev -ne '' -and -not $prev.StartsWith('#') -and $line.Trim() -ne '' -and
+              -not $line.StartsWith('#') -and $line -notmatch '^\s*([-*+]|\d+\.)\s'
+            if ($joins) { $out[$out.Count - 1] = "$prev $($line.Trim())" } else { $out.Add($line) }
+          }
+          Set-Content -Path release-notes.md -Value ($out -join "`n") -Encoding utf8
+          Get-Content release-notes.md -Encoding utf8
       - name: Upload to the release
         shell: pwsh
         env:
@@ -58,13 +79,28 @@ jobs:
         run: |
           $files = @(Get-ChildItem dist -File | Where-Object { $_.Name -like 'hadion-*.zip' -or $_.Name -like 'hadion-*-setup.exe' -or $_.Name -eq 'SHA256SUMS' } | ForEach-Object { $_.FullName })
           if ($files.Count -lt 2) { throw "Nothing to upload: $($files -join ', ')" }
-          gh release view $env:TAG --json tagName *> $null
+          # Published already (a re-run): an immutable release takes no new
+          # files, a mutable one gets them replaced.
+          $immutable = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:TAG" --jq '.immutable' 2> $null
+          if ($LASTEXITCODE -eq 0) {
+            if ($immutable -eq 'true') { throw "$env:TAG is published as an immutable release, so its files cannot change: release a new version." }
+            gh release upload $env:TAG @files --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed' }
+            exit 0
+          }
+          # Otherwise fill a draft and publish it last: immutable releases
+          # refuse files added after publishing.
+          gh release view $env:TAG --json isDraft *> $null
           if ($LASTEXITCODE -ne 0) {
+            $notes = @('--generate-notes')
+            if (Test-Path release-notes.md) { $notes = @('--notes-file', 'release-notes.md') }
             $pre = @()
             if ($env:TAG -match '-') { $pre = @('--prerelease') }
-            gh release create $env:TAG --verify-tag --generate-notes --title "Hadion $env:TAG" @pre
+            gh release create $env:TAG --draft --verify-tag --title "Hadion $env:TAG" @notes @pre
             if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
           }
           gh release upload $env:TAG @files --clobber
           if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed' }
+          gh release edit $env:TAG --draft=false
+          if ($LASTEXITCODE -ne 0) { throw 'gh release edit --draft=false failed' }
           Get-Content dist/SHA256SUMS

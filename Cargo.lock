@@ -1609,7 +1609,7 @@ dependencies = [
 
 [[package]]
 name = "hadion"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "eframe",
@@ -1627,7 +1627,7 @@ dependencies = [
 
 [[package]]
 name = "hadion-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aho-corasick",
  "flate2",
