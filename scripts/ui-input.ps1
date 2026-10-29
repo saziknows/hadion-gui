@@ -1,9 +1,9 @@
 param(
   [string]$Action = "click",   # click | rclick | dblclick | drag | move | keys | scroll | where
   [int]$X = 0, [int]$Y = 0, [int]$X2 = 0, [int]$Y2 = 0,
-  [string]$Keys = "", [int]$Delta = 0, [string]$ProcName = "gitvis"
+  [string]$Keys = "", [int]$Delta = 0, [string]$ProcName = "hadion"
 )
-# X/Y are relative to the top-left of the gitvis window (same space as the screenshots).
+# X/Y are relative to the top-left of the Hadion window (same space as the screenshots).
 Add-Type @"
 using System; using System.Runtime.InteropServices;
 public class M {

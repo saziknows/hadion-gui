@@ -12,15 +12,15 @@ the next release with credit to you unless you prefer otherwise.
 
 ## Supported versions
 
-Fixes go into the latest release. gitvis is at version 0.x, so please update to the newest
+Fixes go into the latest release. Hadion is at version 0.x, so please update to the newest
 release before reporting.
 
-## How gitvis treats your credentials and data
+## How Hadion treats your credentials and data
 
-- **GitHub** access goes through your own `gh auth`; gitvis stores no GitHub token. GitLab and
+- **GitHub** access goes through your own `gh auth`; Hadion stores no GitHub token. GitLab and
   Azure DevOps go through `glab` and `az` the same way.
-- **API keys** gitvis does keep (the Claude API key, Jira and Linear tokens) live in the
-  operating system's keychain, service `gitvis`, never in settings files or logs. They reach
+- **API keys** Hadion does keep (the Claude API key, Jira and Linear tokens) live in the
+  operating system's keychain, service `hadion`, never in settings files or logs. They reach
   child processes on standard input only, never on a command line.
 - **Secrets never reach the activity log**, toasts or error messages. The exposure scanner shows
   findings redacted and logs only counts, paths and the git commands it ran.
@@ -34,5 +34,5 @@ release before reporting.
   Safety) refuses all of them; task scripts and commands you type in the terminal are not
   covered.
 - **Updates** are verified against the release's SHA-256 checksums before they are installed.
-- **Crash reports** stay on your machine (`%LOCALAPPDATA%\gitvis\crashes`), with secrets
+- **Crash reports** stay on your machine (`%LOCALAPPDATA%\hadion\crashes`), with secrets
   removed, and are only sent if you choose to open an issue with one.

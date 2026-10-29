@@ -64,7 +64,7 @@ jobs:
             ${{ runner.os }}-cargo-
       - name: Git identity for the fixture tests
         run: |
-          git config --global user.name "gitvis CI"
+          git config --global user.name "Hadion CI"
           git config --global user.email "ci@example.invalid"
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings

@@ -2,7 +2,7 @@
 # package it with scripts/package.ps1 and attach the zip (plus the
 # installer when Inno Setup is on the runner) and SHA256SUMS to the GitHub
 # release, creating the release when the tag has none yet. This is the
-# contract the in-app updater reads: gitvis-<version>-windows-x86_64.zip
+# contract the in-app updater reads: hadion-<version>-windows-x86_64.zip
 # and SHA256SUMS on a release tagged v<version>.
 #
 # Actions are pinned to full commit SHAs (verified against the tags on
@@ -26,7 +26,7 @@ jobs:
       contents: write
     env:
       TAG: ${{ github.ref_name }}
-      GITVIS_BUILD_COMMIT: ${{ github.sha }}
+      HADION_BUILD_COMMIT: ${{ github.sha }}
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -56,13 +56,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $files = @(Get-ChildItem dist -File | Where-Object { $_.Name -like 'gitvis-*.zip' -or $_.Name -like 'gitvis-*-setup.exe' -or $_.Name -eq 'SHA256SUMS' } | ForEach-Object { $_.FullName })
+          $files = @(Get-ChildItem dist -File | Where-Object { $_.Name -like 'hadion-*.zip' -or $_.Name -like 'hadion-*-setup.exe' -or $_.Name -eq 'SHA256SUMS' } | ForEach-Object { $_.FullName })
           if ($files.Count -lt 2) { throw "Nothing to upload: $($files -join ', ')" }
           gh release view $env:TAG --json tagName *> $null
           if ($LASTEXITCODE -ne 0) {
             $pre = @()
             if ($env:TAG -match '-') { $pre = @('--prerelease') }
-            gh release create $env:TAG --verify-tag --generate-notes --title "gitvis $env:TAG" @pre
+            gh release create $env:TAG --verify-tag --generate-notes --title "Hadion $env:TAG" @pre
             if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
           }
           gh release upload $env:TAG @files --clobber

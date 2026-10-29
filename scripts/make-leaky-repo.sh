@@ -6,7 +6,7 @@
 # commit that is not pushed. Nothing in it is a real credential.
 #
 #   scripts/make-leaky-repo.sh /tmp/leaky
-#   GITVIS_SCRIPT="wait 3; security; scan-history 0; wait 5; shot out.png; quit" target/debug/gitvis.exe /tmp/leaky
+#   HADION_SCRIPT="wait 3; security; scan-history 0; wait 5; shot out.png; quit" target/debug/hadion.exe /tmp/leaky
 set -euo pipefail
 D=${1:?usage: make-leaky-repo.sh DIR}
 rm -rf "$D" "$D-remote.git"
@@ -30,7 +30,7 @@ mkdir -p deploy src config
 printf -- '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n-----END OPENSSH PRIVATE KEY-----\n' > deploy/id_rsa
 printf 'import os\n\nSTRIPE_KEY = "sk_live_51H8sJ2KzQyXbW3n9LmP7Rt0V"\nSLACK = "xoxb-917203645081-2938475610293-Qr7TmZp2Lk9WvXc4Yb8Nd3Hs"\npassword = os.environ["PW"]  # fine\n' > src/settings.py
 printf 'aws:\n  access_key_id: AKIAJ6ZQMPTX3V7UBNRQ\n  secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYzQ9vL2mNpQ"\n' > config/prod.yml
-printf 'const key = "AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY"; // gitvis:allow\nconst example = "AKIAIOSFODNN7EXAMPLE";\n' > src/client.js
+printf 'const key = "AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY"; // hadion:allow\nconst example = "AKIAIOSFODNN7EXAMPLE";\n' > src/client.js
 git add -A && git commit -q -m "deploy tooling"
 
 # Everything so far is on the remote; the next commit is local only.

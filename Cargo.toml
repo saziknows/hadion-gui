@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/gitvis-core", "crates/gitvis"]
+members = ["crates/hadion-core", "crates/hadion"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,7 +10,7 @@ repository = "https://github.com/saziknows/hadion-gui"
 publish = false
 
 [workspace.dependencies]
-gitvis-core = { path = "crates/gitvis-core" }
+hadion-core = { path = "crates/hadion-core" }
 git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 eframe = { version = "0.37", default-features = true, features = ["persistence"] }
 egui = "0.37"

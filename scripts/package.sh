@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Build gitvis and package a release the updater can install, on Linux or
+# Build Hadion and package a release the updater can install, on Linux or
 # macOS (scripts/package.ps1 is the Windows equivalent):
 #
-#   dist/gitvis-<version>/                     gitvis, README.md, LICENSE files, licenses/
-#   dist/gitvis-<version>-<os>-<arch>.zip      the release asset
+#   dist/hadion-<version>/                     hadion, README.md, LICENSE files, licenses/
+#   dist/hadion-<version>-<os>-<arch>.zip      the release asset
 #   dist/SHA256SUMS
 #
 # Usage: scripts/package.sh [--debug] [--no-build] [--exe PATH] [--out DIR]
@@ -44,17 +44,17 @@ case "$(uname -m)" in
   arm64|aarch64) arch=aarch64 ;;
   *) arch="$(uname -m)" ;;
 esac
-name="gitvis-$version"
-echo "gitvis $version for $os-$arch ($profile)"
+name="hadion-$version"
+echo "Hadion $version for $os-$arch ($profile)"
 
 if [ "$build" = 1 ]; then
-  args=(build -p gitvis --locked)
+  args=(build -p hadion --locked)
   [ "$profile" = release ] && args+=(--release)
   echo "== cargo ${args[*]}"
   cargo "${args[@]}"
 fi
 if [ -z "$exe" ]; then
-  exe="${CARGO_TARGET_DIR:-$root/target}/$profile/gitvis"
+  exe="${CARGO_TARGET_DIR:-$root/target}/$profile/hadion"
 fi
 [ -f "$exe" ] || { echo "no executable at $exe (build first, or pass --exe PATH)" >&2; exit 1; }
 
@@ -64,18 +64,18 @@ stage="$out/$name"
 echo "== stage $stage"
 rm -rf "$stage"
 mkdir -p "$stage/licenses"
-cp "$exe" "$stage/gitvis"
-chmod 755 "$stage/gitvis"
+cp "$exe" "$stage/hadion"
+chmod 755 "$stage/hadion"
 cp "$root/README.md" "$stage/"
 found_licence=0
 for f in LICENSE LICENSE.md LICENSE.txt LICENSE-MIT LICENSE-APACHE; do
   if [ -f "$root/$f" ]; then cp "$root/$f" "$stage/"; found_licence=1; fi
 done
 [ "$found_licence" = 1 ] || echo "warning: the repository has no LICENSE file; only the font licences are packaged" >&2
-cp "$root"/crates/gitvis/assets/fonts/*-OFL.txt "$stage/licenses/"
-cp "$root"/crates/gitvis/assets/fonts/*-LICENSE.txt "$stage/licenses/"
-# Every crate compiled into gitvis, with its licence files.
-notice_args="run --quiet --locked -p gitvis-core --example notices"
+cp "$root"/crates/hadion/assets/fonts/*-OFL.txt "$stage/licenses/"
+cp "$root"/crates/hadion/assets/fonts/*-LICENSE.txt "$stage/licenses/"
+# Every crate compiled into Hadion, with its licence files.
+notice_args="run --quiet --locked -p hadion-core --example notices"
 [ "$profile" = release ] && notice_args="$notice_args --release"
 (cd "$root" && cargo $notice_args -- --out "$stage/licenses/THIRD-PARTY-LICENSES.txt")
 

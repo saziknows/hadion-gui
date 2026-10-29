@@ -1479,42 +1479,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gitvis"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "eframe",
- "egui",
- "gitvis-core",
- "image",
- "notify",
- "open",
- "rfd",
- "serde",
- "serde_json",
- "syntect",
-]
-
-[[package]]
-name = "gitvis-core"
-version = "0.1.0"
-dependencies = [
- "aho-corasick",
- "flate2",
- "git2",
- "keyring",
- "notify-rust",
- "portable-pty",
- "regex",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "similar",
- "vt100",
-]
-
-[[package]]
 name = "gl_generator"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1641,6 +1605,43 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6b17e70c989c36bad147b27a58d148c0741c51448aa5653436547323e524d0ab"
 dependencies = [
  "euclid",
+]
+
+[[package]]
+name = "hadion"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "eframe",
+ "egui",
+ "hadion-core",
+ "image",
+ "notify",
+ "open",
+ "rfd",
+ "serde",
+ "serde_json",
+ "syntect",
+ "winresource",
+]
+
+[[package]]
+name = "hadion-core"
+version = "0.1.0"
+dependencies = [
+ "aho-corasick",
+ "flate2",
+ "git2",
+ "keyring",
+ "notify-rust",
+ "portable-pty",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "similar",
+ "vt100",
 ]
 
 [[package]]
@@ -5094,6 +5095,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80d0f4e272c85def139476380b12f9ac60926689dd2e01d4923222f40580869d"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "winresource"
+version = "0.1.34"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2bc6d36480b829272a5bdabf08e6dca8004761c1da7e35efef800540c66221b"
+dependencies = [
+ "version_check",
 ]
 
 [[package]]

@@ -1,17 +1,17 @@
-# gitvis — notes for Claude Code
+# Hadion — notes for Claude Code
 
 Native Git client (Rust + egui 0.37) focused on branch visualisation; see README.md for features.
 
 ## Commands
 
-- `cargo build` / `cargo run -p gitvis -- <repo>` — debug build; deps are built with opt-level 2 so it stays usable.
+- `cargo build` / `cargo run -p hadion -- <repo>` — debug build; deps are built with opt-level 2 so it stays usable.
   Never share one `CARGO_TARGET_DIR` between worktrees of this repository: cargo names the workspace crates'
   artifacts the same in every worktree and then treats another worktree's build as up to date, so an exe can
-  silently contain another branch's code (check with `grep -a -o 'gitvis-wt[\/][a-z0-9-]*' exe | sort -u`).
-- `cargo test` — unit tests plus `crates/gitvis-core/tests/fixture_repo.rs`, which builds throwaway repos with the real `git` binary.
-- `cargo run --release -p gitvis-core --example bench -- <repo>` — loader timings (`GITVIS_TIMING=1` prints phases).
-- `cargo build --release` — the shippable binary at `target/release/gitvis.exe`.
-- `cargo run -p gitvis-core --example notices -- --out FILE` — third-party licence notices (every crate compiled in, with
+  silently contain another branch's code (check with `grep -a -o 'hadion-wt[\/][a-z0-9-]*' exe | sort -u`).
+- `cargo test` — unit tests plus `crates/hadion-core/tests/fixture_repo.rs`, which builds throwaway repos with the real `git` binary.
+- `cargo run --release -p hadion-core --example bench -- <repo>` — loader timings (`HADION_TIMING=1` prints phases).
+- `cargo build --release` — the shippable binary at `target/release/hadion.exe`.
+- `cargo run -p hadion-core --example notices -- --out FILE` — third-party licence notices (every crate compiled in, with
   its licence files; `scripts/package.ps1` ships them as `licenses/THIRD-PARTY-LICENSES.txt`).
 
 Developed on Windows with the `stable-x86_64-pc-windows-gnu` toolchain and WinLibs gcc (CI also builds with MSVC and on
@@ -19,7 +19,7 @@ Linux); libgit2 is vendored and compiles from C.
 
 ## Layout
 
-- `crates/gitvis-core` — no UI. `graph.rs` (lane layout, pure), `repo.rs` (libgit2 snapshot; working tree via
+- `crates/hadion-core` — no UI. `graph.rs` (lane layout, pure), `repo.rs` (libgit2 snapshot; working tree via
   `git status --porcelain=v2` because libgit2 status is ~15x slower on big trees), `ops.rs` (`GitOp` → git
   command lines; mutations always go through the git binary; `gh pr checkout`
   is a `GitOp` too, with `program() == "gh"`), `diff.rs` (unified diff parser keeping raw bytes so hunks
@@ -34,7 +34,7 @@ Linux); libgit2 is vendored and compiles from C.
   "pushed"; `scan_changes()` is the quick staged/unstaged/untracked scan that runs after every status
   refresh). Secrets must never reach a command line or the activity log; findings are keyed by
   `fingerprint(rule, secret)` and dismissals live in `RepoPrefs.dismissed`.
-  `cargo run --release -p gitvis-core --example scan -- <repo> [--history N]` prints a report.
+  `cargo run --release -p hadion-core --example scan -- <repo> [--history N]` prints a report.
   `osint.rs` reuses the scanner (`Rules::from_specs` with `strict: false` + validators for the footprint
   rules; `Collector`/`scan_files`/`walk_patch` are `pub(crate)`) and adds: one `git log --format=%x1e…%B`
   pass for identities, time heat maps and message intelligence; EXIF/PNG/PDF/Office parsers (zip via
@@ -56,7 +56,7 @@ Linux); libgit2 is vendored and compiles from C.
   `search.rs` (`log -S/-G/--grep/--author --name-only`, streamed, capped), `recover.rs`
   (`fsck --unreachable --no-reflogs --connectivity-only` + `log --no-walk --stdin` + `reflog --all`).
   `--example insights -- <repo> [--weight] [--lost] [--date-debt] [--pickaxe TEXT]` prints it.
-- `crates/gitvis` — egui app. `app.rs` owns all orchestration (loads, ops, watcher debounce, selection,
+- `crates/hadion` — egui app. `app.rs` owns all orchestration (loads, ops, watcher debounce, selection,
   the verbose activity log); views in `src/views/` only read state and push `Action`s. Background work:
   `worker.rs` (one reader thread that coalesces stale jobs, one thread per op / API request),
   `watcher.rs` (notify; `.git/objects`, `index.lock` ignored). `views/github.rs` is the Actions page's
@@ -74,7 +74,7 @@ Linux); libgit2 is vendored and compiles from C.
   tokens (`pal(ui)` palette with surfaces chrome/panel/canvas/raised/hover/overlay, text/text_2/text_3/
   text_strong, status colours; `Tone`; `size::` type scale with nothing under 11 pt; `space::`, `radius::`)
   and loads Inter (one variable font pinned at 400/500/600 via `FontTweak.coords`) and JetBrains Mono from
-  `crates/gitvis/assets/fonts` (OFL licences beside them). egui's `.strong()` only brightens colour;
+  `crates/hadion/assets/fonts` (OFL licences beside them). egui's `.strong()` only brightens colour;
   `.family(theme::semibold())` / `theme::medium()` set real weights. `views/kit.rs` is the component kit every
   page builds from (text, sections, cards, callouts, code blocks, key-value, stats, badges, bars, tables,
   virtualised two-line rows, search box, chips, segmented control, section nav, page frames, progress).
@@ -83,12 +83,23 @@ Linux); libgit2 is vendored and compiles from C.
   each DevOps area reports through its `rail_badge`), `views/toolbar.rs` (repo tabs + git actions
   only), `views/statusbar.rs` (location, working tree, last activity). The refs sidebar shows on the
   History page only; Exposure and Insights use `kit::page_with_nav` (grouped section navigation).
+- Brand (2026-10-29): the product is **Hadion** (it was called gitvis until then; crates, binary, data
+  folders, `HADION_*` variables and the keychain service were all renamed). `docs/brand` holds the
+  official logo set, colours and rules (Tile below 24 px, light versions on light backgrounds, never
+  redraw the mark). In the app: `views/brand.rs` (the Tile at the top of the rail and as the window
+  icon, the lockup on the welcome screen and About; PNGs from `crates/hadion/assets/brand`, scaled once
+  to the exact pixel size because wgpu has no mipmaps), `build.rs` embeds `hadion.ico` plus version
+  details through `winresource` (`windres` on gnu, `rc.exe` on MSVC; a release build fails without
+  it). The UI accent stays blue: green means success. Data from before the rename carries over:
+  `packaging::carry_over_from_gitvis` copies `%APPDATA%\gitvis` / `%LOCALAPPDATA%\gitvis` once (not in
+  scripted runs), the keychain reads service `gitvis` as a fallback, `gitvis-dismissed` and hooks
+  marked `gitvis secret check` (backup `pre-commit.before-gitvis`) are still recognised.
 - GitHub specifics: job logs need `gh api --allow-escape-sequences` (gh refuses ANSI output otherwise)
   and are unavailable for running or never-started jobs (HTTP 404 from blob storage). An Actions job's id
   is its check-run id (annotations live there). Check runs of a commit are fetched 400 ms after it is
   selected, so arrow-keying through the graph does not spend the 5,000/h API budget.
 
-## DevOps areas (`crates/gitvis-core/src/devops/`, `crates/gitvis/src/devops/`)
+## DevOps areas (`crates/hadion-core/src/devops/`, `crates/hadion/src/devops/`)
 
 Everything around the repository: review loop, CI control, releases and deployments, what is running,
 governance, the local workbench, GitLab / Azure DevOps, the cross-repository home page. One area =
@@ -97,7 +108,7 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
 
 | Area (app `devops/X`) | Page | Core `devops::X` |
 |---|---|---|
-| `home` (global state in `GitVis.home`) | Home (`Page::Home`) | inbox, dashboard rows |
+| `home` (global state in `Hadion.home`) | Home (`Page::Home`) | inbox, dashboard rows |
 | `review` | Review (`Page::Review`) | PRs, reviews, threads, issues |
 | `ci` | Actions tabs beside Runs (`ci::Tab`; Runs is `views/github.rs`) | dispatch, artifacts, caches, history, compare, lint, act |
 | `ship`, `runtime` | Ship (`devops/pages.rs` owns the nav, `ShipTab`) | releases, deployments, DORA / GHCR, kubectl, terraform |
@@ -122,7 +133,7 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   `errors[]` entry and `(HTTP nnn)`. `devops::proc` (`ProcSpec` with env / stdin / `with_color`,
   `resolve` through PATHEXT so `npm` finds `npm.cmd`, `run_streaming`, `run_capture` with timeout,
   `kill_tree`). `devops::tools` (`Tool`, `available`, `detect` (cached version), `install_hint`).
-  `GITVIS_GH` overrides the `gh` executable (a recording test double).
+  `HADION_GH` overrides the `gh` executable (a recording test double).
 - Views: `views/form.rs` (inputs with stable ids, `field`, `row`, `checkbox`, `radio`, `select`, `tags`,
   `primary` / `button` / `danger`, `actions_row`, `card`, `error`), `views/console.rs` (`output`,
   `lines`, `run_list`; `ConsoleAction` stop / rerun / copy / remove).
@@ -140,7 +151,7 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
     while `conflict::is_open`, opened from a conflicted file in the WIP panel), `history` (Compare page
     `Page::Compare`, graph multi-select in `RepoState::multi`, filters, file tree, inline blame, signature
     verification), `gitplus` (Tools tabs Submodules / Git LFS / Patches / Hooks via `workbench::Tab::gitplus`,
-    stash selected files, split a commit, `gitvis hook pre-commit` through `gitplus::cli_main` in `main.rs`),
+    stash selected files, split a commit, `hadion hook pre-commit` through `gitplus::cli_main` in `main.rs`),
     `ai` (Claude buttons through the owner's Claude Code CLI or the Claude API; config in `Settings::ext.ai`). `devops::on_snapshot` runs after every load.
   - App-wide areas (`devops/global.rs`: state in `Globals`, prefs in `Settings::ext: ExtPrefs`; contract
     `apply(cx, &mut State, &mut GlobalCx, act)`, `on_msg`, `tick` every frame, `script`; `GlobalView` for
@@ -165,16 +176,16 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
     `Globals`: `automation/shared.rs` (groups runtime, release section, lookups, used by the Home and
     Ship views) and `ai/session.rs` (key status, usage, script overrides; repository areas have no
     app-wide state). Lock briefly, never inside a background task.
-  - Safe mode (`Settings::safe_mode`, `gitvis_core::devops::safety`): refuses remote writes at the lowest
+  - Safe mode (`Settings::safe_mode`, `hadion_core::devops::safety`): refuses remote writes at the lowest
     level (`cli::run_raw` / `run_program`, `proc::run_streaming` / `run_capture`, so also `api_request` and
     `Gh::cli`), classified by `safety::remote_write(program, args, stdin)`. Task scripts and the
     terminal are not covered; `gh auth switch` / `setup-git` and curl to the Claude API are allowed
     (local config / sends code but changes nothing remote).
-  - `gitvis_core::devops::keychain` keeps API keys and tokens in the OS keychain (service `gitvis`), never
+  - `hadion_core::devops::keychain` keeps API keys and tokens in the OS keychain (service `hadion`), never
     in settings files or logs; call it from background tasks.
   - ConPTY (Windows pseudo-terminal, `portable-pty`) sends `ESC[6n` first and blocks until the terminal
     answers with the cursor position (`ESC[row;colR`): the terminal must answer it, or nothing appears.
-  - Dependencies added to `gitvis-core`: `keyring`, `portable-pty`, `vt100`, `notify-rust`, `sha2`.
+  - Dependencies added to `hadion-core`: `keyring`, `portable-pty`, `vt100`, `notify-rust`, `sha2`.
   - `Action::AddToCommitMessage { text, at_start }` edits the active repository's commit message for
     app-wide areas (which only read repositories); the Tools page has a Stashes tab drawn by `gitplus`.
   - All nine round-2 areas were merged into `devops` on 2026-10-28.
@@ -184,10 +195,10 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
     substitutes `{number}` of a PR created a step earlier), `patch` (GitHub's bare hunks, comment
     anchors, suggestions), `local` (templates, commits between branches, `#N` matching), `fetch`; app
     `reads`, `changes`, `control`, `view`, `conversation`, `files`, `forms`, `issues`, `widgets`.
-    `cargo test -p gitvis-core --test review_live -- --ignored --nocapture` is a read-only live check
-    (`GITVIS_REVIEW_REPO=owner/name`).
+    `cargo test -p hadion-core --test review_live -- --ignored --nocapture` is a read-only live check
+    (`HADION_REVIEW_REPO=owner/name`).
   - `ci`: core `workflow`/`yaml` (dispatch inputs; serde_yaml reads the YAML 1.1 key `on` as `true`),
-    `lint` (`GITVIS_LINT_DIR=<repo> cargo test -p gitvis-core --lib lint_report -- --ignored
+    `lint` (`HADION_LINT_DIR=<repo> cargo test -p hadion-core --lib lint_report -- --ignored
     --nocapture` prints a report), `history` (stats, flaky), `compare` (log normalisation and diff; it
     skips the "Set up job" preamble, which ends at `Complete job name:`), `act`, `requests`.
     Re-fetches after a change use `Ctx::after` (GitHub needs a moment), not a sleeping read.
@@ -204,7 +215,7 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
     required keys), `codeowners` (GitHub semantics: last match wins, `docs/*` is not recursive),
     `envs`, `config` (secrets via `gh secret set` stdin, variables).
   - `workbench`: core `tasks/` (discovery; a small order-keeping TOML reader in `toml.rs`;
-    `GITVIS_DISCOVER=<dir> cargo test -p gitvis-core --lib print_discovery -- --ignored --nocapture`),
+    `HADION_DISCOVER=<dir> cargo test -p hadion-core --lib print_discovery -- --ignored --nocapture`),
     `rebase` (needs git ≥ 2.38 for `--no-update-refs`; `GIT_SEQUENCE_EDITOR="cp '<todo>'"` and
     `exec git commit --amend -F` lines, so no editor opens), `bisect`, `worktrees`, `history`.
   - `home` / `forge`: core `home::{notify, search, runs, fetch}` (one GraphQL search for review
@@ -222,35 +233,35 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
     --porcelain`), filters (streamed capped `log --all`), signatures (SSH signatures without an
     allowed-signers file read from the commit object: "can't check", not "unsigned"), cherry-pick /
     format-patch plans; app `picks` (multi-select), `sigs` (lazy batch verification of visible rows),
-    `widgets`. `cargo test -p gitvis-core --test history_git`.
+    `widgets`. `cargo test -p hadion-core --test history_git`.
   - `gitplus`: core `stash`, `submodules`, `lfs`, `patches`, `githooks`, `secret_hook`, `precommit`,
     `split`; app tabs on the Tools page (re-exporting `workbench::ui` helpers). `git stash show`
     mangles `--src-prefix`, so `diff.noprefix` / `diff.mnemonicPrefix` are overridden with `-c`.
     git ≥ 2.38.1 refuses file-path submodule URLs (`protocol.file.allow`; the tests pass `-c
-    protocol.file.allow=always`). `gitvis hook pre-commit` exits 1 on an undismissed high or
-    critical staged finding; dismissals are synced to `<git dir>/gitvis-dismissed`.
+    protocol.file.allow=always`). `hadion hook pre-commit` exits 1 on an undismissed high or
+    critical staged finding; dismissals are synced to `<git dir>/hadion-dismissed`.
   - `ai`: curl `--config -` on stdin (headers, key, `@body.json`; the body file is deleted on every
     outcome and stale ones swept), SSE parser, redaction through the exposure rules, budgets,
     prices (estimates), refusal / `max_tokens` / fallback handling; the answer streams into an
-    `Arc<Mutex<Live>>` the views read. `GITVIS_AI_KEYCHAIN_NAME` (only `gitvis-test-…`), a fake
+    `Arc<Mutex<Live>>` the views read. `HADION_AI_KEYCHAIN_NAME` (only `hadion-test-…`), a fake
     curl first on PATH; `--test ai_curl` (Windows) and `--test ai_inputs`. Claude Code route (`cli.rs`):
-    `find` (`GITVIS_CLAUDE`, `~/.local/bin/claude.exe`, PATH, the npm shim's
+    `find` (`HADION_CLAUDE`, `~/.local/bin/claude.exe`, PATH, the npm shim's
     `node_modules/@anthropic-ai/claude-code/bin/claude.exe`; never the `.cmd`, whose batch arguments cannot
     carry a multi-line system prompt), `detect` (`--version` + `auth status`, cached five minutes), `args`,
     `env_plan` (removes `ANTHROPIC_*` / `CLAUDE*`, so the plan's sign-in is used), one fixed empty folder
-    `%TEMP%\gitvis-claude-code`, `Stream` (stream-json; `tools` must be empty), Stop = `kill_tree`.
+    `%TEMP%\hadion-claude-code`, `Stream` (stream-json; `tools` must be empty), Stop = `kill_tree`.
     `total_cost_usd` is an estimate: covered by a plan, billed for an API-key sign-in. The commit and
-    failed-job answers open in windows. Test double: `cargo build -p gitvis-core --example fake_claude` +
-    `GITVIS_CLAUDE=<exe>` (`FAKE_CLAUDE_AUTH` plan|env_key|api_key|none, `FAKE_CLAUDE_SCENARIO` /
+    failed-job answers open in windows. Test double: `cargo build -p hadion-core --example fake_claude` +
+    `HADION_CLAUDE=<exe>` (`FAKE_CLAUDE_AUTH` plan|env_key|api_key|none, `FAKE_CLAUDE_SCENARIO` /
     `FAKE_CLAUDE_SEQ`, `FAKE_CLAUDE_LOG`); `--test ai_cli`. Never run `claude auth login/logout`,
-    `setup-token` or `update` from gitvis or tests.
+    `setup-token` or `update` from Hadion or tests.
   - `palette`: core `fuzzy` (alignment + quality filter), `frecency`, `scope`, `item`, `sources`,
     `rank` (narrowing search while the query grows), `files`; app `commands`, `verbs`, `sources`
-    (cached by stamp), `results`, `view`. `cargo test -p gitvis-core --lib palette_perf -- --ignored
+    (cached by stamp), `results`, `view`. `cargo test -p hadion-core --lib palette_perf -- --ignored
     --nocapture`.
   - `identity`: core config listing with file:line, includeIf rules and a git-compatible wildmatch,
     ssh-keygen / ssh-add / `ssh -T` / gpg colon / `gh auth status` parsers, signing plans; four
-    Settings sections. `GITVIS_GPG`, `GITVIS_SSH_KNOWN_HOSTS` (Windows ssh ignores HOME, and
+    Settings sections. `HADION_GPG`, `HADION_SSH_KNOWN_HOSTS` (Windows ssh ignores HOME, and
     `ssh -T github.com` would write your real known_hosts); test edits with `GIT_CONFIG_GLOBAL`
     and a scratch `GNUPGHOME` (a plain `gpg` against the real home creates `~/.gnupg/trustdb.gpg`).
     `--test identity_apply`.
@@ -262,23 +273,23 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
     (no UTF-8 / SHA-256 false positives; lower-case keys only in branch names), `lookup` (curl
     stdin config), `release` (manifest bumps keeping formatting, Keep a Changelog); app
     `notifications`, `groups` (Home tab), `integrations`, `release` (Ship publish form section).
-  - `packaging`: core `version`, `buildinfo` (`crates/gitvis/build.rs` embeds commit, dirty, date,
+  - `packaging`: core `version`, `buildinfo` (`crates/hadion/build.rs` embeds commit, dirty, date,
     target, profile, rustc, owner/repo), `release`, `checksum`, `zip`, `update`, `swap` (rename to
     `.old`, move `.new` in, relaunch, roll back; refuses exes inside a Cargo target folder: never
     run it on `target/debug` or `target/release`), `crash` (panic hook, redacted reports), `issue`,
-    `paths`; `scripts/package.ps1`, `packaging/windows/gitvis.iss`, `.github/workflows/{ci,release}.yml`.
-- Test doubles: `GITVIS_GH` (any area), `GITVIS_KUBECTL`, `GITVIS_TERRAFORM` replace the executables.
-  `cargo build -p gitvis-core --example gh_guard`, then `GITVIS_GH=target/debug/examples/gh_guard.exe`
+    `paths`; `scripts/package.ps1`, `packaging/windows/hadion.iss`, `.github/workflows/{ci,release}.yml`.
+- Test doubles: `HADION_GH` (any area), `HADION_KUBECTL`, `HADION_TERRAFORM` replace the executables.
+  `cargo build -p hadion-core --example gh_guard`, then `HADION_GH=target/debug/examples/gh_guard.exe`
   passes reads to the real gh and blocks every write (non-GET, GraphQL mutations, other subcommands),
   logging to `GH_GUARD_LOG`; `GH_GUARD_FAIL=msg` forces error states. Use it for every UI session
   that touches GitHub. Read-only public test beds the area agents used: cli/cli (environments, 3.6k
   deployments, releases), pallets/click (releases with assets), sharkdp/fd (small artifacts),
   gitlab-org/gitlab-runner (public GitLab API); brave-core has no releases or deployments.
-  Round 2: `GITVIS_NOTIFY=log|off` + `GITVIS_NOTIFY_LOG` (scripted runs always log, never show a
-  notification), `GITVIS_CURL` (issue lookups), `GITVIS_KEYCHAIN_TEST=1` (`gitvis-test-*` entries),
-  `GITVIS_UPDATE_DIR` / `GITVIS_UPDATE_THROTTLE_KIB` / `GITVIS_SCRIPT_AFTER_UPDATE` (updates from a
-  folder), `GITVIS_DATA_DIR` / `GITVIS_CRASH_DIR`, `GITVIS_ALLOW_CRASH_TEST=1` (with a script, for
-  `crash-test`), `GITVIS_CLAUDE` (a fake Claude Code CLI). Never call the real Claude API while testing (it
+  Round 2: `HADION_NOTIFY=log|off` + `HADION_NOTIFY_LOG` (scripted runs always log, never show a
+  notification), `HADION_CURL` (issue lookups), `HADION_KEYCHAIN_TEST=1` (`hadion-test-*` entries),
+  `HADION_UPDATE_DIR` / `HADION_UPDATE_THROTTLE_KIB` / `HADION_SCRIPT_AFTER_UPDATE` (updates from a
+  folder), `HADION_DATA_DIR` / `HADION_CRASH_DIR`, `HADION_ALLOW_CRASH_TEST=1` (with a script, for
+  `crash-test`), `HADION_CLAUDE` (a fake Claude Code CLI). Never call the real Claude API while testing (it
   costs money and sends code).
 - Script commands per area (each area's `script` fn has the full list): review `review`, `prs`,
   `issues`, `pr N`, `pr-tab conversation|files|commits|checks`, `pr-file N`, `issue N`, `new-pr`,
@@ -360,20 +371,20 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
 
 ## Scripted smoke tests (preferred over mouse automation)
 
-`GITVIS_SCRIPT="wait 10; tab 1; head; open path/in/commit; wait 2; shot out.png; split; shot out2.png; quit"`
+`HADION_SCRIPT="wait 10; tab 1; head; open path/in/commit; wait 2; shot out.png; split; shot out2.png; quit"`
 drives the app from inside and saves PNGs rendered by egui (works whatever is on screen).
 Commands: `wait S`, `shot PATH`, `window W H` (inner size in points; 900 × 560 is the minimum), `dialog-cancel`
 (close the open dialog), `tab N`, `head`, `wip`, `open PATH`, `open-wip PATH`, `split`,
 `unified`, `select HUNK FROM TO`, `activity`, `reflog`, `collapse KEY`, `stage PATH`, `undo`,
 (scripted runs never save settings, window geometry or egui memory, so they cannot change your own
-session; run a copy of the exe under another name, e.g. `gitvis-test.exe`, so the build is never locked),
+session; run a copy of the exe under another name, e.g. `hadion-test.exe`, so the build is never locked),
 `theme`, `github` / `graph` (centre page), `filter TEXT` and `status failed|running|passed|all`
 (run list), `run N` (open the N-th listed run), `job N` (show the N-th job's log), `verbose`,
 `security` / `scan` / `scan-history N` / `finding N` / `reveal` (Exposure page), `sec-tab NAME` /
 `osint` / `item N` / `unreachable` / `osv` / `dorks` / `pr-refs` (OSINT tabs), `insights` /
 `ins-tab NAME` / `analyse N` / `ins-item N` / `weight` / `date-debt` / `pickaxe TEXT` / `grep TEXT` /
 `recover` / `blame PATH` (Insights page), the DevOps commands (see "DevOps areas"), `quit`. See
-`crates/gitvis/src/script.rs`. `stage`/`undo` run real git operations; the GitHub commands make
+`crates/hadion/src/script.rs`. `stage`/`undo` run real git operations; the GitHub commands make
 real `gh api` calls (brave-core is the live test bed: `status failed; run 0` lands on a Dependabot
 failure with annotations and an `##[error]` line). `scripts/make-leaky-repo.sh DIR` builds a
 repository with planted (fake) secrets in history, HEAD, the index and the working tree for the
@@ -385,15 +396,15 @@ leftovers. The same script also plants Insights material (reserved/colliding nam
 branch, a cherry-picked duplicate, a `tmp-old` branch, TODO/FIXME, a leaky workflow, MIT LICENSE vs
 `"license": "ISC"`, a foreign copyright header, a dropped stash): `insights; wait 4; shot x.png`
 then `ins-tab ci; ins-item 0`. A scripted window is a real window: clicks in it (for example
-while you work in your own gitvis instance on the same desktop) can change what it shows, so a
+while you work in your own Hadion instance on the same desktop) can change what it shows, so a
 screenshot may show a different tab than the script set. Scripted runs also restore the tabs
-saved by your own gitvis session; `GITVIS_NO_RESTORE=1` opens only the repository on the command
+saved by your own Hadion session; `HADION_NO_RESTORE=1` opens only the repository on the command
 line (README screenshots are taken that way).
 
 ## UI testing without a human
 
 `scripts/make-demo-repo.sh <dir>` builds a demo repository (branches, merges, tags, remote, stash, dirty tree).
-`scripts/ui-shot.ps1 -Out x.png` screenshots the gitvis window; `scripts/ui-input.ps1 -Action click|rclick|
+`scripts/ui-shot.ps1 -Out x.png` screenshots the Hadion window; `scripts/ui-input.ps1 -Action click|rclick|
 dblclick|drag|scroll|keys -X .. -Y ..` sends input in window-relative coordinates (same space as the
-screenshots). Launch `target/debug/gitvis.exe <repo>` in the background first; the exe is locked while it runs,
+screenshots). Launch `target/debug/hadion.exe <repo>` in the background first; the exe is locked while it runs,
 so stop it before rebuilding.

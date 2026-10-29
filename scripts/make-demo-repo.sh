@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds a demo repository with branches, merges, tags, a remote, a stash and
-# a dirty working tree, for exercising the gitvis UI.
+# a dirty working tree, for exercising the Hadion UI.
 set -euo pipefail
 
 ROOT="$1"

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64.00 64.00" width="64" height="64" role="img" aria-label="Hadion">
+<title>Hadion</title>
+<rect width="64" height="64" rx="15" fill="#0F1115"/>
+<g fill="none" stroke="#F4F5F2" stroke-linecap="round" stroke-width="6.5">
+<line x1="22" y1="16" x2="22" y2="48"/>
+<line x1="42" y1="16" x2="42" y2="48"/>
+<path d="M42 36C33 36 31 28.5 22 28.5"/>
+</g>
+<circle cx="22" cy="28.5" r="5.5" fill="#0F1115" stroke="#F4F5F2" stroke-width="4"/>
+</svg>

@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in gitvis does not work as it should.
+description: Something in Hadion does not work as it should.
 labels: [bug]
 body:
   - type: markdown
@@ -34,4 +34,4 @@ body:
     id: logs
     attributes:
       label: Activity log, crash report or screenshot
-      description: The activity log (Ctrl+L) shows every command gitvis ran. Crash reports are in Settings → Crash reports. Check them for anything private before you paste.
+      description: The activity log (Ctrl+L) shows every command Hadion ran. Crash reports are in Settings → Crash reports. Check them for anything private before you paste.

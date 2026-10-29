@@ -1,20 +1,20 @@
 <#
 .SYNOPSIS
-  Build gitvis and package a release the updater can install.
+  Build Hadion and package a release the updater can install.
 
 .DESCRIPTION
-  1. cargo build -p gitvis (--release unless -Profile debug), skipped with -NoBuild
-  2. stage dist\gitvis-<version>\ : gitvis.exe, README.md, LICENSE-MIT,
+  1. cargo build -p hadion (--release unless -Profile debug), skipped with -NoBuild
+  2. stage dist\hadion-<version>\ : hadion.exe, README.md, LICENSE-MIT,
      LICENSE-APACHE, licenses\ (the bundled fonts' OFL texts and
      THIRD-PARTY-LICENSES.txt from `cargo run --example notices`)
-  3. dist\gitvis-<version>-windows-<arch>.zip  (the release asset)
-  4. the installer dist\gitvis-<version>-windows-<arch>-setup.exe with
+  3. dist\hadion-<version>-windows-<arch>.zip  (the release asset)
+  4. the installer dist\hadion-<version>-windows-<arch>-setup.exe with
      Inno Setup (ISCC) when it is installed; otherwise how to get it
   5. dist\SHA256SUMS listing the zip (and the installer)
 
   The version comes from [workspace.package] in Cargo.toml. The release
   contract the updater checks: a release tagged v<version> carrying
-  gitvis-<version>-windows-x86_64.zip and SHA256SUMS.
+  hadion-<version>-windows-x86_64.zip and SHA256SUMS.
 
 .EXAMPLE
   ./scripts/package.ps1
@@ -25,7 +25,7 @@
   Package the existing debug build, e.g. to test the packaging steps.
 
 .EXAMPLE
-  ./scripts/package.ps1 -NoBuild -Exe C:\tmp\gitvis.exe -OutDir C:\tmp\dist -NoInstaller
+  ./scripts/package.ps1 -NoBuild -Exe C:\tmp\hadion.exe -OutDir C:\tmp\dist -NoInstaller
   Package a given executable into another folder (update tests).
 #>
 [CmdletBinding()]
@@ -55,12 +55,12 @@ if (-not $m.Success) { throw 'No version in [workspace.package] of Cargo.toml' }
 $version = $m.Groups[1].Value
 $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'aarch64' } else { 'x86_64' }
 $platform = "windows-$arch"
-$name = "gitvis-$version"
-Write-Host "gitvis $version for $platform ($Profile)"
+$name = "hadion-$version"
+Write-Host "Hadion $version for $platform ($Profile)"
 
 # --- Build ----------------------------------------------------------------------
 if (-not $NoBuild) {
-    $cargoArgs = @('build', '-p', 'gitvis', '--locked')
+    $cargoArgs = @('build', '-p', 'hadion', '--locked')
     if ($Profile -eq 'release') { $cargoArgs += '--release' }
     Step "cargo $($cargoArgs -join ' ')"
     & cargo @cargoArgs
@@ -68,7 +68,7 @@ if (-not $NoBuild) {
 }
 if (-not $Exe) {
     $targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $root 'target' }
-    $Exe = Join-Path $targetDir "$Profile\gitvis.exe"
+    $Exe = Join-Path $targetDir "$Profile\hadion.exe"
 }
 if (-not (Test-Path $Exe -PathType Leaf)) {
     throw "No executable at $Exe (build first, or pass -Exe PATH)"
@@ -79,7 +79,7 @@ $stage = Join-Path $OutDir $name
 Step "Stage $stage"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force (Join-Path $stage 'licenses') | Out-Null
-Copy-Item $Exe (Join-Path $stage 'gitvis.exe')
+Copy-Item $Exe (Join-Path $stage 'hadion.exe')
 Copy-Item (Join-Path $root 'README.md') $stage
 $licences = @()
 foreach ($f in 'LICENSE', 'LICENSE.md', 'LICENSE.txt', 'LICENSE-MIT', 'LICENSE-APACHE') {
@@ -89,12 +89,12 @@ foreach ($f in 'LICENSE', 'LICENSE.md', 'LICENSE.txt', 'LICENSE-MIT', 'LICENSE-A
 if (-not $licences) {
     Write-Warning 'The repository has no LICENSE file: the package carries only the font licences.'
 }
-Copy-Item (Join-Path $root 'crates\gitvis\assets\fonts\*-OFL.txt') (Join-Path $stage 'licenses')
-Copy-Item (Join-Path $root 'crates\gitvis\assets\fonts\*-LICENSE.txt') (Join-Path $stage 'licenses')
-# Every crate compiled into gitvis, with its licence files (MIT, BSD, ISC
+Copy-Item (Join-Path $root 'crates\hadion\assets\fonts\*-OFL.txt') (Join-Path $stage 'licenses')
+Copy-Item (Join-Path $root 'crates\hadion\assets\fonts\*-LICENSE.txt') (Join-Path $stage 'licenses')
+# Every crate compiled into Hadion, with its licence files (MIT, BSD, ISC
 # and Zlib ask for their notices to travel with binaries).
 $notices = Join-Path $stage 'licenses\THIRD-PARTY-LICENSES.txt'
-$noticeArgs = @('run', '--quiet', '--locked', '-p', 'gitvis-core', '--example', 'notices')
+$noticeArgs = @('run', '--quiet', '--locked', '-p', 'hadion-core', '--example', 'notices')
 if ($Profile -eq 'release') { $noticeArgs += '--release' }
 & cargo @noticeArgs -- --out $notices
 if ($LASTEXITCODE -ne 0) { throw "cargo run --example notices failed (exit $LASTEXITCODE)" }
@@ -123,7 +123,7 @@ if (-not $NoInstaller) {
             Select-Object -First 1
     }
     if ($iscc) {
-        $iss = Join-Path $root 'packaging\windows\gitvis.iss'
+        $iss = Join-Path $root 'packaging\windows\hadion.iss'
         & $iscc "/DAppVersion=$version" "/DSourceDir=$stage" "/DOutputDir=$OutDir" "/DPlatform=$platform" $iss
         if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit $LASTEXITCODE)" }
         $setup = Join-Path $OutDir "$name-$platform-setup.exe"

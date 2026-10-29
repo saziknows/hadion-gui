@@ -1,4 +1,7 @@
-# gitvis
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/svg/hadion-lockup.svg">
+  <img alt="Hadion" src="docs/brand/svg/hadion-lockup-light.svg" width="320">
+</picture>
 
 A fast, native Git client focused on **branch visualisation and management**, with the
 work around a repository (reviews, CI, releases, deployments, security) in the same window.
@@ -20,17 +23,17 @@ GitKraken.
 
 **Windows** (x86-64): download the installer or the zip from
 [Releases](https://github.com/saziknows/hadion-gui/releases). The installer is per-user and
-needs no administrator rights; installed that way, gitvis can update itself (Settings →
+needs no administrator rights; installed that way, Hadion can update itself (Settings →
 Updates). Each release lists SHA-256 checksums in `SHA256SUMS`.
 
-gitvis needs `git` on `PATH`. Everything else is optional and only used by the features that
-need it: [`gh`](https://cli.github.com/) for GitHub (gitvis uses your `gh auth` and stores no
+Hadion needs `git` on `PATH`. Everything else is optional and only used by the features that
+need it: [`gh`](https://cli.github.com/) for GitHub (Hadion uses your `gh auth` and stores no
 GitHub token), `glab` / `az` for GitLab and Azure DevOps, `kubectl`, `terraform` / `tofu`,
 `act`, `trivy` / `grype`, `pre-commit`, `semgrep`, `curl` for osv.dev and the Claude API, and
 Claude Code (`claude`) for AI assist on your Claude plan. A
 missing tool is reported where it is needed, with how to install it.
 
-**Platforms.** gitvis is developed and used every day on Windows 11. Linux builds and passes
+**Platforms.** Hadion is developed and used every day on Windows 11. Linux builds and passes
 the test suite (CI runs it on every push), but its UI has seen little use there. macOS has
 not been tried yet.
 
@@ -41,7 +44,7 @@ compiler for libgit2 (MSVC or MinGW on Windows, gcc or clang elsewhere), and `gi
 at runtime. On Linux the keychain support also needs `pkg-config` and `libdbus-1-dev`.
 
 ```sh
-cargo run --release -p gitvis -- path/to/repo
+cargo run --release -p hadion -- path/to/repo
 ```
 
 Run without arguments inside a repository to open it, or open one from the
@@ -55,21 +58,21 @@ cargo test
 
 Packaging (Windows): `./scripts/package.ps1` builds the release exe, a zip, `SHA256SUMS` and,
 when Inno Setup is installed (`winget install JRSoftware.InnoSetup`), a per-user installer
-(`packaging/windows/gitvis.iss`, no admin rights). Pushing a tag `vX.Y.Z` that matches
+(`packaging/windows/hadion.iss`, no admin rights). Pushing a tag `vX.Y.Z` that matches
 `Cargo.toml` runs `.github/workflows/release.yml`, which builds and uploads the same files;
 `.github/workflows/ci.yml` checks format, clippy and tests on pushes and pull requests.
-In-app updates need a per-user install (`%LOCALAPPDATA%\Programs\gitvis`).
+In-app updates need a per-user install (`%LOCALAPPDATA%\Programs\hadion`).
 
 The integration tests build throwaway repositories with the real `git` binary.
-`GITVIS_TIMING=1` prints loader phase timings to stderr;
-`cargo run --release -p gitvis-core --example bench -- path/to/repo` times a load;
+`HADION_TIMING=1` prints loader phase timings to stderr;
+`cargo run --release -p hadion-core --example bench -- path/to/repo` times a load;
 `--example scan -- path/to/repo [--history N]` prints the exposure report,
 `--example osint -- path/to/repo [--unreachable]` the OSINT report and
 `--example insights -- path/to/repo [--commits N] [--weight] [--lost] [--date-debt] [--pickaxe TEXT]`
 the insights report.
 
-Third-party licences: `cargo run -p gitvis-core --example notices` writes the licence texts of
-every crate compiled into gitvis; `scripts/package.ps1` puts them in
+Third-party licences: `cargo run -p hadion-core --example notices` writes the licence texts of
+every crate compiled into Hadion; `scripts/package.ps1` puts them in
 `licenses/THIRD-PARTY-LICENSES.txt` of every release.
 
 ## Features
@@ -126,7 +129,7 @@ every crate compiled into gitvis; `scripts/package.ps1` puts them in
   reveal in Explorer.
 
 **Activity, reflog, undo**
-- Activity panel (`Ctrl+L`): everything gitvis did, with the exact command, the full
+- Activity panel (`Ctrl+L`): everything Hadion did, with the exact command, the full
   output, working directory, size and duration. Filter by kind (operations, repository
   reads, GitHub API) or text; copy commands or output.
 - **Verbose mode** (on by default, gear menu): background reads are logged too — what a
@@ -145,15 +148,15 @@ every crate compiled into gitvis; `scripts/package.ps1` puts them in
   branches, urgent exposure findings, operations in progress. **Fetch all** runs
   `git fetch --all --prune` in each repository after a confirmation listing them.
 - **Inbox**: notifications by reason (review requested, mention, assigned, CI, security, …)
-  with unread / open-in-gitvis / group-by-repository filters, plus review requests, your
+  with unread / open-in-hadion / group-by-repository filters, plus review requests, your
   pull requests, mentions and assignments from one GraphQL search, and failed runs on your
-  branches from the data already loaded. Items open in gitvis when their repository is open.
+  branches from the data already loaded. Items open in Hadion when their repository is open.
 - **Groups**: named sets of repositories (open or not) with a status table (branch, ahead /
   behind, changes, last commit), open all as tabs, and **fetch all / pull all (`--ff-only`)
   / create a branch in all**, one repository after another with the result of each; pull
   skips dirty, detached, diverged and untracked branches and says so.
 
-**Review** (`Ctrl+Shift+R`): pull requests and issues (through the `gh` CLI, so gitvis stores no token)
+**Review** (`Ctrl+Shift+R`): pull requests and issues (through the `gh` CLI, so Hadion stores no token)
 - Pull request list from one GraphQL query: draft, review decision, checks, conflicts or
   behind, your review requested, labels in their colours; chips for open / draft / review
   requested / mine / closed, search, paging.
@@ -269,8 +272,8 @@ every crate compiled into gitvis; `scripts/package.ps1` puts them in
   ("applies cleanly", "needs a 3-way merge", "does not apply") through `git apply` or
   `git am`, with Continue / Skip / Abort while `git am` is stopped.
 - **Hooks**: every hook in `core.hooksPath` or `.git/hooks` with when git runs it; edit,
-  enable / disable, new from a template. **The gitvis secret check** installs as a
-  pre-commit hook (`gitvis hook pre-commit`, chaining an existing hook): it scans the
+  enable / disable, new from a template. **The Hadion secret check** installs as a
+  pre-commit hook (`hadion hook pre-commit`, chaining an existing hook): it scans the
   staged added lines with the Exposure rules, prints findings redacted, and stops the
   commit on a high or critical one that you did not dismiss (`git commit --no-verify`
   skips it once). `pre-commit` and `semgrep` run in the console when installed.
@@ -320,10 +323,10 @@ the multi-selection panel, or the palette's `>compare`)
   API** with an API key (billed per token). **Auto**, the default, uses Claude Code when it is
   signed in with a plan, otherwise the API key, and otherwise says how to set up either.
   Model and effort are chosen per way and per feature.
-- gitvis runs Claude Code from an empty folder with its tools, MCP servers, plugins, hooks,
+- Hadion runs Claude Code from an empty folder with its tools, MCP servers, plugins, hooks,
   slash commands and CLAUDE.md files off (`--safe-mode --tools ""`), for one turn, without
   saving the session. The material goes on standard input, never on the command line, and
-  `ANTHROPIC_*` / `CLAUDE*` variables are removed so it uses its own sign-in. gitvis never
+  `ANTHROPIC_*` / `CLAUDE*` variables are removed so it uses its own sign-in. Hadion never
   reads or stores Claude Code's credentials: it reads `claude auth status`, shows how to
   install Claude Code or sign in (`claude auth login`, which you run yourself), and warns
   when Claude Code is signed in with an API key, which bills that account.
@@ -363,7 +366,7 @@ the multi-selection panel, or the palette's `>compare`)
   status lookups (tokens in the keychain).
 - **Updates**: check GitHub releases when asked (or on start), verify the SHA-256, stage the
   new exe and swap it in on restart, rolling back on failure.
-- **Crash reports**: written with secrets removed to `%LOCALAPPDATA%\gitvis\crashes`,
+- **Crash reports**: written with secrets removed to `%LOCALAPPDATA%\hadion\crashes`,
   offered on the next start, never uploaded; "Report on GitHub" shows the issue text first.
 - **About**: version, commit, build, paths and licences.
 
@@ -371,7 +374,7 @@ the multi-selection panel, or the palette's `>compare`)
 - **Secrets in content**: 50+ patterns (AWS, GitHub, GitLab, Slack, Stripe, Google, OpenAI,
   Anthropic, npm, PyPI, Azure, private keys, JWTs, passwords in URLs, credentials in
   `.env`/ini/yaml, generic `password =` assignments, high-entropy strings) with placeholder
-  and entropy filters; a `gitvis:allow` comment on a line skips it.
+  and entropy filters; a `hadion:allow` comment on a line skips it.
 - **Sensitive files**: `.env*`, SSH and PGP keys, `*.pem/.key/.p12/.pfx/.jks`, credential
   stores (`.git-credentials`, `.netrc`, `.npmrc`, `.pypirc`, `.aws/credentials`, kubeconfig,
   Docker config), Terraform state and variables, database dumps, shell histories, …
@@ -485,10 +488,10 @@ the multi-selection panel, or the palette's `>compare`)
   network calls only happen when you open a page or press a button.
 - Multiple repositories as tabs; clone (`Ctrl+Shift+O`), open (`Ctrl+O`), or drag a folder
   onto the window.
-- API keys and tokens live in the OS keychain (service `gitvis`), never in settings files or
+- API keys and tokens live in the OS keychain (service `hadion`), never in settings files or
   logs.
 - Inter and JetBrains Mono (both SIL Open Font Licence) and Lucide icons (ISC), bundled in
-  `crates/gitvis/assets/fonts` with their licences; dark and light themes; relative or
+  `crates/hadion/assets/fonts` with their licences; dark and light themes; relative or
   absolute dates. Every page fits windows down to 900 × 560.
 - Settings and per-repository preferences persist between runs.
 
@@ -525,7 +528,7 @@ the multi-selection panel, or the palette's `>compare`)
 
 ```
 crates/
-  gitvis-core/   repository model, graph layout, diff parsing, git operations
+  hadion-core/   repository model, graph layout, diff parsing, git operations
     src/graph.rs     lane layout (pure, unit-tested)
     src/repo.rs      libgit2 snapshot loader; `git status` for the working tree
     src/ops.rs       GitOp -> git command lines, run via the git binary
@@ -542,12 +545,12 @@ crates/
                      history/, gitplus/, ai/, palette/, identity/, terminal/,
                      automation/, packaging/; safety.rs (safe mode), keychain.rs
     tests/           end-to-end tests against generated repositories
-  gitvis/        egui application
+  hadion/        egui application
     src/app.rs       state machine: loads, operations, watcher, actions, verbose logging
     src/worker.rs    background reader thread + one thread per operation or API request
     src/watcher.rs   file-system watcher with .git-aware classification
     src/highlight.rs syntect colouring, computed on the reader thread
-    src/script.rs    GITVIS_SCRIPT smoke-test driver (screenshots via egui)
+    src/script.rs    HADION_SCRIPT smoke-test driver (screenshots via egui)
     src/theme.rs     design tokens: palette, type scale, spacing, fonts
     src/views/kit.rs the component kit every page is built from
     src/views/       rail, toolbar, sidebar, graph, details, diff, github, security, osint, insights/,
@@ -586,7 +589,7 @@ Please report security problems privately, as described in [SECURITY.md](SECURIT
 
 ## License
 
-gitvis is licensed under either of
+Hadion is licensed under either of
 
 - [Apache License, Version 2.0](LICENSE-APACHE)
 - [MIT license](LICENSE-MIT)
@@ -594,9 +597,11 @@ gitvis is licensed under either of
 at your option.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for
-inclusion in gitvis by you, as defined in the Apache-2.0 license, shall be dual licensed as
+inclusion in Hadion by you, as defined in the Apache-2.0 license, shall be dual licensed as
 above, without any additional terms or conditions.
 
 The bundled Inter and JetBrains Mono fonts are under the SIL Open Font License 1.1 and the
-Lucide icons under the ISC licence (their licences are in `crates/gitvis/assets/fonts`); the crates gitvis is built from keep their own
-licences, collected in each release's `licenses/THIRD-PARTY-LICENSES.txt`.
+Lucide icons under the ISC licence (their licences are in `crates/hadion/assets/fonts`); the
+crates Hadion is built from keep their own licences, collected in each release's
+`licenses/THIRD-PARTY-LICENSES.txt`. The logo files, colours and usage rules are in
+[`docs/brand`](docs/brand).

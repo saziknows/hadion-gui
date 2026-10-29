@@ -1,4 +1,4 @@
-param([string]$Out = "shot.png", [string]$ProcName = "gitvis")
+param([string]$Out = "shot.png", [string]$ProcName = "hadion")
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System; using System.Runtime.InteropServices;

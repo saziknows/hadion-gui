@@ -1,0 +1,26 @@
+[package]
+name = "hadion-core"
+version.workspace = true
+edition.workspace = true
+description = "The no-UI core of hadion: repository snapshots, graph layout, diffs, git operations, scanners and DevOps integrations"
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+aho-corasick = "1.1"
+flate2 = "1.1"
+git2.workspace = true
+regex = "1.11"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+similar = "3.2.1"
+# App-wide features (2026-10-27): OS keychain for API tokens, pseudo-terminals
+# and a VT100 screen for the terminal panel, desktop notifications, SHA-256
+# for update downloads.
+keyring = { version = "3", features = ["windows-native", "apple-native", "sync-secret-service"] }
+portable-pty = "0.9"
+vt100 = "0.15"
+notify-rust = "4"
+sha2 = "0.10"

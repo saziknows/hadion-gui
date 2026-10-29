@@ -1,0 +1,25 @@
+[package]
+name = "hadion"
+version.workspace = true
+edition.workspace = true
+description = "A native Git client focused on branch visualisation, with code review, CI, releases and repository insights in the same window"
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+hadion-core.workspace = true
+eframe.workspace = true
+egui.workspace = true
+rfd.workspace = true
+notify.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+open.workspace = true
+syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+
+[build-dependencies]
+# Icon and version resource of the Windows exe (build.rs; without its toml feature).
+winresource = { version = "0.1.34", default-features = false }
