@@ -359,7 +359,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                     " If git am stops, Continue, Skip and Abort are on this tab and on the banner.",
                 );
             }
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 if am {
                     "Apply as commits?"
                 } else {
@@ -417,7 +418,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                     true,
                 ),
             };
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 title,
                 body,
                 match step.as_str() {
@@ -498,7 +500,8 @@ fn confirm_create(cx: &mut Ctx, source: Source, out_dir: PathBuf, commits: &[Ran
     if commits.len() > 40 {
         list.push(format!("… and {} more", commits.len() - 40));
     }
-    cx.confirm(
+    crate::devops::pages::explain::confirm(
+        cx,
         "Create the patch files?",
         format!(
             "Writes {} into {}, one mail per commit ({}), oldest first. Merge commits are left out.",
@@ -546,7 +549,7 @@ fn am_stopped(ui: &mut Ui, p: &mut Patches, busy: bool, actions: &mut Vec<Action
         ui,
         Tone::Warning,
         "git am stopped",
-        "A patch did not apply. Resolve the conflicts (or apply it by hand) and stage the result, then Continue; or Skip this patch; or Abort to go back to where the branch was.",
+        "A patch did not apply.\nResolve the conflicts (or apply it by hand) and stage the result, then Continue; or Skip this patch; or Abort to go back to where the branch was.",
         |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
@@ -655,7 +658,8 @@ fn create(ui: &mut Ui, p: &mut Patches, branch: &str, busy: bool, actions: &mut 
                         "gp_patch_out",
                         &mut p.out_dir,
                         InputOpts::new("Choose a folder")
-                            .width((ui.available_width() - 110.0).max(240.0)),
+                            // Room for the Choose button; the frame adds 22.
+                            .width((ui.available_width() - 134.0).max(120.0)),
                     );
                     if form::button(ui, "Choose…", true).clicked() {
                         actions.push(Act::PickPatchFolder.into());

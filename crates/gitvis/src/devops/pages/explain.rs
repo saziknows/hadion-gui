@@ -149,6 +149,22 @@ pub fn quiet(ui: &mut Ui, text: &str) -> egui::Response {
     ui.add(Label::new(RichText::new(text).size(size::SMALL).color(c)).wrap())
 }
 
+/// `Ctx::confirm` with the body one sentence per line: the confirmation
+/// dialogs of these pages explain several things at once (what runs, what
+/// changes, what to do after), which read as a wall in one paragraph.
+pub fn confirm(
+    cx: &mut crate::devops::ctx::Ctx,
+    title: impl Into<String>,
+    body: impl Into<String>,
+    confirm: impl Into<String>,
+    danger: bool,
+    details: Vec<String>,
+    action: crate::state::Action,
+) {
+    let body = one_per_line(&body.into());
+    cx.confirm(title, body, confirm, danger, details, action);
+}
+
 /// A paragraph with each sentence on its own line, so an explanation built
 /// as one paragraph reads as a few short facts ("… role. Your role …"
 /// breaks after "role."; "e.g. Alpine" and "1.2.3" do not).

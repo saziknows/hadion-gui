@@ -210,7 +210,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             }
             let body = if cmd.is_empty() {
                 format!(
-                    "Checks out a commit halfway between {} (good) and {bad} (bad). Mark each commit good or bad until git names the first bad one; git bisect reset returns you to where you are now.",
+                    "Checks out a commit halfway between {} (good) and {bad} (bad).\nMark each commit good or bad until git names the first bad one; git bisect reset returns you to where you are now.",
                     goods.join(", ")
                 )
             } else {
@@ -219,7 +219,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                     goods.join(", ")
                 )
             };
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Start bisecting?",
                 body,
                 "Start bisect",
@@ -275,7 +276,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             if shell == Shell::Cmd {
                 details.push(format!("# <script>.cmd\n{}", core::cmd_script_text(&cmd)));
             }
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Let the test command bisect?",
                 "git checks out each candidate commit and runs the command in the working tree: exit 0 means good, 125 skip, any other code up to 127 bad, 128 or more stops the run. The output streams into the console.",
                 "Run",
@@ -297,7 +299,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                     .unwrap_or_else(|| "where it started".into()),
                 _ => "where it started".into(),
             };
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "End the bisection?",
                 format!("Checks out {back} again and forgets the good / bad marks."),
                 "Reset",

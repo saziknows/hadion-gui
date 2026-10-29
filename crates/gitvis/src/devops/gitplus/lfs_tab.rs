@@ -132,7 +132,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 return;
             }
             let args = core::track_args(&pattern, s.lockable);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Track the pattern with LFS?",
                 format!(
                     "Adds \"{pattern}\" to .gitattributes, so matching files added from now on are stored in LFS{}. Files already committed stay as they are until they are added again (git lfs migrate rewrites history; gitvis does not). Commit .gitattributes afterwards.",
@@ -163,7 +164,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         }
         Act::LfsUntrack(pattern) => {
             let args = core::untrack_args(&pattern);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Stop tracking the pattern?",
                 format!(
                     "Removes \"{pattern}\" from .gitattributes. Files already in LFS stay pointers in history; new versions are stored in git directly. Commit .gitattributes afterwards."
@@ -190,7 +192,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                     details.push(summary);
                 }
             }
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("{}?", kind.label()),
                 kind.explain(),
                 kind.label(),
@@ -242,7 +245,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         }
         Act::LfsLock(path) => {
             let args = core::lock_args(&path);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Lock the file?",
                 format!(
                     "Asks the LFS server to lock {path} for you: others cannot push changes to it until you unlock it. This is a change on the server."
@@ -264,8 +268,13 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         }
         Act::LfsUnlock { path, force } => {
             let args = core::unlock_args(&path, force);
-            cx.confirm(
-                if force { "Force the unlock?" } else { "Unlock the file?" },
+            crate::devops::pages::explain::confirm(
+                cx,
+                if force {
+                    "Force the unlock?"
+                } else {
+                    "Unlock the file?"
+                },
                 if force {
                     format!(
                         "Removes the lock on {path} although someone else holds it (needs admin rights on the server). They are not told."
@@ -639,7 +648,7 @@ fn files(ui: &mut Ui, s: &mut Lfs, o: &Overview, actions: &mut Vec<Action>) {
     } else if shown.is_empty() {
         kit::muted(ui, "No file matches the filter.");
     }
-    kit::muted(
+    kit::secondary(
         ui,
         "Right-click a file to lock it or copy its path or object id.",
     );
@@ -647,7 +656,7 @@ fn files(ui: &mut Ui, s: &mut Lfs, o: &Overview, actions: &mut Vec<Action>) {
 
 fn gui_search(ui: &mut Ui, text: &mut String) {
     ui.horizontal(|ui| {
-        ui.set_max_width(420.0);
+        crate::devops::pages::layout::cap_width(ui, 420.0);
         kit::search_box(ui, "gp_lfs_filter", text, "Filter files");
     });
     ui.add_space(4.0);
@@ -702,7 +711,7 @@ fn locks(ui: &mut Ui, s: &mut Lfs, settings: &Settings, busy: bool, actions: &mu
         },
     );
     if settings.safe_mode {
-        kit::muted(
+        kit::secondary(
             ui,
             "Safe mode is on: lock and unlock are refused (they change the server).",
         );

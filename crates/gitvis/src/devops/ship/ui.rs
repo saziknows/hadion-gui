@@ -21,7 +21,7 @@ pub fn gate(ui: &mut Ui, repo: &RepoState, actions: &mut Vec<Action>) -> bool {
             ui,
             Icon::Cloud,
             "No GitHub remote",
-            "Releases, environments and deployments come from GitHub. Add a remote on github.com (git remote add origin https://github.com/OWNER/REPO.git) and open this page again.",
+            "Releases, environments and deployments come from GitHub.\nAdd a remote on github.com (git remote add origin https://github.com/OWNER/REPO.git) and open this page again.",
             None,
         );
         return false;

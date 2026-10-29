@@ -635,7 +635,7 @@ pub fn codeowners(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) 
                 ui,
                 Icon::Lock,
                 "No CODEOWNERS file",
-                "GitHub looks for .github/CODEOWNERS, then CODEOWNERS, then docs/CODEOWNERS. Code owners are requested for review automatically, and branch protection can require their approval.",
+                "GitHub looks for .github/CODEOWNERS, then CODEOWNERS, then docs/CODEOWNERS.\nCode owners are requested for review automatically, and branch protection can require their approval.",
                 Some((Icon::Plus, "Create .github/CODEOWNERS")),
             ) {
                 actions.push(Act::EditCodeowners(true).into());

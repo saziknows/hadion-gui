@@ -121,12 +121,12 @@ pub fn show(
             return;
         }
         if empty {
-            crate::devops::pages::layout::page(ui, "ship_releases_empty", |ui| {
+            crate::devops::pages::layout::state_page(ui, "ship_releases_empty", |ui| {
                 if kit::empty_state(
                     ui,
                     Icon::Tag,
                     "No releases yet",
-                    "This repository has no release on GitHub. Publish one from a tag: gitvis suggests the next version from your conventional commits and writes the notes.",
+                    "This repository has no release on GitHub.\nPublish one from a tag: gitvis suggests the next version from your conventional commits and writes the notes.",
                     Some((Icon::Plus, "New release")),
                 ) {
                     actions.push(Act::NewRelease.into());
@@ -134,7 +134,7 @@ pub fn show(
             });
             return;
         }
-        crate::devops::pages::layout::page(ui, "ship_releases_state", |ui| {
+        crate::devops::pages::layout::state_page(ui, "ship_releases_state", |ui| {
             sui::loaded(
                 ui,
                 &st.releases,
@@ -997,9 +997,9 @@ fn publish_form(
                                 .size(size::SMALL)
                                 .color(p.text_2),
                         );
-                        // A long path is cut instead of widening the form.
-                        ui.add(egui::Label::new(kit::mono(path).color(p.text)).truncate())
-                            .on_hover_text(path);
+                        // A long path is cut instead of widening the form
+                        // (egui shows the full path on hover when cut).
+                        ui.add(egui::Label::new(kit::mono(path).color(p.text)).truncate());
                     });
                 }
                 if let Some(i) = remove {

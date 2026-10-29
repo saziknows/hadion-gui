@@ -353,7 +353,8 @@ pub fn on_msg(cx: &mut Ctx, g: &mut GlobalCx, msg: Msg) {
                 details.push(String::new());
             }
             let paths: Vec<&str> = plan.edits.iter().map(|e| e.path.as_str()).collect();
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Create the release commit for {}?", plan.tag),
                 format!(
                     "Writes {} ({}), stages them and commits only them as \"{}\". Other staged changes stay staged. Nothing is pushed: push, then publish.",
@@ -665,7 +666,7 @@ fn body(
     match &found.changelog {
         Some((path, content)) if core::section_line(content, version).is_some() => {
             kit::subtitle(ui, path);
-            kit::muted(
+            kit::secondary(
                 ui,
                 &format!(
                     "Already has a section for {version} (line {}): nothing to add.",

@@ -119,7 +119,7 @@ pub fn show(ui: &mut Ui, cx: &Cx, rt: &mut State, console: &Console, actions: &m
                 common::missing_tool(
                     ui,
                     "Neither Terraform nor OpenTofu is installed",
-                    "Format checks, validate, plan and drift run the terraform (or tofu) binary in the root's directory. The roots and their configuration below are read from the files and need neither.",
+                    "Format checks, validate, plan and drift run the terraform (or tofu) binary in the root's directory.\nThe roots and their configuration below are read from the files and need neither.",
                     &[Binary::Terraform.install_hint(), Binary::Tofu.install_hint()],
                     Act::TfCheckTools,
                     actions,
@@ -133,10 +133,10 @@ pub fn show(ui: &mut Ui, cx: &Cx, rt: &mut State, console: &Console, actions: &m
                 Icon::Cloud,
                 "No Terraform roots in this repository",
                 &if scan.modules.is_empty() {
-                    "No *.tf or *.tofu files outside .terraform/. Roots are directories with configuration files that are not called as a module by another directory.".to_owned()
+                    "No *.tf or *.tofu files outside .terraform/.\nRoots are directories with configuration files that are not called as a module by another directory.".to_owned()
                 } else {
                     format!(
-                        "{} with configuration were found, all of them modules (called by another directory, or under modules/). A root is where terraform init and plan run; it usually has a backend block.",
+                        "{} with configuration were found, all of them modules (called by another directory, or under modules/).\nA root is where terraform init and plan run; it usually has a backend block.",
                         format::plural(scan.modules.len(), "directory", "directories")
                     )
                 },

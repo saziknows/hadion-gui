@@ -114,7 +114,7 @@ pub fn detail_pane(ui: &mut Ui, salt: impl Hash + std::fmt::Debug, add: impl FnO
 
 /// A full-width page in the remaining area (empty and error states).
 pub fn page(ui: &mut Ui, salt: &str, add: impl FnOnce(&mut Ui)) {
-    layout::detail_pane(ui, salt, add);
+    layout::state_page(ui, salt, add);
 }
 
 /// A console run in a resizable panel at the bottom of the remaining area,
@@ -141,7 +141,7 @@ pub fn console_panel(
     egui::Panel::bottom(id)
         .resizable(true)
         .default_size((avail * 0.34).max(200.0))
-        .size_range(140.0..=(avail - 120.0).max(160.0))
+        .size_range(210.0..=(avail - 120.0).max(210.0))
         .frame(Frame::NONE.fill(fill))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());

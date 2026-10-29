@@ -194,9 +194,13 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                     if commit.is_empty() { "HEAD" } else { commit }
                 ),
             };
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Add a worktree?",
-                format!("Creates {} with {what} checked out. It shares this repository's history, branches and stashes.", display(&path)),
+                format!(
+                    "Creates {} with {what} checked out. It shares this repository's history, branches and stashes.",
+                    display(&path)
+                ),
                 "Add worktree",
                 false,
                 vec![core::line(&args)],
@@ -251,7 +255,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             if locked {
                 body.push_str(" It is locked: --force twice removes it anyway.");
             }
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Remove the worktree?",
                 body,
                 if dirty {
@@ -285,7 +290,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 .trim()
                 .to_owned();
             let args = core::lock_args(&path, &reason);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Lock the worktree?",
                 "A locked worktree is never pruned, moved or removed by git until it is unlocked: useful for one on a removable disk or a network share.",
                 "Lock",
@@ -299,7 +305,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         }
         Act::UnlockWorktree(path) => {
             let args = core::unlock_args(&path);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Unlock the worktree?",
                 "git may then prune it when its folder is missing.",
                 "Unlock",
@@ -321,7 +328,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 return;
             }
             let args = core::move_args(&path, &to);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Move the worktree?",
                 format!(
                     "Moves {} to {} and updates git's records. Programs with files open in it may lose them.",
@@ -366,7 +374,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                         .join("\n"),
                 );
             }
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Prune worktree records?",
                 format!(
                     "Removes git's records of {} worktree{} whose folders are gone. No files are deleted.",
@@ -815,7 +824,7 @@ fn detail(
         }
     });
     if current {
-        kit::muted(
+        kit::secondary(
             ui,
             "Open in this tab: switch to another worktree to move or remove this one.",
         );

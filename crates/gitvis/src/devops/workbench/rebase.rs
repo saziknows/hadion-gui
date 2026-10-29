@@ -179,7 +179,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             let rewritten = r.plan.rewritten();
             let pushed = rewritten.iter().filter(|c| c.pushed).count();
             let mut body = format!(
-                "Rewrites {} of {} commits onto {} ({}). Uncommitted changes are stashed first and restored afterwards (--autostash); hooks are skipped for the message amends, as git does for picks.",
+                "Rewrites {} of {} commits onto {} ({}).\nUncommitted changes are stashed first and restored afterwards (--autostash); hooks are skipped for the message amends, as git does for picks.",
                 rewritten.len(),
                 r.plan.rows.len(),
                 &l.base_sha[..10.min(l.base_sha.len())],
@@ -196,7 +196,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 ));
             }
             r.work = Some(work);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Start the interactive rebase?",
                 body,
                 "Start rebase",

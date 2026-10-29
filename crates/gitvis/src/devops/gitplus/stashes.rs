@@ -266,7 +266,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                     true,
                 ),
             };
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 title,
                 body,
                 confirm,
@@ -320,7 +321,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 .entry(&sha)
                 .and_then(|e| e.base.clone())
                 .unwrap_or_default();
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Create a branch from the stash?",
                 format!(
                     "Creates the branch {name} at the commit the stash was made on ({}), switches to it, applies stash@{{{index}}} there and drops it when that worked. Your current branch is not touched.",
@@ -396,7 +398,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             let include_untracked = f.include_untracked || untracked;
             let args = core::push_args(&f.message, f.keep_index, include_untracked, &paths);
             let left = changed.len() - paths.len();
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Stash the selected files?",
                 format!(
                     "Moves the changes of {} into a new stash and puts those files back as they are in HEAD.{}{}",
@@ -612,9 +615,9 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
     if list.is_empty() && !form_open {
         gui::empty_pane(ui, |ui| {
             let body = if changed.is_empty() {
-                "A stash keeps uncommitted changes aside so you can switch branches or pull, then brings them back. The working tree is clean, so there is nothing to stash right now."
+                "A stash keeps uncommitted changes aside so you can switch branches or pull, then brings them back.\nThe working tree is clean, so there is nothing to stash right now."
             } else {
-                "A stash keeps uncommitted changes aside so you can switch branches or pull, then brings them back. Stash some or all of your changed files to start."
+                "A stash keeps uncommitted changes aside so you can switch branches or pull, then brings them back.\nStash some or all of your changed files to start."
             };
             let action = (!changed.is_empty()).then_some((Icon::Stash, "Stash selected files…"));
             if kit::empty_state(ui, Icon::Stash, "No stashes", body, action) {
@@ -854,7 +857,7 @@ fn detail(
             );
         }
     });
-    kit::muted(
+    kit::secondary(
         ui,
         "git stash branch: a new branch at the commit the stash was made on, with the stash applied and dropped.",
     );

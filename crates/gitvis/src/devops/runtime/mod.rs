@@ -1125,12 +1125,13 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 )
             };
             let body = format!(
-                "Version {} ({}) of {} is removed from the GitHub Container Registry. {tags} This cannot be undone from gitvis (GitHub keeps deleted versions restorable for 30 days on its website). It needs the delete:packages scope and admin rights on the package.",
+                "Version {} ({}) of {} is removed from the GitHub Container Registry. {tags} This cannot be undone from gitvis (GitHub keeps deleted versions restorable for 30 days on its website).\nIt needs the delete:packages scope and admin rights on the package.",
                 version,
                 v.short_digest(),
                 package
             );
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Delete {} of {package}?", v.short_digest()),
                 body,
                 "Delete version",
@@ -1349,7 +1350,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 target.context,
                 target.namespace
             );
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("{}?", write.title()),
                 body,
                 confirm,
@@ -1410,11 +1412,12 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             let dir = repo.workdir.join(&root);
             let line = format!("{} {}", binary.word(), Command::Init.args(None).join(" "));
             let body = format!(
-                "{} downloads the providers and modules this configuration needs from the registry (network) into {}/.terraform/. It also creates or updates .terraform.lock.hcl in that directory, a file you normally commit. The backend is skipped (-backend=false): no state is read or written and no credentials are used.",
+                "{} downloads the providers and modules this configuration needs from the registry (network) into {}/.terraform/.\nIt also creates or updates .terraform.lock.hcl in that directory, a file you normally commit.\nThe backend is skipped (-backend=false): no state is read or written and no credentials are used.",
                 binary.name(),
                 root_display(&root)
             );
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Run {} init in {}?", binary.word(), root_display(&root)),
                 body,
                 "Run init",

@@ -35,7 +35,7 @@ pub(super) fn rollback_action(st: &State, rerun: bool) -> Option<Act> {
             run,
             title: format!("Roll {env} back by re-running run {run}?"),
             body: format!(
-                "Re-runs the workflow run that deployed {} to {env} {}. A re-run checks out the run's original commit, so {env} goes back from {} to {}. Approvals and wait timers of the environment apply again.",
+                "Re-runs the workflow run that deployed {} to {env} {}.\nA re-run checks out the run's original commit, so {env} goes back from {} to {}.\nApprovals and wait timers of the environment apply again.",
                 short(&prev.sha),
                 format::relative(prev.created, now),
                 short(&cur.sha),
@@ -77,7 +77,7 @@ pub(super) fn promote_action(st: &State, to: &str, rerun: bool) -> Option<Act> {
                 short(&cur.sha)
             ),
             body: format!(
-                "Re-runs the workflow run that deployed {} to {from}. It reaches {to} only when that workflow deploys there after {from} (one pipeline with a job per environment, {to} usually behind an approval).",
+                "Re-runs the workflow run that deployed {} to {from}.\nIt reaches {to} only when that workflow deploys there after {from} (one pipeline with a job per environment, {to} usually behind an approval).",
                 short(&cur.sha)
             ),
         });
@@ -133,7 +133,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
     }
     let st = &repo.devops.ship;
     if st.envs.ok().is_none() {
-        crate::devops::pages::layout::page(ui, "ship_envs_state", |ui| {
+        crate::devops::pages::layout::state_page(ui, "ship_envs_state", |ui| {
             sui::loaded(
                 ui,
                 &st.envs,
@@ -154,7 +154,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         let st = &mut repo.devops.ship;
         let urgent =
             st.approvals.err().is_some() || st.approvals.ok().is_some_and(|l| !l.is_empty());
-        crate::devops::pages::layout::page(ui, "ship_envs_empty", |ui| {
+        crate::devops::pages::layout::state_page(ui, "ship_envs_empty", |ui| {
             if urgent {
                 approvals_section(ui, st, now, actions);
             }
@@ -163,10 +163,10 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                 Icon::Cloud,
                 "No deployment environments",
                 &if order.is_empty() {
-                    "GitHub creates an environment the first time a workflow job names one (`environment: production`) or a deployment is created for it. This repository has none, so nothing is deployed anywhere yet. Releases and tags still work as a DORA source.".to_owned()
+                    "GitHub creates an environment the first time a workflow job names one (`environment: production`) or a deployment is created for it.\nThis repository has none, so nothing is deployed anywhere yet.\nReleases and tags still work as a DORA source.".to_owned()
                 } else {
                     format!(
-                        "The only environments are GitHub's own ({}) and nothing was deployed to them. A workflow job that names an environment (`environment: production`) creates one with deployments. Releases and tags still work as a DORA source.",
+                        "The only environments are GitHub's own ({}) and nothing was deployed to them.\nA workflow job that names an environment (`environment: production`) creates one with deployments.\nReleases and tags still work as a DORA source.",
                         order.join(", ")
                     )
                 },

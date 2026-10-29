@@ -143,6 +143,13 @@ pub fn page(ui: &mut Ui, salt: impl Hash + std::fmt::Debug, add: impl FnOnce(&mu
     scroll(ui, salt, kit::DETAIL_MAX + 120.0, add);
 }
 
+/// A scrolling page for an empty, loading or error state: not capped, so
+/// a centred `kit::empty_state` is centred in the whole area (callouts cap
+/// their own width).
+pub fn state_page(ui: &mut Ui, salt: impl Hash + std::fmt::Debug, add: impl FnOnce(&mut Ui)) {
+    scroll(ui, salt, f32::INFINITY, add);
+}
+
 fn scroll(ui: &mut Ui, salt: impl Hash + std::fmt::Debug, max: f32, add: impl FnOnce(&mut Ui)) {
     let p = *pal(ui);
     let side = 28;

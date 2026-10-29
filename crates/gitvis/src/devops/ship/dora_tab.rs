@@ -825,7 +825,8 @@ const TERM_W: f32 = 200.0;
 /// The band thresholds: a table where it fits, a group per metric where
 /// it does not.
 fn bands(ui: &mut Ui) {
-    if ui.available_width() >= 780.0 {
+    // The table needs about 950 points; below that its cells are cut.
+    if ui.available_width() >= 960.0 {
         let rows: Vec<Vec<String>> = THRESHOLDS
             .iter()
             .map(|(m, b)| {

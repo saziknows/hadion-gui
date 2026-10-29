@@ -80,7 +80,7 @@ pub fn show(ui: &mut Ui, cx: &Cx, rt: &mut State, actions: &mut Vec<Action>) {
                 Icon::Package,
                 &format!("{owner} has no container packages"),
                 &format!(
-                    "Nothing is published on ghcr.io/{} yet. Images pushed with `docker push ghcr.io/{}/NAME:TAG` (or from GitHub Actions with docker/build-push-action) show up here, matched to the commits they were built from.",
+                    "Nothing is published on ghcr.io/{} yet.\nImages pushed with `docker push ghcr.io/{}/NAME:TAG` (or from GitHub Actions with docker/build-push-action) show up here, matched to the commits they were built from.",
                     owner.to_lowercase(),
                     owner.to_lowercase()
                 ),
@@ -102,7 +102,7 @@ pub fn show(ui: &mut Ui, cx: &Cx, rt: &mut State, actions: &mut Vec<Action>) {
                 Icon::Package,
                 &format!("No package is linked to {repo}"),
                 &format!(
-                    "{owner} has {}, none of them linked to this repository. A package is linked when its image carries the label org.opencontainers.image.source=https://github.com/{repo}, or by hand in the package settings.",
+                    "{owner} has {}, none of them linked to this repository.\nA package is linked when its image carries the label org.opencontainers.image.source=https://github.com/{repo}, or by hand in the package settings.",
                     format::plural(n, "container package", "container packages")
                 ),
                 Some((Icon::List, "Show all of the owner's packages")),
@@ -198,7 +198,7 @@ fn error_state(ui: &mut Ui, e: &str, owner: Option<&str>, actions: &mut Vec<Acti
     kit::body(
         ui,
         &format!(
-            "gitvis talks to GitHub through your GitHub CLI login (gh auth). That login can read this repository but not its container packages{who}: listing packages needs the read:packages scope, which `gh auth login` does not ask for by default.{}",
+            "gitvis talks to GitHub through your GitHub CLI login (gh auth).\nThat login can read this repository but not its container packages{who}: listing packages needs the read:packages scope, which `gh auth login` does not ask for by default.{}",
             if problem == Problem::LikelyScope {
                 " GitHub answered with a 403 / 404 without naming the scope; it hides packages a token may not see, so this is almost always the cause."
             } else {
@@ -209,7 +209,7 @@ fn error_state(ui: &mut Ui, e: &str, owner: Option<&str>, actions: &mut Vec<Acti
     kit::section(ui, "Fix it in a terminal", None);
     kit::body(
         ui,
-        "Run this. It opens your browser so GitHub can ask you to approve the extra scope; your existing login and its other scopes stay as they are.",
+        "Run this.\nIt opens your browser so GitHub can ask you to approve the extra scope; your existing login and its other scopes stay as they are.",
     );
     kit::code_block(ui, SCOPE_FIX, actions);
     common::buttons(ui, |ui| {
@@ -235,7 +235,7 @@ fn error_state(ui: &mut Ui, e: &str, owner: Option<&str>, actions: &mut Vec<Acti
         ui,
         Tone::Neutral,
         "Why gitvis does not run it for you",
-        "It opens a browser and changes your GitHub CLI authentication, which every other tool on this machine shares. That is your call, not gitvis's.",
+        "It opens a browser and changes your GitHub CLI authentication, which every other tool on this machine shares.\nThat is your call, not gitvis's.",
     );
     kit::secondary(
         ui,

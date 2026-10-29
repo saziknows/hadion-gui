@@ -119,7 +119,7 @@ pub fn show(ui: &mut Ui, cx: &Cx, rt: &mut State, console: &Console, actions: &m
                 ui,
                 Icon::Wheel,
                 "No contexts in the kubeconfig",
-                "kubectl has no cluster to talk to. Create one locally (kind create cluster, k3d cluster create) or add a context with your cloud's CLI (aws eks update-kubeconfig, gcloud container clusters get-credentials, az aks get-credentials), then refresh.",
+                "kubectl has no cluster to talk to.\nCreate one locally (kind create cluster, k3d cluster create) or add a context with your cloud's CLI (aws eks update-kubeconfig, gcloud container clusters get-credentials, az aks get-credentials), then refresh.",
                 None,
             );
         });
@@ -459,7 +459,7 @@ fn unreachable(
     if kind == ErrorKind::Unreachable || kind == ErrorKind::Timeout {
         common::note(
             ui,
-            "gitvis gave up quickly (10 s client timeout) and skipped the other calls. Commands that change the cluster are never run while it is unreachable.",
+            "gitvis gave up quickly (10 s client timeout) and skipped the other calls.\nCommands that change the cluster are never run while it is unreachable.",
         );
     }
     kit::section_with(
@@ -478,7 +478,7 @@ fn unreachable(
     );
     kit::secondary(
         ui,
-        "Check which clusters answer (read-only: kubectl get namespaces with a 5 s timeout), then click one to switch. The kubeconfig's current context is not changed.",
+        "Check which clusters answer (read-only: kubectl get namespaces with a 5 s timeout), then click one to switch.\nThe kubeconfig's current context is not changed.",
     );
     probe_table(ui, k, cfg, actions);
 }
@@ -926,7 +926,7 @@ fn workload_detail(
         ),
         Some(Ok(ev)) if ev.is_empty() => common::note(
             ui,
-            "No events for this workload. Kubernetes keeps events for about an hour; pod events are under each pod.",
+            "No events for this workload.\nKubernetes keeps events for about an hour; pod events are under each pod.",
         ),
         Some(Ok(ev)) => events_table(ui, cx, "k8s_events", ev),
     }

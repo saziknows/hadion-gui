@@ -80,7 +80,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                         "Reading branches, tags and deployed commits from local history…",
                     );
                 } else {
-                    kit::muted(
+                    kit::secondary(
                         ui,
                         "Type a commit id, branch or tag, or pick the selected commit.",
                     );
@@ -414,6 +414,11 @@ fn pull_step(repo: &RepoState, l: &Located, now: i64) -> Step {
         );
     }
     match &st.where_pulls.result {
+        Some(Err(e)) if super::not_on_github(e) => Step::new(
+            Mark::NotYet,
+            "Pull request",
+            vec!["GitHub does not have this commit yet: push it, then look again.".to_owned()],
+        ),
         Some(Err(e)) => Step::new(Mark::Unknown, "Pull request", vec![e.clone()]),
         Some(Ok(list)) => match whereis::introducing(list, &l.sha) {
             None => Step::new(
@@ -486,6 +491,11 @@ fn ci_step(repo: &RepoState, l: &Located, _now: i64) -> Step {
             Mark::Unknown,
             "Checks",
             vec!["Fetching check runs…".to_owned()],
+        ),
+        Some(Err(e)) if super::not_on_github(e) => Step::new(
+            Mark::NotYet,
+            "Checks",
+            vec!["No checks yet: GitHub does not have this commit until it is pushed.".to_owned()],
         ),
         Some(Err(e)) => Step::new(Mark::Unknown, "Checks", vec![e.clone()]),
         Some(Ok(list)) if list.is_empty() => Step::new(

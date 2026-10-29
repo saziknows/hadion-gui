@@ -170,7 +170,8 @@ fn run_task(cx: &mut Ctx, repo: &mut RepoState, id: &str) {
     let extra = split_args(wb.tasks.args.get(id).map(String::as_str).unwrap_or(""));
     if task.destructive {
         let line = task.command_line(&extra);
-        cx.confirm(
+        crate::devops::pages::explain::confirm(
+            cx,
             format!("Run {}?", task.name),
             format!(
                 "{}. It runs in {}.",
@@ -324,9 +325,9 @@ pub fn show(
             ui.add_space(6.0);
             ui.label(
                 RichText::new(format!(
-                    "{} tasks  ·  {} projects  ·  {}  ·  {}",
-                    format::count(d.tasks.len()),
-                    format::count(d.projects.len()),
+                    "{}  ·  {}  ·  {}  ·  {}",
+                    format::plural(d.tasks.len(), "task", "tasks"),
+                    format::plural(d.projects.len(), "project", "projects"),
                     format::millis(d.elapsed_ms),
                     format::relative(now - at.elapsed().as_secs() as i64, now)
                 ))
@@ -392,7 +393,7 @@ pub fn show(
             }
             ui.add_space(12.0);
             ui.vertical_centered(|ui| {
-                ui.set_max_width(440.0);
+                crate::devops::pages::layout::cap_width(ui, 440.0);
                 explain::details(ui, "wb_tasks_sources", "What gitvis looks for", false, |ui| {
                     explain::bullets(
                         ui,
@@ -441,7 +442,7 @@ pub fn show(
         egui::Panel::bottom("wb_task_output")
             .resizable(true)
             .default_size((avail * 0.55).max(220.0))
-            .size_range(160.0..=(avail - 140.0).max(180.0))
+            .size_range(190.0..=(avail - 140.0).max(190.0))
             .frame(Frame::NONE.fill(fill))
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
@@ -855,7 +856,7 @@ fn detail(
     let records: Vec<&RunRecord> = wb.records.iter().rev().filter(|r| r.task == id).collect();
     kit::section(ui, "Run history", Some(records.len()));
     if records.is_empty() {
-        kit::muted(
+        kit::secondary(
             ui,
             "Not run from gitvis yet. Runs are kept with their status, duration and exit code.",
         );
@@ -919,7 +920,7 @@ fn overview(ui: &mut Ui, wb: &State, console: &Console, actions: &mut Vec<Action
     kit::title(ui, "What this repository can run");
     kit::secondary(
         ui,
-        "Select a task to see its exact command, where it comes from and its output. Double-click runs it; extra arguments can be typed before running.",
+        "Select a task to see its exact command, where it comes from and its output.\nDouble-click runs it; extra arguments can be typed before running.",
     );
     ui.add_space(4.0);
     let mut sources: Vec<(Source, usize)> = Vec::new();
@@ -1064,13 +1065,17 @@ fn overview(ui: &mut Ui, wb: &State, console: &Console, actions: &mut Vec<Action
         });
     }
     ui.add_space(6.0);
-    kit::muted(
+    kit::secondary(
         ui,
         &format!(
-            "Scanned {} folders (the root and two levels below; node_modules, target, build output and hidden folders are skipped), read {} files in {}.",
-            format::count(d.dirs_scanned),
-            format::count(d.files_read),
+            "Scanned {}, read {} in {}.",
+            format::plural(d.dirs_scanned, "folder", "folders"),
+            format::plural(d.files_read, "file", "files"),
             format::millis(d.elapsed_ms)
         ),
+    );
+    kit::secondary(
+        ui,
+        "The root and two levels below; node_modules, target, build output and hidden folders are skipped.",
     );
 }

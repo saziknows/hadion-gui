@@ -534,7 +534,7 @@ fn env_form(ui: &mut Ui, edit: &mut EnvEdit, actions: &mut Vec<Action>) {
             }
         });
         if edit.form.policy == PolicyMode::Custom {
-            kit::muted(
+            kit::secondary(
                 ui,
                 "Add the branch and tag patterns after saving, on the environment's page.",
             );
@@ -585,14 +585,31 @@ fn scope_chips(
     ui.add_space(4.0);
 }
 
+/// The column widths of a [`table_row`] / [`table_head`]: as given, or
+/// scaled down together when they (with the gaps and room for the row's
+/// buttons) are wider than the pane, so a narrow window cuts cells
+/// instead of pushing the last columns and the buttons out of view.
+fn fit_cols(ui: &Ui, widths: impl Iterator<Item = f32>) -> Vec<f32> {
+    let ws: Vec<f32> = widths.collect();
+    let gaps = 12.0 * ws.len() as f32;
+    let room = (ui.available_width() - gaps - 80.0).max(64.0 * ws.len() as f32);
+    let total: f32 = ws.iter().sum();
+    if total <= room {
+        ws
+    } else {
+        ws.iter().map(|w| (w * room / total).max(64.0)).collect()
+    }
+}
+
 /// A table row with fixed columns and buttons on the right.
 fn table_row(ui: &mut Ui, cols: &[(f32, RichText)], buttons: impl FnOnce(&mut Ui)) {
+    let ws = fit_cols(ui, cols.iter().map(|c| c.0));
     ui.allocate_ui_with_layout(
         vec2(ui.available_width(), 30.0),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
-            for (w, t) in cols {
+            for ((_, t), w) in cols.iter().zip(&ws) {
                 ui.allocate_ui_with_layout(
                     vec2(*w, 28.0),
                     Layout::left_to_right(Align::Center),
@@ -613,15 +630,16 @@ fn table_row(ui: &mut Ui, cols: &[(f32, RichText)], buttons: impl FnOnce(&mut Ui
 
 fn table_head(ui: &mut Ui, cols: &[(f32, &str)]) {
     let p = *pal(ui);
+    let ws = fit_cols(ui, cols.iter().map(|c| c.0));
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 12.0;
-        for (w, t) in cols {
+        for ((_, t), w) in cols.iter().zip(&ws) {
             ui.allocate_ui_with_layout(
                 vec2(*w, 20.0),
                 Layout::left_to_right(Align::Center),
                 |ui| {
                     ui.set_width(*w);
-                    ui.label(kit::caption_text(&p, t));
+                    ui.add(egui::Label::new(kit::caption_text(&p, t)).truncate());
                 },
             );
         }
@@ -817,7 +835,7 @@ fn workflow_refs(
     let Some(refs) = refs.ok() else { return };
     kit::section(ui, "Referenced by workflows", Some(refs.len()));
     if refs.is_empty() {
-        kit::muted(
+        kit::secondary(
             ui,
             "No workflow under .github/workflows reads secrets.NAME (GITHUB_TOKEN aside).",
         );
@@ -825,7 +843,7 @@ fn workflow_refs(
     }
     kit::secondary(
         ui,
-        "secrets.NAME in .github/workflows, and the scopes that define each one (repository, organisation, environments). A secret no scope defines reads as an empty string.",
+        "secrets.NAME in .github/workflows, and the scopes that define each one (repository, organisation, environments).\nA secret no scope defines reads as an empty string.",
     );
     let p = *pal(ui);
     // Where each name is defined, among the scopes read so far.

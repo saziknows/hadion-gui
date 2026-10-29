@@ -1139,7 +1139,7 @@ fn scan_result(ui: &mut Ui, run: &ScanRun, console: &Console, actions: &mut Vec<
                 ui,
                 Tone::Warning,
                 "Docker Scout needs a Docker Hub login",
-                "Scout analyses images against Docker's database and only works for a signed-in Docker ID (a free account is enough). Sign in, then scan again.",
+                "Scout analyses images against Docker's database and only works for a signed-in Docker ID (a free account is enough).\nSign in, then scan again.",
                 |ui| {
                     kit::code_block(ui, "docker login", actions);
                     kit::code_block(ui, tail, actions);
