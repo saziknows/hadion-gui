@@ -238,7 +238,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                     ui,
                     Icon::Clock,
                     "Pick a file",
-                    "Type a path (letters in order are enough: \"kitrs\" finds src/views/kit.rs) and press Enter. The list shows every commit that changed it, following renames, with each commit's diff. From a commit's file list, right-click a file and choose File history.",
+                    "Type a path and press Enter; letters in order are enough (\"kitrs\" finds src/views/kit.rs).\nThe list shows every commit that changed it, following renames, with each commit's diff.\nOr right-click a file in a commit's file list and choose File history.",
                     None,
                 );
             });
@@ -302,10 +302,9 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                 kit::paint_row(
                     ui,
                     rect,
-                    &Row::new(&c.subject)
-                        .subtitle(&sub)
-                        .meta(&meta)
-                        .badges(&badges),
+                    &Row::new(&c.subject).subtitle(&sub).meta(&meta).badges(
+                        &crate::devops::pages::layout::fit_badges(ui, rect.width(), &badges),
+                    ),
                     selected == Some(i),
                 );
                 if resp.clicked() {
@@ -576,7 +575,7 @@ fn overview(ui: &mut Ui, r: &FileHistory, now: i64, actions: &mut Vec<Action>) {
     kit::title(ui, &r.path);
     kit::secondary(
         ui,
-        "Select a commit for its diff of the file. Renames are followed (git log --follow), so older commits may show an earlier name.",
+        "Select a commit for its diff of the file.\nRenames are followed (git log --follow), so older commits may show an earlier name.",
     );
     ui.add_space(4.0);
     let first = r.commits.last();

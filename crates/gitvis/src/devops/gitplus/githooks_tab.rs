@@ -20,6 +20,7 @@ use gitvis_core::devops::workbench::shell::sh_path;
 use super::{Act, Msg, ui as gui};
 use crate::devops::console::{Console, ConsoleRun};
 use crate::devops::ctx::Ctx;
+use crate::devops::pages::explain;
 use crate::format;
 use crate::state::{Action, RepoState, ToastKind};
 use crate::theme::{pal, size};
@@ -315,7 +316,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             if f.gitvis {
                 body.push_str(" This is the gitvis secret check: reinstalling it later overwrites your edits.");
             }
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Save the hook?",
                 body,
                 "Save",
@@ -346,7 +348,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             };
             let from = l.dir.join(format!("{hook}.sample"));
             let to = l.dir.join(&hook);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Enable the hook?",
                 format!(
                     "Renames {hook}.sample to {hook}, so git runs it (on {}).",
@@ -395,7 +398,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             if gitvis {
                 body.push_str(" This turns the gitvis secret check off.");
             }
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Disable the hook?",
                 body,
                 "Disable",
@@ -436,7 +440,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 cx.toast(ToastKind::Error, format!("{name} exists already."));
                 return;
             }
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Create the hook?",
                 format!(
                     "Writes a {name} script that does nothing yet (exit 0), for you to edit. Git runs it on {}.",
@@ -496,7 +501,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 ));
             }
             details.push(plan.script.clone());
-            let mut body = "Before each commit git runs gitvis, which scans the added lines of the staged changes with the Exposure page's rules. A high or critical secret stops the commit and is printed redacted, never in full; git commit --no-verify skips the check once.".to_owned();
+            let mut body = "Before each commit git runs gitvis, which scans the added lines of the staged changes with the Exposure page's rules.\nA high or critical secret stops the commit and is printed redacted, never in full; git commit --no-verify skips the check once.".to_owned();
             if plan.reinstall {
                 body.push_str(
                     " The check is installed already: this updates it to the running gitvis.",
@@ -511,7 +516,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 " The script calls {}: if gitvis moves, reinstall the check.",
                 exe.display()
             ));
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 if plan.reinstall {
                     "Update the gitvis secret check?"
                 } else {
@@ -562,7 +568,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             } else {
                 "Removes the gitvis secret check: commits are no longer scanned for secrets."
             };
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Remove the gitvis secret check?",
                 body,
                 "Remove",
@@ -597,7 +604,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 return;
             };
             let n = repo.dismissed.len();
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Update the hook's dismissed findings?",
                 format!(
                     "Writes the fingerprints of the {} you dismissed on the Exposure page, so the pre-commit check does not stop commits for them. Fingerprints only: no secret is written.",
@@ -605,7 +613,10 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 ),
                 "Update",
                 false,
-                vec![format!("write {}", sh_path(&c.join(secret_hook::DISMISSED_FILE)))],
+                vec![format!(
+                    "write {}",
+                    sh_path(&c.join(secret_hook::DISMISSED_FILE))
+                )],
                 Act::SyncDismissedConfirmed.into(),
             );
         }
@@ -662,7 +673,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             };
             let spec =
                 ProcSpec::new(path.to_string_lossy().into_owned(), repo.workdir.clone()).args(args);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Run pre-commit?",
                 if all {
                     "Runs every hook of .pre-commit-config.yaml on every tracked file, in the console. Hooks that fix files (formatters, whitespace) change them. The first run downloads and installs the hook repositories (network)."
@@ -727,7 +739,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             let report = precommit::report_path();
             let spec = ProcSpec::new(path.to_string_lossy().into_owned(), repo.workdir.clone())
                 .args(precommit::semgrep_args(&report));
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Scan with semgrep?",
                 "semgrep --config auto downloads its rules for the languages it finds from semgrep.dev (network) and sends anonymous usage metrics, which that mode requires. The code itself is scanned on this machine. It runs in the console; the summary appears here when it ends.",
                 "Scan",
@@ -946,7 +959,9 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
     let selected = h.selected.clone();
     gui::list_pane(ui, "gp_hooks_list", 380.0, |ui| {
         kit::list_header(ui, "Hooks", Some(l.files.len()), |ui| {
-            if IconButton::text("Overview").compact().show(ui).clicked() {
+            // The same "back to the overview" link as the other list panes,
+            // shown while a hook is selected.
+            if selected.is_some() && kit::link(ui, "Overview").clicked() {
                 actions.push(Act::SelectHook(None).into());
             }
         });
@@ -996,7 +1011,11 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mut 
                         .leading(kit::Leading::Dot(dot))
                         .subtitle(&sub)
                         .meta(&format::bytes(f.size as usize))
-                        .badges(&b)
+                        .badges(&crate::devops::pages::layout::fit_badges(
+                            ui,
+                            rect.width(),
+                            &b,
+                        ))
                         .mono()
                         .dimmed(f.sample),
                     selected.as_deref() == Some(f.file.as_str()),
@@ -1123,7 +1142,7 @@ fn overview(
     kit::title(ui, "Hooks");
     let enabled = l.files.iter().filter(|f| f.enabled).count();
     let samples = l.files.iter().filter(|f| f.sample).count();
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             Stat::new("Enabled hooks", format::count(enabled)),
@@ -1180,8 +1199,26 @@ fn secret_check(
         |ui| {
             kit::body(
                 ui,
-                "Install the Exposure page's secret scan as the pre-commit hook: before each commit, the added lines of the staged changes are checked, and a high or critical secret (API keys, tokens, private keys, passwords) stops the commit. Findings are printed redacted with file:line and rule; git commit --no-verify skips the check once.",
+                "The Exposure page's secret scan as the pre-commit hook: a commit with a secret in it does not go through.",
             );
+            explain::details(ui, "gp_secret_hook_how", "How it works", false, |ui| {
+                explain::terms(
+                    ui,
+                    150.0,
+                    &[
+                        (
+                            "Checks",
+                            "The added lines of the staged changes, before each commit.",
+                        ),
+                        (
+                            "Stops the commit",
+                            "On a high or critical secret: API keys, tokens, private keys, passwords.",
+                        ),
+                        ("Prints", "Each finding redacted, with file:line and rule."),
+                        ("Skip once", "git commit --no-verify"),
+                    ],
+                );
+            });
             ui.add_space(4.0);
             match installed {
                 Some(f) => {
@@ -1261,7 +1298,7 @@ fn secret_check(
                 None => {
                     let existing = l.files.iter().any(|f| f.file == "pre-commit");
                     if existing {
-                        kit::muted(
+                        kit::secondary(
                             ui,
                             &format!(
                                 "A pre-commit hook exists: it is kept as {} and runs before the check.",
@@ -1294,9 +1331,10 @@ fn precommit_card(
     form::card(ui, Tone::Neutral, |ui| {
         match &l.precommit {
             None => {
+                kit::secondary(ui, "No .pre-commit-config.yaml in this repository.");
                 kit::secondary(
                     ui,
-                    "No .pre-commit-config.yaml in this repository. The pre-commit framework runs linters and formatters from many languages as git hooks; add the file to use it.",
+                    "The pre-commit framework runs linters and formatters from many languages as git hooks; add the file to use it.",
                 );
             }
             Some((path, Err(e))) => kit::callout(
@@ -1483,7 +1521,7 @@ fn semgrep_card(ui: &mut Ui, h: &mut Hooks, console: &Console, actions: &mut Vec
                     tiles.push(Stat::new(sev.as_str(), format::count(*n)));
                 }
                 tiles.push(Stat::new("Files scanned", format::count(s.scanned)));
-                kit::stats(ui, &tiles);
+                crate::views::insights::stats(ui, &tiles);
                 if !s.top_rules.is_empty() {
                     kit::subtitle(ui, "Top rules");
                     let items: Vec<(String, u32)> = s
@@ -1553,6 +1591,6 @@ fn new_hook(ui: &mut Ui, h: &mut Hooks, l: &Listing, busy: bool, actions: &mut V
         }
     });
     if let Some(d) = core::describe(&h.new_hook) {
-        kit::muted(ui, &format!("Runs on: {d}."));
+        kit::secondary(ui, &format!("Runs on: {d}."));
     }
 }

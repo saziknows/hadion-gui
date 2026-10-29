@@ -13,6 +13,7 @@ use gitvis_core::devops::workbench::tasks::{Discovery, Source, Task, discover};
 use super::{Act, Msg, RunRecord, State, ui as wui};
 use crate::devops::console::{Console, ConsoleRun};
 use crate::devops::ctx::Ctx;
+use crate::devops::pages::explain;
 use crate::format;
 use crate::state::{Action, RepoState, Settings};
 use crate::theme::{pal, semibold, size};
@@ -169,7 +170,8 @@ fn run_task(cx: &mut Ctx, repo: &mut RepoState, id: &str) {
     let extra = split_args(wb.tasks.args.get(id).map(String::as_str).unwrap_or(""));
     if task.destructive {
         let line = task.command_line(&extra);
-        cx.confirm(
+        crate::devops::pages::explain::confirm(
+            cx,
             format!("Run {}?", task.name),
             format!(
                 "{}. It runs in {}.",
@@ -323,9 +325,9 @@ pub fn show(
             ui.add_space(6.0);
             ui.label(
                 RichText::new(format!(
-                    "{} tasks  ·  {} projects  ·  {}  ·  {}",
-                    format::count(d.tasks.len()),
-                    format::count(d.projects.len()),
+                    "{}  ·  {}  ·  {}  ·  {}",
+                    format::plural(d.tasks.len(), "task", "tasks"),
+                    format::plural(d.projects.len(), "project", "projects"),
                     format::millis(d.elapsed_ms),
                     format::relative(now - at.elapsed().as_secs() as i64, now)
                 ))
@@ -374,19 +376,38 @@ pub fn show(
             .iter()
             .map(|p| format!("{}: {}", p.file, p.message))
             .collect();
-        wui::empty_pane(ui, |ui| {
+        crate::devops::pages::layout::page(ui, "wb_tasks_none", |ui| {
+            // A file that could not be read explains the empty list: it
+            // comes first.
+            for pr in &problems {
+                kit::callout(ui, Tone::Warning, "Could not read a file", pr);
+            }
             if kit::empty_state(
                 ui,
                 Icon::Terminal,
                 "No tasks found",
-                "gitvis looks for package.json scripts, Makefile targets, justfile recipes, Taskfile tasks, Cargo, composer, deno, Go, .NET, Gradle, Maven, Python and docker compose files in this folder and two levels below. Add one, then scan again.",
+                "Nothing in this folder or two levels below defines a task.\nAdd one, then scan again.",
                 Some((Icon::Rerun, "Scan again")),
             ) {
                 actions.push(Act::DiscoverTasks.into());
             }
-            for pr in &problems {
-                kit::callout(ui, Tone::Warning, "Could not read a file", pr);
-            }
+            ui.add_space(12.0);
+            ui.vertical_centered(|ui| {
+                crate::devops::pages::layout::cap_width(ui, 440.0);
+                explain::details(ui, "wb_tasks_sources", "What gitvis looks for", false, |ui| {
+                    explain::bullets(
+                        ui,
+                        &[
+                            "package.json scripts",
+                            "Makefile targets",
+                            "justfile recipes",
+                            "Taskfile tasks",
+                            "Cargo, composer, deno, Go, .NET, Gradle, Maven and Python projects",
+                            "docker compose files",
+                        ],
+                    );
+                });
+            });
         });
         return;
     }
@@ -421,7 +442,7 @@ pub fn show(
         egui::Panel::bottom("wb_task_output")
             .resizable(true)
             .default_size((avail * 0.55).max(220.0))
-            .size_range(160.0..=(avail - 140.0).max(180.0))
+            .size_range(190.0..=(avail - 140.0).max(190.0))
             .frame(Frame::NONE.fill(fill))
             .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
@@ -603,7 +624,11 @@ fn task_list(
                                 .leading(kit::Leading::Dot(dot))
                                 .subtitle(&command)
                                 .meta(&meta)
-                                .badges(&badges),
+                                .badges(&crate::devops::pages::layout::fit_badges(
+                                    ui,
+                                    rect.width(),
+                                    &badges,
+                                )),
                             on,
                         );
                         if resp.hovered() {
@@ -831,7 +856,7 @@ fn detail(
     let records: Vec<&RunRecord> = wb.records.iter().rev().filter(|r| r.task == id).collect();
     kit::section(ui, "Run history", Some(records.len()));
     if records.is_empty() {
-        kit::muted(
+        kit::secondary(
             ui,
             "Not run from gitvis yet. Runs are kept with their status, duration and exit code.",
         );
@@ -868,17 +893,19 @@ fn detail(
                 ]
             })
             .collect();
-        kit::table(
-            ui,
-            &[
-                Col::text("When"),
-                Col::text("Status"),
-                Col::num("Duration"),
-                Col::num("Exit code"),
-                Col::text("Arguments"),
-            ],
-            &rows,
-        );
+        crate::devops::pages::layout::wide(ui, "wb_task_runs", 600.0, |ui| {
+            kit::table(
+                ui,
+                &[
+                    Col::text("When"),
+                    Col::text("Status"),
+                    Col::num("Duration"),
+                    Col::num("Exit code"),
+                    Col::text("Arguments"),
+                ],
+                &rows,
+            );
+        });
         if records.len() > 15 {
             kit::muted(ui, &format!("and {} older runs", records.len() - 15));
         }
@@ -893,7 +920,7 @@ fn overview(ui: &mut Ui, wb: &State, console: &Console, actions: &mut Vec<Action
     kit::title(ui, "What this repository can run");
     kit::secondary(
         ui,
-        "Select a task to see its exact command, where it comes from and its output. Double-click runs it; extra arguments can be typed before running.",
+        "Select a task to see its exact command, where it comes from and its output.\nDouble-click runs it; extra arguments can be typed before running.",
     );
     ui.add_space(4.0);
     let mut sources: Vec<(Source, usize)> = Vec::new();
@@ -992,18 +1019,20 @@ fn overview(ui: &mut Ui, wb: &State, console: &Console, actions: &mut Vec<Action
             ]
         })
         .collect();
-    kit::table(
-        ui,
-        &[
-            Col::text("Folder"),
-            Col::text("Name"),
-            Col::text("Kinds"),
-            Col::text("Package manager"),
-            Col::text("Workspace"),
-            Col::num("Tasks"),
-        ],
-        &rows,
-    );
+    crate::devops::pages::layout::wide(ui, "wb_tools_installed", 600.0, |ui| {
+        kit::table(
+            ui,
+            &[
+                Col::text("Folder"),
+                Col::text("Name"),
+                Col::text("Kinds"),
+                Col::text("Package manager"),
+                Col::text("Workspace"),
+                Col::num("Tasks"),
+            ],
+            &rows,
+        );
+    });
     if !wb.tasks.tools.is_empty() {
         kit::section(ui, "Tools", Some(wb.tasks.tools.len()));
         let mut tools: Vec<(&Tool, &Option<Installed>)> = wb.tasks.tools.iter().collect();
@@ -1023,24 +1052,30 @@ fn overview(ui: &mut Ui, wb: &State, console: &Console, actions: &mut Vec<Action
                 ],
             })
             .collect();
-        kit::table(
-            ui,
-            &[
-                Col::text("Tool"),
-                Col::text("Version"),
-                Col::text("Path or how to install"),
-            ],
-            &rows,
-        );
+        crate::devops::pages::layout::wide(ui, "wb_tools_table", 600.0, |ui| {
+            kit::table(
+                ui,
+                &[
+                    Col::text("Tool"),
+                    Col::text("Version"),
+                    Col::text("Path or how to install"),
+                ],
+                &rows,
+            );
+        });
     }
     ui.add_space(6.0);
-    kit::muted(
+    kit::secondary(
         ui,
         &format!(
-            "Scanned {} folders (the root and two levels below; node_modules, target, build output and hidden folders are skipped), read {} files in {}.",
-            format::count(d.dirs_scanned),
-            format::count(d.files_read),
+            "Scanned {}, read {} in {}.",
+            format::plural(d.dirs_scanned, "folder", "folders"),
+            format::plural(d.files_read, "file", "files"),
             format::millis(d.elapsed_ms)
         ),
+    );
+    kit::secondary(
+        ui,
+        "The root and two levels below; node_modules, target, build output and hidden folders are skipped.",
     );
 }

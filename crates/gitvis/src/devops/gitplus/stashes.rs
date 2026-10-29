@@ -266,7 +266,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                     true,
                 ),
             };
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 title,
                 body,
                 confirm,
@@ -320,7 +321,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 .entry(&sha)
                 .and_then(|e| e.base.clone())
                 .unwrap_or_default();
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Create a branch from the stash?",
                 format!(
                     "Creates the branch {name} at the commit the stash was made on ({}), switches to it, applies stash@{{{index}}} there and drops it when that worked. Your current branch is not touched.",
@@ -396,7 +398,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             let include_untracked = f.include_untracked || untracked;
             let args = core::push_args(&f.message, f.keep_index, include_untracked, &paths);
             let left = changed.len() - paths.len();
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Stash the selected files?",
                 format!(
                     "Moves the changes of {} into a new stash and puts those files back as they are in HEAD.{}{}",
@@ -612,9 +615,9 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
     if list.is_empty() && !form_open {
         gui::empty_pane(ui, |ui| {
             let body = if changed.is_empty() {
-                "A stash keeps uncommitted changes aside so you can switch branches or pull, then brings them back. The working tree is clean, so there is nothing to stash right now."
+                "A stash keeps uncommitted changes aside so you can switch branches or pull, then brings them back.\nThe working tree is clean, so there is nothing to stash right now."
             } else {
-                "A stash keeps uncommitted changes aside so you can switch branches or pull, then brings them back. Stash some or all of your changed files to start."
+                "A stash keeps uncommitted changes aside so you can switch branches or pull, then brings them back.\nStash some or all of your changed files to start."
             };
             let action = (!changed.is_empty()).then_some((Icon::Stash, "Stash selected files…"));
             if kit::empty_state(ui, Icon::Stash, "No stashes", body, action) {
@@ -654,7 +657,11 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                         .leading(kit::Leading::Icon(Icon::Stash, p.text_3))
                         .subtitle(&sub)
                         .meta(&meta)
-                        .badges(&b),
+                        .badges(&crate::devops::pages::layout::fit_badges(
+                            ui,
+                            rect.width(),
+                            &b,
+                        )),
                     !form_open && selected.as_deref() == Some(e.sha.as_str()),
                 );
                 if resp.clicked() {
@@ -688,7 +695,7 @@ fn overview(ui: &mut Ui, list: &[StashEntry], now: i64) {
         .sum();
     let oldest = list.iter().map(|e| e.time).min().unwrap_or(now);
     let branches: BTreeSet<&str> = list.iter().filter_map(|e| e.branch.as_deref()).collect();
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             Stat::new("Stashes", format::count(list.len())),
@@ -700,11 +707,20 @@ fn overview(ui: &mut Ui, list: &[StashEntry], now: i64) {
     );
     kit::secondary(ui, "Select a stash to see its changes, file by file.");
     kit::section(ui, "Apply, pop or branch", None);
-    kit::callout(
+    crate::devops::pages::explain::terms(
         ui,
-        Tone::Neutral,
-        "Which one to use",
-        "Apply puts the changes back and keeps the stash, so you can apply it elsewhere too. Pop applies and drops it. Branch creates a branch at the commit the stash was made on and applies it there: the safe choice when the code has moved on and applying would conflict.",
+        90.0,
+        &[
+            (
+                "Apply",
+                "Puts the changes back and keeps the stash, so you can apply it elsewhere too.",
+            ),
+            ("Pop", "Applies and drops it."),
+            (
+                "Branch",
+                "Creates a branch at the commit the stash was made on and applies it there.\nThe safe choice when the code has moved on and applying would conflict.",
+            ),
+        ],
     );
     if now - oldest > 30 * 86_400 {
         kit::callout(
@@ -817,12 +833,13 @@ fn detail(
         }
     });
     kit::section(ui, "Branch from it", None);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
+        let iw = crate::devops::pages::layout::input_width(ui, 260.0);
         form::input(
             ui,
             ("gp_stash_branch", e.sha.as_str()),
             &mut s.branch_name,
-            InputOpts::new("new-branch-name").width(260.0).mono(),
+            InputOpts::new("new-branch-name").width(iw).mono(),
         );
         if form::button(
             ui,
@@ -840,7 +857,7 @@ fn detail(
             );
         }
     });
-    kit::muted(
+    kit::secondary(
         ui,
         "git stash branch: a new branch at the commit the stash was made on, with the stash applied and dropped.",
     );

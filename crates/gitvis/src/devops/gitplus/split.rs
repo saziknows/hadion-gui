@@ -54,7 +54,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
 pub fn body(plan: &SplitPlan) -> String {
     let mut s = if plan.head {
         format!(
-            "Undoes the last commit, \"{}\", and keeps its changes in the working tree, unstaged, so you can commit them in smaller parts. Nothing is lost: the commit stays in the reflog.",
+            "Undoes the last commit, \"{}\", and keeps its changes in the working tree, unstaged, so you can commit them in smaller parts.\nNothing is lost: the commit stays in the reflog.",
             plan.subject
         )
     } else {
@@ -87,7 +87,8 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
             repo.devops.gitplus.split.busy = false;
             match r {
                 Err(e) => cx.toast(ToastKind::Error, format!("Cannot split: {e}")),
-                Ok(plan) => cx.confirm(
+                Ok(plan) => crate::devops::pages::explain::confirm(
+                    cx,
                     if plan.head {
                         "Split the last commit?"
                     } else {

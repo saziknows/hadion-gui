@@ -16,6 +16,7 @@ use super::shared::{self, Found, ReleaseRt};
 use super::{Act, Msg, PrepareReq, ReleasePlan};
 use crate::devops::ctx::Ctx;
 use crate::devops::global::GlobalCx;
+use crate::devops::pages::explain;
 use crate::format;
 use crate::state::{Action, Dialog, ToastKind};
 use crate::theme::{Tone, pal, size, space};
@@ -352,7 +353,8 @@ pub fn on_msg(cx: &mut Ctx, g: &mut GlobalCx, msg: Msg) {
                 details.push(String::new());
             }
             let paths: Vec<&str> = plan.edits.iter().map(|e| e.path.as_str()).collect();
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Create the release commit for {}?", plan.tag),
                 format!(
                     "Writes {} ({}), stages them and commits only them as \"{}\". Other staged changes stay staged. Nothing is pushed: push, then publish.",
@@ -522,9 +524,24 @@ fn body(
     actions: &mut Vec<Action>,
 ) {
     let p = *pal(ui);
-    kit::secondary(
+    kit::body(
         ui,
-        "Bumps the version in the manifests you tick (only the version text changes, the files keep their formatting), adds the release's section to CHANGELOG.md, and commits only those files. You confirm the exact diffs first; nothing is pushed.",
+        "One local commit that bumps the version and adds the release to CHANGELOG.md.",
+    );
+    explain::terms(
+        ui,
+        150.0,
+        &[
+            (
+                "Manifests",
+                "Only the version text changes in the ones you tick; the files keep their formatting.",
+            ),
+            ("CHANGELOG.md", "Gets the release's section."),
+            (
+                "Commit",
+                "Only these files. You confirm the exact diffs first; nothing is pushed.",
+            ),
+        ],
     );
     ui.add_space(space::S);
     let Some(version) = version else {
@@ -562,21 +579,27 @@ fn body(
     // Manifests.
     let bumpable: usize = found.manifests.iter().map(|d| d.fields.len()).sum();
     let age = found.at.elapsed().as_secs();
-    kit::subtitle(
-        ui,
-        &format!(
-            "Version manifests · {bumpable} · read {}",
-            if age < 60 {
-                format!("{age} s ago")
-            } else {
-                format!("{} min ago", age / 60)
-            }
-        ),
-    );
+    ui.horizontal_wrapped(|ui| {
+        kit::subtitle(ui, "Version manifests");
+        ui.label(
+            RichText::new(format!(
+                "{}, read {}",
+                format::plural(bumpable, "version field", "version fields"),
+                if age < 60 {
+                    format!("{age} s ago")
+                } else {
+                    format!("{} min ago", age / 60)
+                }
+            ))
+            .size(size::SMALL)
+            .color(p.text_2),
+        );
+    });
     if found.manifests.is_empty() {
-        kit::muted(
+        kit::secondary(ui, "None in the tracked files.");
+        kit::secondary(
             ui,
-            "None in the tracked files (package.json, Cargo.toml, pyproject.toml, *.csproj, pom.xml, build.gradle(.kts), VERSION, Chart.yaml; up to four folders deep, not in node_modules, vendor, target and the like).",
+            "Looked for package.json, Cargo.toml, pyproject.toml, *.csproj, pom.xml, build.gradle(.kts), VERSION and Chart.yaml, up to four folders deep, not in node_modules, vendor, target and the like.",
         );
     }
     for d in &found.manifests {
@@ -584,7 +607,8 @@ fn body(
             let key = (d.path.clone(), f.label.clone());
             let same = f.version.trim_start_matches(['v', 'V']) == version;
             let mut on = checked.contains(&key) && !same;
-            ui.horizontal(|ui| {
+            // Wraps on a narrow pane instead of widening the form.
+            ui.horizontal_wrapped(|ui| {
                 ui.add_enabled_ui(!same, |ui| {
                     if form::checkbox(ui, &mut on, &d.path).clicked() {
                         changed = true;
@@ -619,12 +643,15 @@ fn body(
             });
         }
         for n in &d.notes {
-            ui.horizontal(|ui| {
+            ui.horizontal_top(|ui| {
                 ui.add_space(24.0);
-                ui.label(
-                    RichText::new(format!("{}: {n}", d.path))
-                        .size(size::SMALL)
-                        .color(p.text_3),
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!("{}: {n}", d.path))
+                            .size(size::SMALL)
+                            .color(p.text_2),
+                    )
+                    .wrap(),
                 );
             });
         }
@@ -639,7 +666,7 @@ fn body(
     match &found.changelog {
         Some((path, content)) if core::section_line(content, version).is_some() => {
             kit::subtitle(ui, path);
-            kit::muted(
+            kit::secondary(
                 ui,
                 &format!(
                     "Already has a section for {version} (line {}): nothing to add.",
@@ -656,11 +683,13 @@ fn body(
             let unreleased = core::unreleased_body(content);
             if on {
                 if let Some(u) = &unreleased {
+                    // Checkbox labels do not wrap: kept short so the row
+                    // fits a narrow pane.
                     form::checkbox(
                         ui,
                         &mut rt.use_unreleased,
                         &format!(
-                            "Use the {} under Unreleased as this version's entries",
+                            "Use the Unreleased entries ({})",
                             format::plural(
                                 u.lines().filter(|l| !l.trim().is_empty()).count(),
                                 "line",
@@ -677,24 +706,23 @@ fn body(
                         .to_owned()
                 } else {
                     format!(
-                        "With the release notes above ({}); their headings become level 3 so they stay inside the section.",
+                        "Its entries are the release notes above ({}); their headings become level 3 so they stay inside the section.",
                         format::plural(notes.lines().count(), "line", "lines")
                     )
                 };
-                kit::muted(
+                kit::secondary(ui, &source);
+                kit::secondary(
                     ui,
-                    &format!(
-                        "{source} Above the previous version, compare links updated when the file has them."
-                    ),
+                    "It goes above the previous version; compare links are updated when the file has them.",
                 );
             }
         }
         None => {
             kit::subtitle(ui, "CHANGELOG.md");
-            form::checkbox(
+            form::checkbox(ui, &mut rt.create_changelog, "Create CHANGELOG.md");
+            kit::secondary(
                 ui,
-                &mut rt.create_changelog,
-                &format!("Create CHANGELOG.md with ## [{version}] - {date} (Keep a Changelog)"),
+                &format!("With ## [{version}] - {date}, in Keep a Changelog style."),
             );
         }
     }
@@ -725,8 +753,8 @@ fn body(
         .is_some_and(|m| m != default_msg && m.contains(version))
     {
         let t = message.replace(version, "{version}");
-        ui.horizontal(|ui| {
-            kit::muted(ui, &format!("Default for every release: \"{t}\""));
+        ui.horizontal_wrapped(|ui| {
+            kit::secondary(ui, &format!("Default for every release: \"{t}\""));
             if kit::link(ui, "Save as the default").clicked() {
                 actions.push(Act::SetReleaseTemplate(t.clone()).into());
             }

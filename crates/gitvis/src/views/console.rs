@@ -47,18 +47,74 @@ pub fn output(ui: &mut Ui, run: &ConsoleRun, id_salt: &str, actions: &mut Vec<Ac
             bottom: 8,
         })
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
+            // The buttons first, on the right; the title and the facts get
+            // what is left (cut or wrapped), so a long title in a narrow
+            // pane no longer pushes the buttons out of view.
+            let w = ui.available_width();
+            ui.allocate_ui_with_layout(vec2(w, 40.0), Layout::right_to_left(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                {
+                    if run.running() {
+                        if IconButton::new(Icon::Stop, "Stop")
+                            .show(ui)
+                            .on_hover_text("Kill the process and everything it started")
+                            .clicked()
+                        {
+                            actions.push(Action::Console(ConsoleAction::Stop(run.id)));
+                        }
+                    } else {
+                        if IconButton::icon(Icon::Close)
+                            .show(ui)
+                            .on_hover_text("Remove this run")
+                            .clicked()
+                        {
+                            actions.push(Action::Console(ConsoleAction::Remove(run.id)));
+                        }
+                        // Icon only in a narrow pane: the title needs the room.
+                        let rerun = if w < 560.0 {
+                            IconButton::icon(Icon::Rerun)
+                        } else {
+                            IconButton::new(Icon::Rerun, "Run again")
+                        };
+                        if rerun
+                            .show(ui)
+                            .on_hover_text(format!("Run again: {}", run.command))
+                            .clicked()
+                        {
+                            actions.push(Action::Console(ConsoleAction::Rerun(run.id)));
+                        }
+                    }
+                    if IconButton::icon(Icon::Copy)
+                        .show(ui)
+                        .on_hover_text("Copy the output")
+                        .clicked()
+                    {
+                        actions.push(Action::Console(ConsoleAction::Copy(run.id)));
+                    }
+                }
+                ui.add_space(8.0);
+                ui.with_layout(Layout::top_down(Align::Min), |ui| {
                     ui.spacing_mut().item_spacing.y = 3.0;
                     ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(&run.title)
-                                .size(size::TITLE)
-                                .family(crate::theme::semibold())
-                                .color(p.text_strong),
-                        );
+                        let status = run.status_text();
+                        let reserve = kit::badge_width(ui.painter(), &status)
+                            + 12.0
+                            + if run.running() { 20.0 } else { 0.0 };
+                        let room = (ui.available_width() - reserve).max(40.0);
+                        ui.scope(|ui| {
+                            ui.set_max_width(room);
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&run.title)
+                                        .size(size::TITLE)
+                                        .family(crate::theme::semibold())
+                                        .color(p.text_strong),
+                                )
+                                .truncate(),
+                            );
+                        });
                         ui.add_space(4.0);
-                        kit::badge(ui, &run.status_text(), status_tone(run));
+                        kit::badge(ui, &status, status_tone(run));
                         if run.running() {
                             ui.add(egui::Spinner::new().size(12.0).color(p.accent));
                         }
@@ -81,64 +137,48 @@ pub fn output(ui: &mut Ui, run: &ConsoleRun, id_salt: &str, actions: &mut Vec<Ac
                             format::plural(run.dropped, "line", "lines")
                         ));
                     }
-                    ui.label(
-                        RichText::new(facts.join("  ·  "))
-                            .size(size::SMALL)
-                            .color(p.text_2),
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(facts.join("  ·  "))
+                                .size(size::SMALL)
+                                .color(p.text_2),
+                        )
+                        .truncate(),
                     );
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    if run.running() {
-                        if IconButton::new(Icon::Stop, "Stop")
-                            .show(ui)
-                            .on_hover_text("Kill the process and everything it started")
-                            .clicked()
-                        {
-                            actions.push(Action::Console(ConsoleAction::Stop(run.id)));
-                        }
-                    } else {
-                        if IconButton::icon(Icon::Close)
-                            .show(ui)
-                            .on_hover_text("Remove this run")
-                            .clicked()
-                        {
-                            actions.push(Action::Console(ConsoleAction::Remove(run.id)));
-                        }
-                        if IconButton::new(Icon::Rerun, "Run again")
-                            .show(ui)
-                            .on_hover_text(&run.command)
-                            .clicked()
-                        {
-                            actions.push(Action::Console(ConsoleAction::Rerun(run.id)));
-                        }
-                    }
-                    if IconButton::icon(Icon::Copy)
-                        .show(ui)
-                        .on_hover_text("Copy the output")
-                        .clicked()
-                    {
-                        actions.push(Action::Console(ConsoleAction::Copy(run.id)));
-                    }
                 });
             });
             ui.add_space(6.0);
-            // The command and where it ran, copyable.
-            let cmd = format!("{}\n  in {}", run.command, run.spec.cwd.display());
-            let resp = ui
-                .add(
-                    egui::Label::new(
-                        RichText::new(&cmd)
-                            .family(egui::FontFamily::Monospace)
-                            .size(size::MONO - 0.5)
-                            .color(p.text_2),
-                    )
-                    .sense(Sense::click())
-                    .wrap(),
-                )
-                .on_hover_text("Click to copy the command")
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
-            if resp.clicked() {
+            // The command and where it ran, one line each (cut when long:
+            // wrapped, a long path made the header taller than a short
+            // console panel, which then slid under the pane above it).
+            // Click to copy; the full text is in the tooltip.
+            let full = format!("{}\n  in {}", run.command, run.spec.cwd.display());
+            let mono = |t: String| {
+                RichText::new(t)
+                    .family(egui::FontFamily::Monospace)
+                    .size(size::MONO - 0.5)
+                    .color(p.text_2)
+            };
+            let mut clicked = false;
+            ui.scope(|ui| {
+                ui.spacing_mut().item_spacing.y = 1.0;
+                for text in [
+                    run.command.clone(),
+                    format!("  in {}", run.spec.cwd.display()),
+                ] {
+                    let resp = ui
+                        .add(
+                            egui::Label::new(mono(text))
+                                .sense(Sense::click())
+                                .truncate(),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    let resp = resp
+                        .on_hover_text_at_pointer(format!("{full}\n\nClick to copy the command"));
+                    clicked |= resp.clicked();
+                }
+            });
+            if clicked {
                 actions.push(Action::Copy(run.command.clone()));
             }
         });
@@ -171,6 +211,10 @@ pub fn lines(ui: &mut Ui, run: &ConsoleRun, id_salt: &str) {
             return;
         }
         let font = FontId::monospace(size::MONO - 0.5);
+        // `show_rows` spaces rows by the row height plus the item spacing it
+        // finds here, and the rows inherit it: no spacing, so the line
+        // pitch is exactly LINE_H and the last line scrolls into view.
+        ui.spacing_mut().item_spacing.y = 0.0;
         egui::ScrollArea::both()
             .id_salt(("console_lines", id_salt, run.id))
             .auto_shrink([false, false])

@@ -119,7 +119,7 @@ pub fn show(ui: &mut Ui, cx: &Cx, rt: &mut State, console: &Console, actions: &m
                 ui,
                 Icon::Wheel,
                 "No contexts in the kubeconfig",
-                "kubectl has no cluster to talk to. Create one locally (kind create cluster, k3d cluster create) or add a context with your cloud's CLI (aws eks update-kubeconfig, gcloud container clusters get-credentials, az aks get-credentials), then refresh.",
+                "kubectl has no cluster to talk to.\nCreate one locally (kind create cluster, k3d cluster create) or add a context with your cloud's CLI (aws eks update-kubeconfig, gcloud container clusters get-credentials, az aks get-credentials), then refresh.",
                 None,
             );
         });
@@ -242,9 +242,28 @@ fn toolbar(ui: &mut Ui, k: &KubeState, cfg: &KubeConfig, actions: &mut Vec<Actio
         })
         .show(ui, |ui| {
             let w = ui.available_width();
-            ui.allocate_ui_with_layout(egui::vec2(w, 32.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                ui.label(RichText::new("Context").size(size::SMALL).color(p.text_2));
+            // One row on a wide window, two on a narrow one: combo boxes do
+            // not wrap, and a row wider than the page widens the panes below.
+            let wide = w >= 780.0;
+            let row = |ui: &mut Ui, add: &mut dyn FnMut(&mut Ui)| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(w, 32.0),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        add(ui)
+                    },
+                );
+            };
+            let label_w = if wide { 0.0 } else { 76.0 };
+            let label = |ui: &mut Ui, text: &str| {
+                let r = ui.label(RichText::new(text).size(size::SMALL).color(p.text_2));
+                if r.rect.width() < label_w {
+                    ui.add_space(label_w - r.rect.width());
+                }
+            };
+            let mut context = |ui: &mut Ui| {
+                label(ui, "Context");
                 let mut ctx = target.context.clone();
                 let opts: Vec<(String, String)> = cfg
                     .contexts
@@ -260,8 +279,9 @@ fn toolbar(ui: &mut Ui, k: &KubeState, cfg: &KubeConfig, actions: &mut Vec<Actio
                 if crate::views::form::select(ui, "k8s_context", &mut ctx, &opts, 220.0) {
                     actions.push(Act::KubeContext(ctx).into());
                 }
-                ui.add_space(8.0);
-                ui.label(RichText::new("Namespace").size(size::SMALL).color(p.text_2));
+            };
+            let namespace = |ui: &mut Ui, actions: &mut Vec<Action>| {
+                label(ui, "Namespace");
                 let mut ns = target.namespace.clone();
                 let mut opts: Vec<(String, String)> = match k.load.as_ref().map(|l| &l.namespaces) {
                     Some(Ok(list)) => list
@@ -292,7 +312,19 @@ fn toolbar(ui: &mut Ui, k: &KubeState, cfg: &KubeConfig, actions: &mut Vec<Actio
                 {
                     actions.push(Act::KubeProbeAll.into());
                 }
-            });
+            };
+            let mut later: Vec<Action> = Vec::new();
+            if wide {
+                row(ui, &mut |ui| {
+                    context(ui);
+                    ui.add_space(8.0);
+                    namespace(ui, &mut later);
+                });
+            } else {
+                row(ui, &mut |ui| context(ui));
+                row(ui, &mut |ui| namespace(ui, &mut later));
+            }
+            actions.extend(later);
         });
     kit::hairline(ui);
 }
@@ -351,23 +383,25 @@ fn probe_table(ui: &mut Ui, k: &KubeState, cfg: &KubeConfig, actions: &mut Vec<A
         })
         .collect();
     let names: Vec<String> = cfg.contexts.iter().map(|c| c.name.clone()).collect();
-    grid(
-        ui,
-        "k8s_probes",
-        &[
-            Col::text("Context"),
-            Col::text("API server"),
-            Col::text("Status"),
-            Col::num("Took"),
-        ],
-        &rows,
-        true,
-        |r, resp| {
-            if resp.clicked() {
-                actions.push(Act::KubeContext(names[r].clone()).into());
-            }
-        },
-    );
+    crate::devops::pages::layout::wide(ui, "k8s_contexts", 560.0, |ui| {
+        grid(
+            ui,
+            "k8s_probes",
+            &[
+                Col::text("Context"),
+                Col::text("API server"),
+                Col::text("Status"),
+                Col::num("Took"),
+            ],
+            &rows,
+            true,
+            |r, resp| {
+                if resp.clicked() {
+                    actions.push(Act::KubeContext(names[r].clone()).into());
+                }
+            },
+        );
+    });
     let errors: Vec<(&str, &str)> = cfg
         .contexts
         .iter()
@@ -425,7 +459,7 @@ fn unreachable(
     if kind == ErrorKind::Unreachable || kind == ErrorKind::Timeout {
         common::note(
             ui,
-            "gitvis gave up quickly (10 s client timeout) and skipped the other calls. Commands that change the cluster are never run while it is unreachable.",
+            "gitvis gave up quickly (10 s client timeout) and skipped the other calls.\nCommands that change the cluster are never run while it is unreachable.",
         );
     }
     kit::section_with(
@@ -444,7 +478,7 @@ fn unreachable(
     );
     kit::secondary(
         ui,
-        "Check which clusters answer (read-only: kubectl get namespaces with a 5 s timeout), then click one to switch. The kubeconfig's current context is not changed.",
+        "Check which clusters answer (read-only: kubectl get namespaces with a 5 s timeout), then click one to switch.\nThe kubeconfig's current context is not changed.",
     );
     probe_table(ui, k, cfg, actions);
 }
@@ -534,7 +568,11 @@ fn workload_list(ui: &mut Ui, cx: &Cx, k: &mut KubeState, actions: &mut Vec<Acti
                     .leading(Leading::Dot(color))
                     .subtitle(sub)
                     .meta(&meta)
-                    .badges(badges),
+                    .badges(&crate::devops::pages::layout::fit_badges(
+                        ui,
+                        rect.width(),
+                        badges,
+                    )),
                 sel.as_ref() == Some(key),
             );
             if resp.clicked() {
@@ -605,27 +643,29 @@ fn overview(ui: &mut Ui, cx: &Cx, k: &KubeState, actions: &mut Vec<Action>) {
                     .map(|x| (x.kind, x.name.clone()))
             })
             .collect();
-        grid(
-            ui,
-            "k8s_failing",
-            &[
-                Col::text("Pod"),
-                Col::text("Reason"),
-                Col::num("Restarts"),
-                Col::text("Last termination"),
-                Col::num("Age"),
-            ],
-            &rows,
-            true,
-            |r, resp| {
-                if resp.clicked()
-                    && let Some(key) = &owners[r]
-                {
-                    actions.push(Act::KubeSelect(Some(key.clone())).into());
-                    actions.push(Act::KubePod(Some(failing[r].0.name.clone())).into());
-                }
-            },
-        );
+        crate::devops::pages::layout::wide(ui, "k8s_failing", 640.0, |ui| {
+            grid(
+                ui,
+                "k8s_failing",
+                &[
+                    Col::text("Pod"),
+                    Col::text("Reason"),
+                    Col::num("Restarts"),
+                    Col::text("Last termination"),
+                    Col::num("Age"),
+                ],
+                &rows,
+                true,
+                |r, resp| {
+                    if resp.clicked()
+                        && let Some(key) = &owners[r]
+                    {
+                        actions.push(Act::KubeSelect(Some(key.clone())).into());
+                        actions.push(Act::KubePod(Some(failing[r].0.name.clone())).into());
+                    }
+                },
+            );
+        });
     }
     kit::section(ui, "Workloads", Some(w.len()));
     if w.is_empty() {
@@ -653,25 +693,27 @@ fn overview(ui: &mut Ui, cx: &Cx, k: &KubeState, actions: &mut Vec<Action>) {
         .collect();
     let keys: Vec<(kube::WorkloadKind, String)> =
         vis.iter().map(|x| (x.kind, x.name.clone())).collect();
-    grid(
-        ui,
-        "k8s_overview",
-        &[
-            Col::text("Name"),
-            Col::text("Kind"),
-            Col::text("Rollout"),
-            Col::num("Ready"),
-            Col::text("Image"),
-            Col::num("Age"),
-        ],
-        &rows,
-        true,
-        |r, resp| {
-            if resp.clicked() {
-                actions.push(Act::KubeSelect(Some(keys[r].clone())).into());
-            }
-        },
-    );
+    crate::devops::pages::layout::wide(ui, "k8s_workloads", 700.0, |ui| {
+        grid(
+            ui,
+            "k8s_overview",
+            &[
+                Col::text("Name"),
+                Col::text("Kind"),
+                Col::text("Rollout"),
+                Col::num("Ready"),
+                Col::text("Image"),
+                Col::num("Age"),
+            ],
+            &rows,
+            true,
+            |r, resp| {
+                if resp.clicked() {
+                    actions.push(Act::KubeSelect(Some(keys[r].clone())).into());
+                }
+            },
+        );
+    });
     kit::section(ui, "Other contexts", None);
     if let Some(Ok(cfg)) = &k.config {
         probe_table(ui, k, cfg, actions);
@@ -884,7 +926,7 @@ fn workload_detail(
         ),
         Some(Ok(ev)) if ev.is_empty() => common::note(
             ui,
-            "No events for this workload. Kubernetes keeps events for about an hour; pod events are under each pod.",
+            "No events for this workload.\nKubernetes keeps events for about an hour; pod events are under each pod.",
         ),
         Some(Ok(ev)) => events_table(ui, cx, "k8s_events", ev),
     }
@@ -1072,32 +1114,34 @@ fn pod_table(ui: &mut Ui, cx: &Cx, k: &KubeState, pods: &[&Pod], actions: &mut V
         })
         .collect();
     let names: Vec<String> = pods.iter().map(|p| p.name.clone()).collect();
-    grid(
-        ui,
-        "k8s_pods",
-        &[
-            Col::text("Pod"),
-            Col::text("Status"),
-            Col::num("Ready"),
-            Col::num("Restarts"),
-            Col::num("Age"),
-            Col::text("Node"),
-            Col::text("Last termination"),
-        ],
-        &rows,
-        true,
-        |r, resp| {
-            if resp.clicked() {
-                actions.push(Act::KubePod(Some(names[r].clone())).into());
-            }
-            resp.context_menu(|ui| {
-                if ui.button("Copy pod name").clicked() {
-                    actions.push(Action::Copy(names[r].clone()));
-                    ui.close();
+    crate::devops::pages::layout::wide(ui, "k8s_pods", 760.0, |ui| {
+        grid(
+            ui,
+            "k8s_pods",
+            &[
+                Col::text("Pod"),
+                Col::text("Status"),
+                Col::num("Ready"),
+                Col::num("Restarts"),
+                Col::num("Age"),
+                Col::text("Node"),
+                Col::text("Last termination"),
+            ],
+            &rows,
+            true,
+            |r, resp| {
+                if resp.clicked() {
+                    actions.push(Act::KubePod(Some(names[r].clone())).into());
                 }
-            });
-        },
-    );
+                resp.context_menu(|ui| {
+                    if ui.button("Copy pod name").clicked() {
+                        actions.push(Action::Copy(names[r].clone()));
+                        ui.close();
+                    }
+                });
+            },
+        );
+    });
 }
 
 fn pod_detail(ui: &mut Ui, cx: &Cx, k: &KubeState, p: &Pod, actions: &mut Vec<Action>) {
@@ -1274,21 +1318,23 @@ fn events_table(ui: &mut Ui, cx: &Cx, id: &str, ev: &[Event]) {
             ]
         })
         .collect();
-    grid(
-        ui,
-        id,
-        &[
-            Col::text("Type"),
-            Col::text("Reason"),
-            Col::text("Message"),
-            Col::text("Object"),
-            Col::num("Count"),
-            Col::num("Last seen"),
-        ],
-        &rows,
-        false,
-        |_, _| {},
-    );
+    crate::devops::pages::layout::wide(ui, id, 760.0, |ui| {
+        grid(
+            ui,
+            id,
+            &[
+                Col::text("Type"),
+                Col::text("Reason"),
+                Col::text("Message"),
+                Col::text("Object"),
+                Col::num("Count"),
+                Col::num("Last seen"),
+            ],
+            &rows,
+            false,
+            |_, _| {},
+        );
+    });
     if ev.len() > 40 {
         common::note(ui, &format!("and {} more", ev.len() - 40));
     }

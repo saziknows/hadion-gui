@@ -108,7 +108,9 @@ pub fn denied(
     } else {
         Tone::Warning
     };
-    kit::callout_with(ui, tone, &d.title, &d.body, |ui| {
+    // One sentence per line: the explanation reads as a few short facts.
+    let body = crate::devops::pages::explain::one_per_line(&d.body);
+    kit::callout_with(ui, tone, &d.title, &body, |ui| {
         if !d.steps.is_empty() {
             ui.add_space(2.0);
             for (i, step) in d.steps.iter().enumerate() {

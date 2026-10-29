@@ -1,5 +1,12 @@
 //! The Ship page: one section navigation over two areas, releases and
 //! deployments ([`super::ship`]) and what is running ([`super::runtime`]).
+//!
+//! Its submodules are shared by the Ship, Govern and Tools pages: pane
+//! frames that stay inside a narrow window ([`layout`]) and the pieces
+//! explanations are built from ([`explain`]).
+
+pub mod explain;
+pub mod layout;
 
 use crate::devops::console::Console;
 use crate::devops::ctx::Ctx;
@@ -120,7 +127,7 @@ pub fn show_ship(
     let tab = repo.devops.ship_tab;
     let order: Vec<ShipTab> = NAV.iter().flat_map(|(_, t)| t.iter().copied()).collect();
     let mut clicked: Option<ShipTab> = None;
-    kit::page_with_nav(
+    crate::devops::pages::layout::page_with_nav(
         ui,
         "ship_nav",
         |ui| {

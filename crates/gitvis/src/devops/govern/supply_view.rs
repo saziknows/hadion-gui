@@ -14,6 +14,7 @@ use gitvis_core::osint::Package;
 use super::widgets::{self, severity_badge, severity_dot};
 use super::{Act, ScanFailure, ScanRun, ScannerStatus, State};
 use crate::devops::console::Console;
+use crate::devops::pages::explain;
 use crate::format;
 use crate::state::{Action, RepoState};
 use crate::theme::{pal, size};
@@ -118,7 +119,7 @@ pub fn sbom(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
     );
     let Some(local) = sbom.ok() else {
         let error = sbom.error.clone();
-        kit::scroll_page(ui, "gov_sbom_wait", |ui| match &error {
+        crate::devops::pages::layout::page(ui, "gov_sbom_wait", |ui| match &error {
             Some(e) => widgets::failed(
                 ui,
                 "Could not list the tracked files",
@@ -134,7 +135,7 @@ pub fn sbom(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
     let visible = groups(&local.packages, sbom_search, sbom_eco.as_deref());
     let sel = sbom_selected.clone();
     let gh = gh_sbom.ok();
-    kit::split_keyed(
+    crate::devops::pages::layout::split_keyed(
         ui,
         "gov_sbom",
         sel.as_deref().unwrap_or(""),
@@ -169,7 +170,7 @@ pub fn sbom(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                 widgets::list_none(
                     ui,
                     if local.packages.is_empty() {
-                        "No locked packages: no package-lock.json, yarn.lock, pnpm-lock.yaml, Cargo.lock, go.mod, Pipfile.lock, requirements*.txt, Gemfile.lock or composer.lock is tracked."
+                        "No locked packages: no lockfile is tracked."
                     } else {
                         "Nothing matches the filter."
                     },
@@ -332,29 +333,61 @@ fn sbom_overview(
 ) {
     let unique = local.unique().len();
     let ecos = local.by_ecosystem();
-    crate::views::insights::stats(
-        ui,
-        &[
-            kit::Stat::new("Packages", format::count(unique))
-                .tip("Distinct ecosystem, name and version"),
-            kit::Stat::new("Entries", format::count(local.packages.len()))
-                .tip("Package entries across all lockfiles (one package can be locked in several)"),
-            kit::Stat::new("Ecosystems", ecos.len().to_string()),
-            kit::Stat::new("Lockfiles", local.lockfiles.len().to_string()),
-            kit::Stat::new("Git dependencies", local.git_deps.len().to_string())
-                .tone_if(!local.git_deps.is_empty(), Tone::Warning)
-                .tip("Pulled straight from a git repository: no registry version, not in the SBOM"),
-            kit::Stat::new("Read", format::millis(local.elapsed_ms))
-                .tip("Time to read and parse the manifests"),
-        ],
-    );
-    kit::secondary(
-        ui,
-        &format!(
-            "{} of manifests and lockfiles read from the working tree (vendored copies under node_modules/, vendor/ and third_party/ skipped). Exports list each distinct package once with its package URL and the lockfiles it came from.",
-            format::bytes(local.bytes_read)
-        ),
-    );
+    if local.lockfiles.is_empty() && local.git_deps.is_empty() {
+        // Six zero tiles say less than one sentence.
+        kit::title(ui, "No lockfile in this repository");
+        kit::body(
+            ui,
+            "The SBOM lists the packages the lockfiles pin, and none is tracked here.",
+        );
+    } else {
+        crate::views::insights::stats(
+            ui,
+            &[
+                kit::Stat::new("Packages", format::count(unique))
+                    .tip("Distinct ecosystem, name and version"),
+                kit::Stat::new("Entries", format::count(local.packages.len())).tip(
+                    "Package entries across all lockfiles (one package can be locked in several)",
+                ),
+                kit::Stat::new("Ecosystems", ecos.len().to_string()),
+                kit::Stat::new("Lockfiles", local.lockfiles.len().to_string()),
+                kit::Stat::new("Git dependencies", local.git_deps.len().to_string())
+                    .tone_if(!local.git_deps.is_empty(), Tone::Warning)
+                    .tip(
+                        "Pulled straight from a git repository: no registry version, not in the SBOM",
+                    ),
+                kit::Stat::new("Read", format::millis(local.elapsed_ms))
+                    .tip("Time to read and parse the manifests"),
+            ],
+        );
+        kit::secondary(
+            ui,
+            "Exports list each distinct package once, with its package URL and the lockfiles it came from.",
+        );
+    }
+    explain::details(ui, "gov_sbom_read", "What was read", false, |ui| {
+        explain::terms(
+            ui,
+            130.0,
+            &[
+                (
+                    "Read",
+                    &format!(
+                        "{} of manifests and lockfiles from the working tree.",
+                        format::bytes(local.bytes_read)
+                    ),
+                ),
+                (
+                    "Skipped",
+                    "Vendored copies under node_modules/, vendor/ and third_party/.",
+                ),
+                (
+                    "Lockfiles",
+                    "package-lock.json, npm-shrinkwrap.json, yarn.lock, pnpm-lock.yaml, Cargo.lock, go.mod, Pipfile.lock, requirements*.txt, Gemfile.lock and composer.lock.",
+                ),
+            ],
+        );
+    });
     if !ecos.is_empty() {
         kit::section(ui, "By ecosystem", Some(ecos.len()));
         let items: Vec<(String, u32)> = ecos
@@ -363,13 +396,8 @@ fn sbom_overview(
             .collect();
         kit::count_bars(ui, &items, pal(ui).accent, 10);
     }
-    kit::section(ui, "Lockfiles and manifests", Some(local.lockfiles.len()));
-    if local.lockfiles.is_empty() {
-        kit::muted(
-            ui,
-            "None tracked. gitvis reads package-lock.json, npm-shrinkwrap.json, yarn.lock, pnpm-lock.yaml, Cargo.lock, go.mod, Pipfile.lock, requirements*.txt, Gemfile.lock and composer.lock.",
-        );
-    } else {
+    if !local.lockfiles.is_empty() {
+        kit::section(ui, "Lockfiles and manifests", Some(local.lockfiles.len()));
         let mut rows: Vec<&(String, usize)> = local.lockfiles.iter().collect();
         rows.sort_by_key(|a| std::cmp::Reverse(a.1));
         let cells: Vec<Vec<Cell>> = rows
@@ -416,7 +444,7 @@ fn sbom_overview(
 
     kit::section(ui, "GitHub's dependency graph", None);
     if !has_gh {
-        kit::muted(ui, "No GitHub remote: nothing to compare with.");
+        kit::secondary(ui, "No GitHub remote: nothing to compare with.");
         return;
     }
     if let Some(e) = &gh.error {
@@ -448,11 +476,16 @@ fn sbom_overview(
         } else {
             kit::body(
                 ui,
-                "GitHub builds its own SBOM from the manifests it understands. Comparing shows packages only one side knows and version differences (one request: gh api repos/OWNER/REPO/dependency-graph/sbom).",
+                "GitHub builds its own SBOM from the manifests it understands.",
+            );
+            kit::secondary(
+                ui,
+                "Comparing shows the packages only one side knows and the version differences.",
             );
             if IconButton::new(Icon::Download, "Fetch and compare")
                 .primary(true)
                 .show(ui)
+                .on_hover_text("One request: gh api repos/OWNER/REPO/dependency-graph/sbom")
                 .clicked()
             {
                 actions.push(Act::FetchGhSbom.into());
@@ -505,7 +538,7 @@ fn sbom_overview(
         }
     });
     if !d.unsupported.is_empty() {
-        kit::muted(
+        kit::secondary(
             ui,
             &format!(
                 "Not compared (ecosystems gitvis does not read locally): {}",
@@ -527,18 +560,20 @@ fn sbom_overview(
             .take(50)
             .map(|(t, n, v)| vec![text(n.as_str()), sec(t.as_str()), mono(v.join(", "))])
             .collect();
-        grid(
-            ui,
-            id,
-            &[
-                Col::text("Package"),
-                Col::text("Type"),
-                Col::text("Versions"),
-            ],
-            &cells,
-            false,
-            |_, _| {},
-        );
+        crate::devops::pages::layout::wide(ui, id, 520.0, |ui| {
+            grid(
+                ui,
+                id,
+                &[
+                    Col::text("Package"),
+                    Col::text("Type"),
+                    Col::text("Versions"),
+                ],
+                &cells,
+                false,
+                |_, _| {},
+            );
+        });
         crate::views::insights::more(ui, rows.len(), 50);
     };
     if !d.mismatched.is_empty() {
@@ -556,19 +591,21 @@ fn sbom_overview(
                 ]
             })
             .collect();
-        grid(
-            ui,
-            "gov_sbom_mismatch",
-            &[
-                Col::text("Package"),
-                Col::text("Type"),
-                Col::text("Lockfiles"),
-                Col::text("GitHub"),
-            ],
-            &cells,
-            false,
-            |_, _| {},
-        );
+        crate::devops::pages::layout::wide(ui, "gov_sbom_mismatch", 560.0, |ui| {
+            grid(
+                ui,
+                "gov_sbom_mismatch",
+                &[
+                    Col::text("Package"),
+                    Col::text("Type"),
+                    Col::text("Lockfiles"),
+                    Col::text("GitHub"),
+                ],
+                &cells,
+                false,
+                |_, _| {},
+            );
+        });
         crate::views::insights::more(ui, d.mismatched.len(), 50);
     }
     table(
@@ -632,7 +669,7 @@ pub fn images(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mu
     );
     let Some(report) = images.ok() else {
         let error = images.error.clone();
-        kit::scroll_page(ui, "gov_img_wait", |ui| match &error {
+        crate::devops::pages::layout::page(ui, "gov_img_wait", |ui| match &error {
             Some(e) => widgets::failed(
                 ui,
                 "Could not list the tracked files",
@@ -645,7 +682,7 @@ pub fn images(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mu
         return;
     };
     let sel = image_selected.clone();
-    kit::split_keyed(
+    crate::devops::pages::layout::split_keyed(
         ui,
         "gov_img",
         sel.as_deref().unwrap_or(""),
@@ -695,7 +732,11 @@ pub fn images(ui: &mut Ui, repo: &mut RepoState, console: &Console, actions: &mu
                         &Row::new(&df.path)
                             .leading(Leading::Dot(dot))
                             .subtitle(&sub)
-                            .badges(&badges),
+                            .badges(&crate::devops::pages::layout::fit_badges(
+                                ui,
+                                rect.width(),
+                                &badges,
+                            )),
                         sel.as_deref() == Some(df.path.as_str()),
                     );
                     if resp.clicked() {
@@ -742,9 +783,30 @@ fn images_overview(ui: &mut Ui, r: &ImagesReport) {
     kit::secondary(
         ui,
         &format!(
-            "Linted in {}: tags and digests, the user the container runs as, ADD from URLs, piped install scripts, apt / apk hygiene, secret-looking ENV and ARG names (names only), cache-busting COPY, EXPOSE 22, sudo and HEALTHCHECK. Select a Dockerfile for its findings and fixes.",
+            "Every Dockerfile was linted locally in {}. Select one for its findings and fixes.",
             format::millis(r.elapsed_ms)
         ),
+    );
+    explain::details(
+        ui,
+        "gov_images_checks",
+        "What the lint checks",
+        false,
+        |ui| {
+            explain::bullets(
+                ui,
+                &[
+                    "Tags and digests of the base images",
+                    "The user the container runs as",
+                    "ADD from URLs",
+                    "Piped install scripts",
+                    "apt / apk hygiene",
+                    "Secret-looking ENV and ARG names (names only)",
+                    "Cache-busting COPY",
+                    "EXPOSE 22, sudo and HEALTHCHECK",
+                ],
+            );
+        },
     );
     if !r.unreadable.is_empty() {
         kit::callout(
@@ -804,28 +866,30 @@ fn images_tables(ui: &mut Ui, r: &ImagesReport, actions: &mut Vec<Action>) {
                 ]
             })
             .collect();
-        grid(
-            ui,
-            "gov_img_images",
-            &[
-                Col::text("Image"),
-                Col::text("Tag"),
-                Col::text("Digest"),
-                Col::text("Used in"),
-            ],
-            &cells,
-            false,
-            |r, resp| {
-                if let Some(i) = images.get(r) {
-                    resp.context_menu(|ui| {
-                        if ui.button("Copy image").clicked() {
-                            actions.push(Action::Copy(i.clone()));
-                            ui.close();
-                        }
-                    });
-                }
-            },
-        );
+        crate::devops::pages::layout::wide(ui, "gov_images", 560.0, |ui| {
+            grid(
+                ui,
+                "gov_img_images",
+                &[
+                    Col::text("Image"),
+                    Col::text("Tag"),
+                    Col::text("Digest"),
+                    Col::text("Used in"),
+                ],
+                &cells,
+                false,
+                |r, resp| {
+                    if let Some(i) = images.get(r) {
+                        resp.context_menu(|ui| {
+                            if ui.button("Copy image").clicked() {
+                                actions.push(Action::Copy(i.clone()));
+                                ui.close();
+                            }
+                        });
+                    }
+                },
+            );
+        });
     }
     if !r.compose.is_empty() {
         kit::section(ui, "Compose services", Some(r.compose.len()));
@@ -853,19 +917,21 @@ fn images_tables(ui: &mut Ui, r: &ImagesReport, actions: &mut Vec<Action>) {
                 ]
             })
             .collect();
-        grid(
-            ui,
-            "gov_img_compose",
-            &[
-                Col::text("Service"),
-                Col::text("Image"),
-                Col::text("Build"),
-                Col::text("File"),
-            ],
-            &cells,
-            false,
-            |_, _| {},
-        );
+        crate::devops::pages::layout::wide(ui, "gov_compose", 560.0, |ui| {
+            grid(
+                ui,
+                "gov_img_compose",
+                &[
+                    Col::text("Service"),
+                    Col::text("Image"),
+                    Col::text("Build"),
+                    Col::text("File"),
+                ],
+                &cells,
+                false,
+                |_, _| {},
+            );
+        });
     }
 }
 
@@ -893,8 +959,9 @@ fn scan_section(
     });
     kit::secondary(
         ui,
-        "A scan pulls the image from its registry (network) and lists its known vulnerabilities. It runs in the console; the report is summarised here.",
+        "A scan pulls the image from its registry (network) and lists its known vulnerabilities.",
     );
+    kit::secondary(ui, "It runs in the console; the report is summarised here.");
     let Some(found) = scanners.ok() else {
         kit::loading(ui, "Looking for trivy, grype and docker scout…");
         return;
@@ -968,7 +1035,7 @@ fn scan_section(
         }
         Some(s) => {
             if current == Scanner::Scout {
-                kit::muted(
+                kit::secondary(
                     ui,
                     &format!(
                         "docker scout {}: needs a Docker Hub login (docker login) and sends the image's package list to Docker.",
@@ -1072,7 +1139,7 @@ fn scan_result(ui: &mut Ui, run: &ScanRun, console: &Console, actions: &mut Vec<
                 ui,
                 Tone::Warning,
                 "Docker Scout needs a Docker Hub login",
-                "Scout analyses images against Docker's database and only works for a signed-in Docker ID (a free account is enough). Sign in, then scan again.",
+                "Scout analyses images against Docker's database and only works for a signed-in Docker ID (a free account is enough).\nSign in, then scan again.",
                 |ui| {
                     kit::code_block(ui, "docker login", actions);
                     kit::code_block(ui, tail, actions);
@@ -1130,28 +1197,30 @@ fn scan_result(ui: &mut Ui, run: &ScanRun, console: &Console, actions: &mut Vec<
                         ]
                     })
                     .collect();
-                grid(
-                    ui,
-                    &format!("gov_scan_{}", run.id),
-                    &[
-                        Col::text("Severity"),
-                        Col::text("Vulnerability"),
-                        Col::text("Package"),
-                        Col::text("Installed"),
-                        Col::text("Fixed in"),
-                        Col::text("Title"),
-                    ],
-                    &cells,
-                    true,
-                    |r, resp| {
-                        if let Some(v) = s.top.get(r)
-                            && resp.clicked()
-                            && !v.url.is_empty()
-                        {
-                            actions.push(Action::OpenUrl(v.url.clone()));
-                        }
-                    },
-                );
+                crate::devops::pages::layout::wide(ui, ("gov_scan_vulns", run.id), 760.0, |ui| {
+                    grid(
+                        ui,
+                        &format!("gov_scan_{}", run.id),
+                        &[
+                            Col::text("Severity"),
+                            Col::text("Vulnerability"),
+                            Col::text("Package"),
+                            Col::text("Installed"),
+                            Col::text("Fixed in"),
+                            Col::text("Title"),
+                        ],
+                        &cells,
+                        true,
+                        |r, resp| {
+                            if let Some(v) = s.top.get(r)
+                                && resp.clicked()
+                                && !v.url.is_empty()
+                            {
+                                actions.push(Action::OpenUrl(v.url.clone()));
+                            }
+                        },
+                    );
+                });
                 crate::views::insights::more(ui, s.total, s.top.len());
             }
         }
@@ -1235,25 +1304,27 @@ fn dockerfile_detail(
             ]
         })
         .collect();
-    grid(
-        ui,
-        "gov_df_stages",
-        &[
-            Col::text("Stage"),
-            Col::text("Base image"),
-            Col::text("Tag"),
-            Col::text("Digest"),
-            Col::text("User"),
-            Col::text("Exposes"),
-            Col::num("RUN"),
-            Col::num("Line"),
-        ],
-        &cells,
-        false,
-        |_, _| {},
-    );
+    crate::devops::pages::layout::wide(ui, "gov_df_stages", 760.0, |ui| {
+        grid(
+            ui,
+            "gov_df_stages",
+            &[
+                Col::text("Stage"),
+                Col::text("Base image"),
+                Col::text("Tag"),
+                Col::text("Digest"),
+                Col::text("User"),
+                Col::text("Exposes"),
+                Col::num("RUN"),
+                Col::num("Line"),
+            ],
+            &cells,
+            false,
+            |_, _| {},
+        );
+    });
     if !df.global_args.is_empty() {
-        kit::muted(
+        kit::secondary(
             ui,
             &format!("Build arguments before FROM: {}", df.global_args.join(", ")),
         );
@@ -1302,7 +1373,7 @@ fn dockerfile_detail(
             });
             if same.len() > 1 {
                 for x in &same[1..] {
-                    kit::muted(ui, &format!("Also: {} (line {})", x.title, x.line));
+                    kit::secondary(ui, &format!("Also: {} (line {})", x.title, x.line));
                 }
             }
             ui.add_space(2.0);

@@ -134,13 +134,13 @@ pub fn environments(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>
     );
     if let Some(e) = &list.error {
         let e = e.clone();
-        kit::scroll_page(ui, "gov_env_err", |ui| {
+        crate::devops::pages::layout::page(ui, "gov_env_err", |ui| {
             widgets::denied(ui, gh.as_ref(), acc, Feature::Environments, &e, actions);
         });
         return;
     }
     let Some(all) = list.ok() else {
-        kit::scroll_page(ui, "gov_env_wait", |ui| {
+        crate::devops::pages::layout::page(ui, "gov_env_wait", |ui| {
             widgets::loading(ui, "Reading environments…");
         });
         return;
@@ -151,7 +151,7 @@ pub fn environments(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>
         (None, Some(s)) => s.clone(),
         _ => String::new(),
     };
-    kit::split_keyed(
+    crate::devops::pages::layout::split_keyed(
         ui,
         "gov_env",
         &key,
@@ -429,13 +429,14 @@ fn env_detail(
     }
     if is_admin {
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+            let iw = crate::devops::pages::layout::input_width(ui, 260.0);
             form::input(
                 ui,
                 ("gov_policy_new", &e.name),
                 policy_buf,
-                form::InputOpts::new("release/* or v*").mono().width(260.0),
+                form::InputOpts::new("release/* or v*").mono().width(iw),
             );
             if form::radio(ui, !*policy_tag, "Branch") {
                 *policy_tag = false;
@@ -533,7 +534,7 @@ fn env_form(ui: &mut Ui, edit: &mut EnvEdit, actions: &mut Vec<Action>) {
             }
         });
         if edit.form.policy == PolicyMode::Custom {
-            kit::muted(
+            kit::secondary(
                 ui,
                 "Add the branch and tag patterns after saving, on the environment's page.",
             );
@@ -584,14 +585,31 @@ fn scope_chips(
     ui.add_space(4.0);
 }
 
+/// The column widths of a [`table_row`] / [`table_head`]: as given, or
+/// scaled down together when they (with the gaps and room for the row's
+/// buttons) are wider than the pane, so a narrow window cuts cells
+/// instead of pushing the last columns and the buttons out of view.
+fn fit_cols(ui: &Ui, widths: impl Iterator<Item = f32>) -> Vec<f32> {
+    let ws: Vec<f32> = widths.collect();
+    let gaps = 12.0 * ws.len() as f32;
+    let room = (ui.available_width() - gaps - 80.0).max(64.0 * ws.len() as f32);
+    let total: f32 = ws.iter().sum();
+    if total <= room {
+        ws
+    } else {
+        ws.iter().map(|w| (w * room / total).max(64.0)).collect()
+    }
+}
+
 /// A table row with fixed columns and buttons on the right.
 fn table_row(ui: &mut Ui, cols: &[(f32, RichText)], buttons: impl FnOnce(&mut Ui)) {
+    let ws = fit_cols(ui, cols.iter().map(|c| c.0));
     ui.allocate_ui_with_layout(
         vec2(ui.available_width(), 30.0),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
-            for (w, t) in cols {
+            for ((_, t), w) in cols.iter().zip(&ws) {
                 ui.allocate_ui_with_layout(
                     vec2(*w, 28.0),
                     Layout::left_to_right(Align::Center),
@@ -612,15 +630,16 @@ fn table_row(ui: &mut Ui, cols: &[(f32, RichText)], buttons: impl FnOnce(&mut Ui
 
 fn table_head(ui: &mut Ui, cols: &[(f32, &str)]) {
     let p = *pal(ui);
+    let ws = fit_cols(ui, cols.iter().map(|c| c.0));
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 12.0;
-        for (w, t) in cols {
+        for ((_, t), w) in cols.iter().zip(&ws) {
             ui.allocate_ui_with_layout(
                 vec2(*w, 20.0),
                 Layout::left_to_right(Align::Center),
                 |ui| {
                     ui.set_width(*w);
-                    ui.label(kit::caption_text(&p, t));
+                    ui.add(egui::Label::new(kit::caption_text(&p, t)).truncate());
                 },
             );
         }
@@ -690,7 +709,7 @@ pub fn secrets(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
         .as_ref()
         .map(|(o, r)| format!("{o}/{r}"))
         .unwrap_or_default();
-    kit::scroll_page(ui, "gov_secrets", |ui| {
+    crate::devops::pages::layout::page(ui, "gov_secrets", |ui| {
         scope_chips(ui, &scopes, &scope, true, actions);
         if let Some(f) = secret_form {
             secret_form_card(ui, f, &full, actions);
@@ -816,7 +835,7 @@ fn workflow_refs(
     let Some(refs) = refs.ok() else { return };
     kit::section(ui, "Referenced by workflows", Some(refs.len()));
     if refs.is_empty() {
-        kit::muted(
+        kit::secondary(
             ui,
             "No workflow under .github/workflows reads secrets.NAME (GITHUB_TOKEN aside).",
         );
@@ -824,7 +843,7 @@ fn workflow_refs(
     }
     kit::secondary(
         ui,
-        "secrets.NAME in .github/workflows, and the scopes that define each one (repository, organisation, environments). A secret no scope defines reads as an empty string.",
+        "secrets.NAME in .github/workflows, and the scopes that define each one (repository, organisation, environments).\nA secret no scope defines reads as an empty string.",
     );
     let p = *pal(ui);
     // Where each name is defined, among the scopes read so far.
@@ -1005,7 +1024,7 @@ pub fn variables(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
             }
         },
     );
-    kit::scroll_page(ui, "gov_vars", |ui| {
+    crate::devops::pages::layout::page(ui, "gov_vars", |ui| {
         scope_chips(ui, &scopes, &scope, false, actions);
         if let Some(f) = variable_form {
             variable_form_card(ui, f, actions);

@@ -29,19 +29,22 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
             }
         },
     );
-    let mut offset = repo.devops.ship.scroll_to.take();
-    sui::scroll_page(ui, "ship_where_page", &mut offset, |ui| {
+    sui::scroll_page(ui, "ship_where_page", |ui| {
         // The question.
         let st = &mut repo.devops.ship;
         let mut go = false;
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
+        // The buttons wrap under the input in a narrow window (a row wider
+        // than the page widens everything below it).
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+            // Room for the three buttons beside it while the pane allows.
+            let w = (ui.available_width() - 290.0).clamp(160.0, 340.0);
             let resp = form::input(
                 ui,
                 "ship_where_input",
                 &mut st.where_input,
                 form::InputOpts::new("Commit id, branch or tag")
-                    .width(340.0)
+                    .width(w)
                     .mono(),
             );
             if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -78,7 +81,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                         "Reading branches, tags and deployed commits from local history…",
                     );
                 } else {
-                    kit::muted(
+                    kit::secondary(
                         ui,
                         "Type a commit id, branch or tag, or pick the selected commit.",
                     );
@@ -412,6 +415,11 @@ fn pull_step(repo: &RepoState, l: &Located, now: i64) -> Step {
         );
     }
     match &st.where_pulls.result {
+        Some(Err(e)) if super::not_on_github(e) => Step::new(
+            Mark::NotYet,
+            "Pull request",
+            vec!["GitHub does not have this commit yet: push it, then look again.".to_owned()],
+        ),
         Some(Err(e)) => Step::new(Mark::Unknown, "Pull request", vec![e.clone()]),
         Some(Ok(list)) => match whereis::introducing(list, &l.sha) {
             None => Step::new(
@@ -484,6 +492,11 @@ fn ci_step(repo: &RepoState, l: &Located, _now: i64) -> Step {
             Mark::Unknown,
             "Checks",
             vec!["Fetching check runs…".to_owned()],
+        ),
+        Some(Err(e)) if super::not_on_github(e) => Step::new(
+            Mark::NotYet,
+            "Checks",
+            vec!["No checks yet: GitHub does not have this commit until it is pushed.".to_owned()],
         ),
         Some(Err(e)) => Step::new(Mark::Unknown, "Checks", vec![e.clone()]),
         Some(Ok(list)) if list.is_empty() => Step::new(

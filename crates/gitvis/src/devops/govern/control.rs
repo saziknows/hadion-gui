@@ -680,7 +680,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 ),
             };
             let label = format!("Dismiss {what} alert #{}", d.number);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Dismiss {what} alert #{}?", d.number),
                 format!(
                     "Reason: {reason}. GitHub records who dismissed it and why; it can be reopened later."
@@ -702,7 +703,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 AlertKind::Dependabot => (alerts::dependabot_reopen(&gh, number), "Dependabot"),
                 AlertKind::Code => (alerts::code_reopen(&gh, number), "code scanning"),
             };
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Reopen {what} alert #{number}?"),
                 "The alert becomes open again and counts towards the repository's open alerts.",
                 "Reopen alert",
@@ -867,7 +869,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             let body = format!(
                 "{what} The PUT replaces the whole rule: the four required keys come first, null where a setting is off."
             );
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Save branch protection of {branch}?"),
                 body,
                 "Save protection",
@@ -888,7 +891,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             let Some(gh) = gh_of(cx) else { return };
             let branch = repo.devops.govern.prot_branch.clone();
             let request = protection::protection_delete(&gh, &branch);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Remove branch protection from {branch}?"),
                 "Anyone with write access can then push, force-push or delete the branch (rulesets still apply).",
                 "Remove protection",
@@ -970,7 +974,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             )];
             details.extend(codeowners::line_diff(&old, &text, 200));
             let errors = st.co.parsed.as_ref().map(|p| p.errors()).unwrap_or(0);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Save {path}?"),
                 format!(
                     "The file is written in the working tree; commit and push it for GitHub to use it.{}",
@@ -1095,7 +1100,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         Act::ReviewDeleteEnv(name) => {
             let Some(gh) = gh_of(cx) else { return };
             let request = envs::environment_delete(&gh, &name);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Delete the environment {name}?"),
                 "Its protection rules, branch policies, secrets and variables are deleted with it. Deployments that target it stop waiting for approval.",
                 "Delete environment",
@@ -1122,7 +1128,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             }
             let request = envs::branch_policy_create(&gh, &env, &pattern, st.policy_tag);
             let kind = if st.policy_tag { "tag" } else { "branch" };
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Allow {kind}es matching {pattern} to deploy to {env}?"),
                 "Patterns use fnmatch syntax: * matches anything but /, ** also matches /.",
                 "Add policy",
@@ -1139,7 +1146,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         Act::ReviewDeletePolicy { env, id, name } => {
             let Some(gh) = gh_of(cx) else { return };
             let request = envs::branch_policy_delete(&gh, &env, id);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Remove the policy {name} from {env}?"),
                 "Refs matching only this pattern can no longer deploy to the environment.",
                 "Remove policy",
@@ -1207,7 +1215,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 .get(&f.scope)
                 .and_then(|x| x.ok())
                 .is_some_and(|v| v.iter().any(|x| x.name == name));
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!(
                     "{} the secret {name}?",
                     if existing { "Update" } else { "Create" }
@@ -1221,7 +1230,11 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                         ""
                     }
                 ),
-                if existing { "Update secret" } else { "Create secret" },
+                if existing {
+                    "Update secret"
+                } else {
+                    "Create secret"
+                },
                 existing,
                 vec![preview],
                 Act::SetSecretConfirmed.into(),
@@ -1260,7 +1273,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         Act::ReviewDeleteSecret(scope, name) => {
             let Some(full) = full_name(repo) else { return };
             let args = config::secret_delete_args(&full, &name, scope.env());
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Delete the secret {name}?"),
                 format!(
                     "{} on {full}. Workflows that read secrets.{name} get an empty string from then on.",
@@ -1354,7 +1368,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                     format!("Create variable {name}"),
                 ),
             };
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 title,
                 format!(
                     "{}. Variables are not secret: anyone who can read workflow logs can see them.",
@@ -1383,7 +1398,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         Act::ReviewDeleteVariable(scope, name) => {
             let Some(gh) = gh_of(cx) else { return };
             let request = config::variable_delete(&gh, &scope, &name);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Delete the variable {name}?"),
                 format!(
                     "{}. Workflows that read vars.{name} get an empty string from then on.",
@@ -1753,7 +1769,8 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                         ));
                     }
                     let create = edit.editing.is_none();
-                    cx.confirm(
+                    crate::devops::pages::explain::confirm(
+                        cx,
                         if create {
                             format!("Create the environment {name}?")
                         } else {

@@ -233,9 +233,6 @@ pub struct State {
 
     // DORA
     pub dora: DoraState,
-
-    /// A scroll offset for the next frame of a scrolling tab (script).
-    pub scroll_to: Option<f32>,
 }
 
 /// Persisted per repository.
@@ -516,6 +513,12 @@ pub(crate) fn count(n: usize, one: &str, many: &str) -> String {
     format!("{} {}", format::count(n), if n == 1 { one } else { many })
 }
 
+/// GitHub's answer about a commit it does not have (not pushed yet):
+/// `No commit found for SHA: … (HTTP 422)`.
+pub(crate) fn not_on_github(error: &str) -> bool {
+    error.contains("No commit found") || error.contains("(HTTP 422)")
+}
+
 impl Msg {
     /// One line for the activity log (`Err` when the work failed).
     pub fn summary(&self) -> Result<String, String> {
@@ -584,10 +587,13 @@ impl Msg {
                     )
                 })
                 .map_err(Clone::clone),
-            Msg::WherePulls { result, .. } => result
-                .as_ref()
-                .map(|p| count(p.len(), "pull request", "pull requests"))
-                .map_err(Clone::clone),
+            Msg::WherePulls { result, .. } => match result {
+                Ok(p) => Ok(count(p.len(), "pull request", "pull requests")),
+                // A commit that is not pushed is unknown to GitHub: the
+                // expected state of local work, not a failure.
+                Err(e) if not_on_github(e) => Ok("The commit is not on GitHub yet".to_owned()),
+                Err(e) => Err(e.clone()),
+            },
             Msg::DoraEvents { key, result } => result
                 .as_ref()
                 .map(|e| format!("{} for {key}", count(e.len(), "event", "events")))
@@ -886,7 +892,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             let Some(gh) = cx.gh.clone() else { return };
             let req = deploy::rerun_request(&gh, run);
             let danger = title.contains("Roll ");
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 title,
                 body,
                 "Re-run",
@@ -918,7 +925,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             let req = deploy::create_deployment_request(&gh, &sha, &env, &description);
             let mut details = vec![req.display()];
             details.extend(req.body_preview());
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 title,
                 format!(
                     "GitHub records a deployment of {} to {env} and sends the `deployment` event. Only a workflow with `on: deployment` (or an external deployer) acts on it; without one it stays pending.",
@@ -1033,7 +1041,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             recompute_dora(&mut repo.devops.ship);
             dora_start(cx, repo, false);
         }
-        Act::ScrollTo(y) => repo.devops.ship.scroll_to = Some(y.max(0.0)),
+        Act::ScrollTo(y) => crate::devops::pages::layout::scroll_next(y),
         Act::DoraRefresh => {
             if matches!(
                 repo.devops.ship.dora.source,
@@ -1541,7 +1549,8 @@ fn confirm_publish(cx: &mut Ctx, repo: &mut RepoState) {
             )
         }
     );
-    cx.confirm(
+    crate::devops::pages::explain::confirm(
+        cx,
         format!("Publish release {}?", new.tag),
         body,
         if new.draft { "Save draft" } else { "Publish" },
@@ -1606,7 +1615,8 @@ fn confirm_edit(cx: &mut Ctx, repo: &mut RepoState) {
     let req = release::edit_request(&gh, e.id, &edit);
     let mut details = vec![req.display()];
     details.extend(req.body_preview());
-    cx.confirm(
+    crate::devops::pages::explain::confirm(
+        cx,
         format!("Save release {}?", e.tag),
         "GitHub updates the release's title, notes and flags. The tag and the assets stay as they are.",
         "Save",
@@ -1644,7 +1654,8 @@ fn confirm_delete(cx: &mut Ctx, repo: &mut RepoState, id: u64, with_tag: bool) {
     if with_tag {
         details.push(release::delete_tag_request(&gh, &tag).display());
     }
-    cx.confirm(
+    crate::devops::pages::explain::confirm(
+        cx,
         format!(
             "Delete release {}{}?",
             r.title(),
@@ -1807,7 +1818,8 @@ fn confirm_review(
         .and_then(|a| a.iter().find(|x| x.run.id == run))
         .map(|a| format!("{} #{}", a.run.name, a.run.run_number))
         .unwrap_or_else(|| format!("Run {run}"));
-    cx.confirm(
+    crate::devops::pages::explain::confirm(
+        cx,
         format!(
             "{} the deployment to {}?",
             if approve { "Approve" } else { "Reject" },
@@ -2045,11 +2057,19 @@ fn recompute_dora(st: &mut State) {
 /// selected release), `where SHA|head|selected`, `env N`,
 /// `rollback [rerun]`, `promote ENV`, `approve N`, `reject N`,
 /// `dora-source env NAME|releases|tags
-/// PATTERN|workflow NAME`, `dora-period 30|90|180`, `ship-scroll Y` (Where
-/// and DORA pages). Writes stop at their confirmation dialog.
+/// PATTERN|workflow NAME`, `dora-period 30|90|180`, `ship-scroll Y` (scrolls
+/// the next detail pane or page drawn on the Ship, Govern and Tools pages),
+/// `explain open|closed` (every folded explanation of those pages drawn
+/// open). Writes stop at their confirmation dialog.
 pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
     let arg = arg.trim();
     let num = || arg.parse::<usize>().ok();
+    if cmd == "explain" {
+        // `explain open|closed`: draw every folded explanation of the Ship,
+        // Govern and Tools pages open, for screenshots.
+        crate::devops::pages::explain::set_open_all(arg != "closed");
+        return Some(Vec::new());
+    }
     let (tab, a) = match cmd {
         "release" => (ShipTab::Releases, Act::SelectReleaseIndex(num()?)),
         "new-release" => (ShipTab::Releases, Act::NewRelease),

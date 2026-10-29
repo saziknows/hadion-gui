@@ -359,7 +359,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                     " If git am stops, Continue, Skip and Abort are on this tab and on the banner.",
                 );
             }
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 if am {
                     "Apply as commits?"
                 } else {
@@ -417,7 +418,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                     true,
                 ),
             };
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 title,
                 body,
                 match step.as_str() {
@@ -498,7 +500,8 @@ fn confirm_create(cx: &mut Ctx, source: Source, out_dir: PathBuf, commits: &[Ran
     if commits.len() > 40 {
         list.push(format!("… and {} more", commits.len() - 40));
     }
-    cx.confirm(
+    crate::devops::pages::explain::confirm(
+        cx,
         "Create the patch files?",
         format!(
             "Writes {} into {}, one mail per commit ({}), oldest first. Merge commits are left out.",
@@ -546,7 +549,7 @@ fn am_stopped(ui: &mut Ui, p: &mut Patches, busy: bool, actions: &mut Vec<Action
         ui,
         Tone::Warning,
         "git am stopped",
-        "A patch did not apply. Resolve the conflicts (or apply it by hand) and stage the result, then Continue; or Skip this patch; or Abort to go back to where the branch was.",
+        "A patch did not apply.\nResolve the conflicts (or apply it by hand) and stage the result, then Continue; or Skip this patch; or Abort to go back to where the branch was.",
         |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
@@ -605,7 +608,7 @@ fn create(ui: &mut Ui, p: &mut Patches, branch: &str, busy: bool, actions: &mut 
     form::card(ui, Tone::Neutral, |ui| {
         kit::secondary(
             ui,
-            "git format-patch writes one mail-formatted file per commit, with its author, date and message: send it, attach it to an issue, or apply it elsewhere with git am.",
+            "git format-patch writes one mail-formatted file per commit, with its author, date and message.\nSend it, attach it to an issue, or apply it elsewhere with git am.",
         );
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -625,11 +628,12 @@ fn create(ui: &mut Ui, p: &mut Patches, branch: &str, busy: bool, actions: &mut 
                     "A..B is the commits in B that are not in A; one revision (v1.0) means its commits up to HEAD.",
                 ),
                 |ui| {
+                    let iw = crate::devops::pages::layout::input_width(ui, 320.0);
                     form::input(
                         ui,
                         "gp_patch_range",
                         &mut p.range,
-                        InputOpts::new("main..feature").mono().width(320.0),
+                        InputOpts::new("main..feature").mono().width(iw),
                     )
                 },
             );
@@ -654,7 +658,8 @@ fn create(ui: &mut Ui, p: &mut Patches, branch: &str, busy: bool, actions: &mut 
                         "gp_patch_out",
                         &mut p.out_dir,
                         InputOpts::new("Choose a folder")
-                            .width((ui.available_width() - 110.0).max(240.0)),
+                            // Room for the Choose button; the frame adds 22.
+                            .width((ui.available_width() - 134.0).max(120.0)),
                     );
                     if form::button(ui, "Choose…", true).clicked() {
                         actions.push(Act::PickPatchFolder.into());
@@ -777,9 +782,9 @@ fn apply_section(
         }
     });
     if p.files.is_empty() {
-        kit::muted(
+        kit::secondary(
             ui,
-            "Choose .patch, .diff or .mbox files: gitvis checks each one against this repository before anything is applied.",
+            "Choose .patch, .diff or .mbox files.\ngitvis checks each one against this repository before anything is applied.",
         );
         return;
     }

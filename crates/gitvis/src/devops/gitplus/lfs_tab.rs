@@ -132,7 +132,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 return;
             }
             let args = core::track_args(&pattern, s.lockable);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Track the pattern with LFS?",
                 format!(
                     "Adds \"{pattern}\" to .gitattributes, so matching files added from now on are stored in LFS{}. Files already committed stay as they are until they are added again (git lfs migrate rewrites history; gitvis does not). Commit .gitattributes afterwards.",
@@ -163,7 +164,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         }
         Act::LfsUntrack(pattern) => {
             let args = core::untrack_args(&pattern);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Stop tracking the pattern?",
                 format!(
                     "Removes \"{pattern}\" from .gitattributes. Files already in LFS stay pointers in history; new versions are stored in git directly. Commit .gitattributes afterwards."
@@ -190,7 +192,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                     details.push(summary);
                 }
             }
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("{}?", kind.label()),
                 kind.explain(),
                 kind.label(),
@@ -242,7 +245,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         }
         Act::LfsLock(path) => {
             let args = core::lock_args(&path);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Lock the file?",
                 format!(
                     "Asks the LFS server to lock {path} for you: others cannot push changes to it until you unlock it. This is a change on the server."
@@ -264,8 +268,13 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
         }
         Act::LfsUnlock { path, force } => {
             let args = core::unlock_args(&path, force);
-            cx.confirm(
-                if force { "Force the unlock?" } else { "Unlock the file?" },
+            crate::devops::pages::explain::confirm(
+                cx,
+                if force {
+                    "Force the unlock?"
+                } else {
+                    "Unlock the file?"
+                },
                 if force {
                     format!(
                         "Removes the lock on {path} although someone else holds it (needs admin rights on the server). They are not told."
@@ -411,11 +420,11 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
                 ui,
                 Tone::Neutral,
                 "This repository does not use Git LFS",
-                "Git LFS keeps large files (images, videos, datasets, builds) out of the repository: git stores a small pointer and the content lives on the LFS server. To start, track a pattern below and commit .gitattributes; Set up LFS adds the hooks that upload the content on push.",
+                "Git LFS keeps large files (images, videos, datasets, builds) out of the repository: git stores a small pointer and the content lives on the LFS server.\nTo start, track a pattern below and commit .gitattributes.\nSet up LFS adds the hooks that upload the content on push.",
             );
         }
         setup(ui, &o, busy, actions);
-        kit::stats(
+        crate::views::insights::stats(
             ui,
             &[
                 Stat::new("Tracked patterns", format::count(o.patterns.len())),
@@ -481,9 +490,9 @@ fn patterns(ui: &mut Ui, s: &mut Lfs, o: &Overview, busy: bool, actions: &mut Ve
     let p = *pal(ui);
     kit::section(ui, "Tracked patterns", Some(o.patterns.len()));
     if o.patterns.is_empty() {
-        kit::muted(
+        kit::secondary(
             ui,
-            "No pattern sends files through LFS yet. Track one below (for example *.psd or assets/**).",
+            "No pattern sends files through LFS yet.\nTrack one below, for example *.psd or assets/**.",
         );
     }
     for pat in &o.patterns {
@@ -522,12 +531,13 @@ fn patterns(ui: &mut Ui, s: &mut Lfs, o: &Overview, busy: bool, actions: &mut Ve
         );
     }
     ui.add_space(4.0);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
+        let iw = crate::devops::pages::layout::input_width(ui, 220.0);
         form::input(
             ui,
             "gp_lfs_pattern",
             &mut s.pattern,
-            InputOpts::new("*.psd").width(220.0).mono(),
+            InputOpts::new("*.psd").width(iw).mono(),
         );
         form::checkbox(ui, &mut s.lockable, "Lockable");
         if form::button(ui, "Track…", !busy && !s.pattern.trim().is_empty()).clicked() {
@@ -638,7 +648,7 @@ fn files(ui: &mut Ui, s: &mut Lfs, o: &Overview, actions: &mut Vec<Action>) {
     } else if shown.is_empty() {
         kit::muted(ui, "No file matches the filter.");
     }
-    kit::muted(
+    kit::secondary(
         ui,
         "Right-click a file to lock it or copy its path or object id.",
     );
@@ -646,7 +656,7 @@ fn files(ui: &mut Ui, s: &mut Lfs, o: &Overview, actions: &mut Vec<Action>) {
 
 fn gui_search(ui: &mut Ui, text: &mut String) {
     ui.horizontal(|ui| {
-        ui.set_max_width(420.0);
+        crate::devops::pages::layout::cap_width(ui, 420.0);
         kit::search_box(ui, "gp_lfs_filter", text, "Filter files");
     });
     ui.add_space(4.0);
@@ -701,7 +711,7 @@ fn locks(ui: &mut Ui, s: &mut Lfs, settings: &Settings, busy: bool, actions: &mu
         },
     );
     if settings.safe_mode {
-        kit::muted(
+        kit::secondary(
             ui,
             "Safe mode is on: lock and unlock are refused (they change the server).",
         );
@@ -712,9 +722,9 @@ fn locks(ui: &mut Ui, s: &mut Lfs, settings: &Settings, busy: bool, actions: &mu
     }
     match &s.locks {
         None => {
-            kit::muted(
+            kit::secondary(
                 ui,
-                "Locks live on the LFS server: Load locks asks it (network). Lockable files are read-only until you lock them.",
+                "Locks live on the LFS server: Load locks asks it (network).\nLockable files are read-only until you lock them.",
             );
         }
         Some(Err(e)) => {

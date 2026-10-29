@@ -52,10 +52,10 @@ impl SubCmd {
                 "Copies the URLs from .gitmodules into this repository's configuration, so Update knows where to clone from. Nothing is downloaded."
             }
             SubCmd::Update => {
-                "Checks out the commit this repository records in each submodule, cloning the ones that are not there yet (network) and recursing into nested ones. Local commits inside stay reachable but are no longer checked out."
+                "Checks out the commit this repository records in each submodule, cloning the ones that are not there yet (network) and recursing into nested ones.\nLocal commits inside stay reachable but are no longer checked out."
             }
             SubCmd::UpdateRemote => {
-                "Fetches each submodule's tracked branch from its remote (network) and checks out its newest commit. This repository then shows the submodules as changed: commit the new pointers to keep them."
+                "Fetches each submodule's tracked branch from its remote (network) and checks out its newest commit.\nThis repository then shows the submodules as changed: commit the new pointers to keep them."
             }
             SubCmd::Sync => {
                 "Copies changed URLs from .gitmodules into the configuration of this repository and of each submodule's remote. Nothing is downloaded."
@@ -155,7 +155,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                     ""
                 }
             );
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!(
                     "{} {}?",
                     kind.label(),
@@ -205,7 +206,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 return;
             }
             let args = core::add_args(&url, &path, &branch);
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Add the submodule?",
                 format!(
                     "Clones {url} into {path} (network), records its current commit{} and adds it to .gitmodules. Commit the change afterwards; others then get it with Update.",
@@ -259,7 +261,7 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 .map(|m| m.dirty.len())
                 .unwrap_or(0);
             let mut body = format!(
-                "Removes the submodule {path}: its checkout, its entry in .gitmodules and the index, and its clone under .git/modules. Commit the change afterwards."
+                "Removes the submodule {path}: its checkout, its entry in .gitmodules and the index, and its clone under .git/modules.\nCommit the change afterwards."
             );
             if dirty > 0 {
                 body.push_str(&format!(
@@ -268,7 +270,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 ));
             }
             body.push_str(" Commits that exist only in it are lost too unless they were pushed.");
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 "Remove the submodule?",
                 body,
                 "Deinit and remove",
@@ -424,7 +427,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                 ui,
                 Tone::Neutral,
                 "No submodules",
-                "A submodule is another git repository checked out inside this one at a fixed commit: a library, a theme, shared configuration. This repository records which commit; Update checks that commit out, Update to remote moves it forward. This repository has none.",
+                "This repository has none.\nA submodule is another git repository checked out inside this one at a fixed commit: a library, a theme, shared configuration.\nThis repository records which commit; Update checks that commit out, Update to remote moves it forward.",
             );
             add_form(ui, s, busy, actions);
         });
@@ -465,7 +468,11 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, actions: &mut Vec<Action>) {
                         .leading(kit::Leading::Dot(state_tone(m.state).color(&p)))
                         .subtitle(&sub)
                         .meta(&meta)
-                        .badges(&b),
+                        .badges(&crate::devops::pages::layout::fit_badges(
+                            ui,
+                            rect.width(),
+                            &b,
+                        )),
                     selected.as_deref() == Some(m.path.as_str()),
                 );
                 if resp.clicked() {
@@ -519,7 +526,7 @@ fn overview(ui: &mut Ui, s: &mut Submodules, o: &Overview, busy: bool, actions: 
         .iter()
         .filter(|m| m.ahead_behind.is_some_and(|(_, b)| b > 0))
         .count();
-    kit::stats(
+    crate::views::insights::stats(
         ui,
         &[
             Stat::new("Submodules", format::count(o.modules.len())),
@@ -566,9 +573,9 @@ fn overview(ui: &mut Ui, s: &mut Submodules, o: &Overview, busy: bool, actions: 
             }
         }
     });
-    kit::muted(
+    kit::secondary(
         ui,
-        "Update checks out the recorded commits (cloning missing ones); Update to remote moves each one to the newest commit of its branch. Both use the network.",
+        "Update checks out the recorded commits (cloning missing ones); Update to remote moves each one to the newest commit of its branch.\nBoth use the network.",
     );
     if !o.orphans.is_empty() {
         kit::section(
@@ -579,7 +586,7 @@ fn overview(ui: &mut Ui, s: &mut Submodules, o: &Overview, busy: bool, actions: 
         for c in &o.orphans {
             kit::body(ui, &format!("{} → {} ({})", c.name, c.path, c.url));
         }
-        kit::muted(
+        kit::secondary(
             ui,
             "These paths are not gitlinks in the index: the submodule was removed without editing .gitmodules, or was never committed.",
         );
@@ -621,11 +628,12 @@ fn add_form(ui: &mut Ui, s: &mut Submodules, busy: bool, actions: &mut Vec<Actio
             "Branch to track (optional)",
             Some("Recorded in .gitmodules for Update to remote."),
             |ui| {
+                let iw = crate::devops::pages::layout::input_width(ui, 240.0);
                 form::input(
                     ui,
                     "gp_sub_branch",
                     &mut s.add_branch,
-                    InputOpts::new("main").mono().width(240.0),
+                    InputOpts::new("main").mono().width(iw),
                 )
             },
         );
@@ -781,7 +789,7 @@ fn detail(
         }
     });
     if m.nested {
-        kit::muted(
+        kit::secondary(
             ui,
             "A nested submodule: run commands from the submodule that contains it (open it as a tab).",
         );
@@ -808,7 +816,7 @@ fn detail(
         kit::body(
             ui,
             &format!(
-                "This repository records {} but {} is checked out. Stage the submodule in the WIP panel and commit to record the new commit, or Update to check the recorded one out again.",
+                "This repository records {} but {} is checked out.\nStage the submodule in the WIP panel and commit to record the new commit, or Update to check the recorded one out again.",
                 short(r),
                 short(c)
             ),

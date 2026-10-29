@@ -11,80 +11,26 @@ use egui::{
 use gitvis_core::devops::tools::Tool;
 use gitvis_core::diff::LineKind;
 
+use crate::devops::pages::layout;
 use crate::state::{Action, DiffDoc};
 use crate::theme::{Palette, pal, size};
 use crate::views::icons::{Icon, IconButton};
 use crate::views::kit::{self, Tone};
 
-/// The list pane on the left (same frame as `kit::split_keyed`).
+/// The list pane on the left (gives way in a narrow window, see
+/// `pages::layout`).
 pub fn list_pane(ui: &mut Ui, id: &str, default: f32, add: impl FnOnce(&mut Ui)) {
-    let p = *pal(ui);
-    egui::Panel::left(id)
-        .resizable(true)
-        .default_size(default)
-        .size_range(280.0..=760.0)
-        .frame(Frame::NONE.fill(p.panel).inner_margin(Margin {
-            left: 8,
-            right: 8,
-            top: 12,
-            bottom: 6,
-        }))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            add(ui)
-        });
+    layout::list_pane(ui, id, default, add);
 }
 
 /// The scrollable, padded, width-capped detail pane.
 pub fn detail_pane(ui: &mut Ui, salt: impl Hash + std::fmt::Debug, add: impl FnOnce(&mut Ui)) {
-    let p = *pal(ui);
-    egui::CentralPanel::default()
-        .frame(Frame::NONE.fill(p.canvas))
-        .show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt(salt)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    Frame::NONE
-                        .inner_margin(Margin {
-                            left: 28,
-                            right: 28,
-                            top: 20,
-                            bottom: 28,
-                        })
-                        .show(ui, |ui| {
-                            ui.set_max_width(kit::DETAIL_MAX);
-                            ui.spacing_mut().item_spacing.y = 8.0;
-                            add(ui)
-                        });
-                });
-        });
+    layout::detail_pane(ui, salt, add);
 }
 
 /// A full-width scrolling page below the header.
 pub fn page(ui: &mut Ui, salt: impl Hash + std::fmt::Debug, add: impl FnOnce(&mut Ui)) {
-    let p = *pal(ui);
-    egui::CentralPanel::default()
-        .frame(Frame::NONE.fill(p.canvas))
-        .show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt(salt)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    Frame::NONE
-                        .inner_margin(Margin {
-                            left: 24,
-                            right: 24,
-                            top: 16,
-                            bottom: 28,
-                        })
-                        .show(ui, |ui| {
-                            ui.set_max_width(kit::DETAIL_MAX + 120.0);
-                            ui.spacing_mut().item_spacing.y = 8.0;
-                            add(ui)
-                        });
-                });
-        });
+    layout::page(ui, salt, add);
 }
 
 /// The remaining area for an empty state or a spinner.

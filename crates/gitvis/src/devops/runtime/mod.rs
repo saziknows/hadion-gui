@@ -610,6 +610,21 @@ fn n_of(n: usize, one: &str, many: &str) -> String {
     crate::format::plural(n, one, many)
 }
 
+/// A packages error for the activity log. GitHub saying the login lacks
+/// `read:packages` is the expected state of a default `gh auth login` (the
+/// Packages tab explains the fix), so it is information, not a failure
+/// that turns the status bar red.
+fn scope_note(e: &str) -> Result<String, String> {
+    if packages::problem(e) == packages::Problem::MissingScope {
+        Ok(format!(
+            "Needs the read:packages scope (the Packages tab shows the fix): {}",
+            e.lines().next().unwrap_or(e)
+        ))
+    } else {
+        Err(e.to_owned())
+    }
+}
+
 impl Msg {
     /// One line for the activity log (`Err` when the work failed).
     pub fn summary(&self) -> Result<String, String> {
@@ -622,14 +637,14 @@ impl Msg {
                     l.packages.iter().filter(|p| p.linked_to(&l.repo)).count(),
                     l.repo
                 )),
-                Err(e) => Err(e.clone()),
+                Err(e) => scope_note(e),
             },
             Msg::Versions { package, result } => match result {
                 Ok(v) => Ok(format!(
                     "{} of {package}",
                     n_of(v.len(), "version", "versions")
                 )),
-                Err(e) => Err(e.clone()),
+                Err(e) => scope_note(e),
             },
             Msg::PkgDeleted { package } => Ok(format!("Reloading the versions of {package}")),
             Msg::Kube {
@@ -951,8 +966,14 @@ fn scan_tf(cx: &mut Ctx, repo: &mut RepoState) {
     });
 }
 
+/// A root for sentences and titles: its directory, or "the repository
+/// root" (a bare "." reads as a stray full stop).
 fn root_display(root: &str) -> &str {
-    if root.is_empty() { "." } else { root }
+    if root.is_empty() {
+        "the repository root"
+    } else {
+        root
+    }
 }
 
 fn run_tf(cx: &mut Ctx, repo: &mut RepoState, root: String, cmd: Command) {
@@ -1104,12 +1125,13 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 )
             };
             let body = format!(
-                "Version {} ({}) of {} is removed from the GitHub Container Registry. {tags} This cannot be undone from gitvis (GitHub keeps deleted versions restorable for 30 days on its website). It needs the delete:packages scope and admin rights on the package.",
+                "Version {} ({}) of {} is removed from the GitHub Container Registry. {tags} This cannot be undone from gitvis (GitHub keeps deleted versions restorable for 30 days on its website).\nIt needs the delete:packages scope and admin rights on the package.",
                 version,
                 v.short_digest(),
                 package
             );
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Delete {} of {package}?", v.short_digest()),
                 body,
                 "Delete version",
@@ -1328,7 +1350,8 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
                 target.context,
                 target.namespace
             );
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("{}?", write.title()),
                 body,
                 confirm,
@@ -1389,11 +1412,12 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             let dir = repo.workdir.join(&root);
             let line = format!("{} {}", binary.word(), Command::Init.args(None).join(" "));
             let body = format!(
-                "{} downloads the providers and modules this configuration needs from the registry (network) into {}/.terraform/. It also creates or updates .terraform.lock.hcl in that directory, a file you normally commit. The backend is skipped (-backend=false): no state is read or written and no credentials are used.",
+                "{} downloads the providers and modules this configuration needs from the registry (network) into {}/.terraform/.\nIt also creates or updates .terraform.lock.hcl in that directory, a file you normally commit.\nThe backend is skipped (-backend=false): no state is read or written and no credentials are used.",
                 binary.name(),
                 root_display(&root)
             );
-            cx.confirm(
+            crate::devops::pages::explain::confirm(
+                cx,
                 format!("Run {} init in {}?", binary.word(), root_display(&root)),
                 body,
                 "Run init",

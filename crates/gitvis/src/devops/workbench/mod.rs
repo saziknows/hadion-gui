@@ -607,7 +607,7 @@ pub fn show(
     let order: Vec<Tab> = NAV.iter().flat_map(|(_, t)| t.iter().copied()).collect();
     let counts = nav_counts(repo, console);
     let mut clicked: Option<Tab> = None;
-    kit::page_with_nav(
+    crate::devops::pages::layout::page_with_nav(
         ui,
         "wb_nav",
         |ui| {

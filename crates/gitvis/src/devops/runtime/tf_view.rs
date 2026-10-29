@@ -11,12 +11,32 @@ use gitvis_core::devops::runtime::terraform::{
 use super::common::{self, Cx};
 use super::{Act, PlanResult, RootRuns, State, TfState};
 use crate::devops::console::Console;
+use crate::devops::pages::explain;
 use crate::format;
 use crate::state::Action;
 use crate::theme::{pal, size};
 use crate::views::icons::{Icon, IconButton};
 use crate::views::insights::{Cell, detail_title, grid, list_none, list_top};
 use crate::views::kit::{self, Col, Leading, Row, Stat, Tone};
+
+/// A root's name as a title: its directory, or "Repository root" (a bare
+/// "." reads as a stray full stop).
+fn root_title(info: &terraform::TfDir) -> &str {
+    if info.dir.is_empty() {
+        "Repository root"
+    } else {
+        &info.dir
+    }
+}
+
+/// A root's name inside a sentence.
+fn root_text(info: &terraform::TfDir) -> &str {
+    if info.dir.is_empty() {
+        "the repository root"
+    } else {
+        &info.dir
+    }
+}
 
 fn action_tone(a: PlanAction) -> Tone {
     match a {
@@ -99,7 +119,7 @@ pub fn show(ui: &mut Ui, cx: &Cx, rt: &mut State, console: &Console, actions: &m
                 common::missing_tool(
                     ui,
                     "Neither Terraform nor OpenTofu is installed",
-                    "Format checks, validate, plan and drift run the terraform (or tofu) binary in the root's directory. The roots and their configuration below are read from the files and need neither.",
+                    "Format checks, validate, plan and drift run the terraform (or tofu) binary in the root's directory.\nThe roots and their configuration below are read from the files and need neither.",
                     &[Binary::Terraform.install_hint(), Binary::Tofu.install_hint()],
                     Act::TfCheckTools,
                     actions,
@@ -113,10 +133,10 @@ pub fn show(ui: &mut Ui, cx: &Cx, rt: &mut State, console: &Console, actions: &m
                 Icon::Cloud,
                 "No Terraform roots in this repository",
                 &if scan.modules.is_empty() {
-                    "No *.tf or *.tofu files outside .terraform/. Roots are directories with configuration files that are not called as a module by another directory.".to_owned()
+                    "No *.tf or *.tofu files outside .terraform/.\nRoots are directories with configuration files that are not called as a module by another directory.".to_owned()
                 } else {
                     format!(
-                        "{} with configuration were found, all of them modules (called by another directory, or under modules/). A root is where terraform init and plan run; it usually has a backend block.",
+                        "{} with configuration were found, all of them modules (called by another directory, or under modules/).\nA root is where terraform init and plan run; it usually has a backend block.",
                         format::plural(scan.modules.len(), "directory", "directories")
                     )
                 },
@@ -142,7 +162,7 @@ pub fn show(ui: &mut Ui, cx: &Cx, rt: &mut State, console: &Console, actions: &m
                     .map(|(i, files)| {
                         format!(
                             "{} ({})",
-                            scan.roots[*i].info.display_dir(),
+                            root_text(&scan.roots[*i].info),
                             format::plural(files.len(), "file", "files")
                         )
                     })
@@ -322,7 +342,7 @@ fn root_list(
                 }
             }
             let meta = info.required_version.clone().unwrap_or_default();
-            (info.display_dir().to_owned(), sub, meta, badges)
+            (root_title(info).to_owned(), sub, meta, badges)
         })
         .collect();
     let dirs: Vec<String> = roots.iter().map(|r| r.info.dir.clone()).collect();
@@ -342,7 +362,11 @@ fn root_list(
                     .leading(Leading::Icon(Icon::Folder, p.text_2))
                     .subtitle(sub)
                     .meta(meta)
-                    .badges(badges)
+                    .badges(&crate::devops::pages::layout::fit_badges(
+                        ui,
+                        rect.width(),
+                        badges,
+                    ))
                     .mono(),
                 sel.as_deref() == Some(dirs[i].as_str()),
             );
@@ -388,7 +412,7 @@ fn root_detail(
     if info.mentions_tofu {
         badges.push(("Mentions OpenTofu".to_owned(), Tone::Neutral));
     }
-    detail_title(ui, info.display_dir(), &badges);
+    detail_title(ui, root_title(info), &badges);
     let dir_abs = if info.dir.is_empty() {
         cx.workdir.clone()
     } else {
@@ -456,20 +480,38 @@ fn root_detail(
     });
     kit::secondary(
         ui,
-        &format!(
-            "{}Format check and Validate stay on this machine. Init, Plan and Drift check use the network; Plan and Drift check also need the provider's credentials and access to the state backend. No lock is taken and nothing is ever applied.",
-            binary
-                .map(|b| format!("Runs {} in {}. ", b.word(), info.display_dir()))
-                .unwrap_or_default()
-        ),
+        &match binary {
+            Some(b) => format!(
+                "Runs {} in {}. No lock is taken and nothing is ever applied.",
+                b.word(),
+                root_text(info)
+            ),
+            None => "No lock is taken and nothing is ever applied.".to_owned(),
+        },
     );
+    explain::details(ui, "tf_run_needs", "What each check needs", false, |ui| {
+        explain::terms(
+            ui,
+            150.0,
+            &[
+                ("This machine only", "Format check, Validate."),
+                ("The network", "Init, Plan, Drift check."),
+                (
+                    "Credentials",
+                    "Plan and Drift check also need the provider's credentials and access to the state backend.",
+                ),
+            ],
+        );
+    });
     let ran: Vec<Command> = Command::ALL
         .into_iter()
         .filter(|c| running(console, runs, *c) || last_result(runs, *c, cx.now).is_some())
         .collect();
     for cmd in ran {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
+        // Wraps as whole pieces: in a narrow pane the "Show output" link
+        // goes under the badge instead of breaking over two lines.
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 4.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(110.0, 20.0),
                 egui::Layout::left_to_right(egui::Align::Center),
@@ -495,7 +537,14 @@ fn root_detail(
             if let Some(id) = runs.and_then(|r| r.last.get(&cmd))
                 && console.get(*id).is_some()
                 && tf.shown_run != Some(*id)
-                && kit::link(ui, "Show output").clicked()
+                && ui
+                    .add(
+                        egui::Label::new(RichText::new("Show output").color(pal(ui).accent))
+                            .sense(egui::Sense::click())
+                            .wrap_mode(egui::TextWrapMode::Extend),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
             {
                 actions.push(Act::TfShowRun(Some(*id)).into());
             }
@@ -706,19 +755,21 @@ fn change_table(ui: &mut Ui, id: &str, list: &[ResourceChange]) {
             ]
         })
         .collect();
-    grid(
-        ui,
-        id,
-        &[
-            Col::text("Action"),
-            Col::text("Address"),
-            Col::text("Type"),
-            Col::text("Why"),
-        ],
-        &rows,
-        false,
-        |_, _| {},
-    );
+    crate::devops::pages::layout::wide(ui, id, 600.0, |ui| {
+        grid(
+            ui,
+            id,
+            &[
+                Col::text("Action"),
+                Col::text("Address"),
+                Col::text("Type"),
+                Col::text("Why"),
+            ],
+            &rows,
+            false,
+            |_, _| {},
+        );
+    });
     if list.len() > 200 {
         common::note(ui, &format!("and {} more", list.len() - 200));
     }
@@ -811,10 +862,14 @@ fn fmt_section(
         } else {
             kit::secondary(
                 ui,
+                "These files differ from the fmt output; the diff is in the console.",
+            );
+            kit::secondary(
+                ui,
                 &format!(
-                    "These files differ from `fmt` output (the diff is in the console). `{} fmt -recursive` in {} rewrites them.",
+                    "`{} fmt -recursive` in {} rewrites them.",
                     binary.map_or("terraform", Binary::word),
-                    info.display_dir()
+                    root_text(info)
                 ),
             );
             for file in &f.files {
@@ -860,8 +915,20 @@ fn drift_section(ui: &mut Ui, cx: &Cx, r: &RootRuns, actions: &mut Vec<Action>) 
                         "{} changed outside Terraform",
                         format::plural(d.text.drift.len().max(1), "resource", "resources")
                     ),
-                    "Someone (or something) changed these since the last apply. A normal plan will try to undo it; adopt the change in the configuration or apply -refresh-only to accept it.",
+                    "Someone (or something) changed these since the last apply.",
                 );
+                explain::terms(
+                    ui,
+                    150.0,
+                    &[
+                        ("To undo it", "A normal plan and apply puts them back."),
+                        (
+                            "To keep it",
+                            "Adopt the change in the configuration, or apply -refresh-only to accept it.",
+                        ),
+                    ],
+                );
+                ui.add_space(4.0);
                 change_table(ui, "tf_drift", &d.text.drift);
             }
             DriftOutcome::Failed => {
@@ -887,15 +954,19 @@ fn plan_section(ui: &mut Ui, cx: &Cx, p: &PlanResult, actions: &mut Vec<Action>)
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         kit::badge(ui, label, tone);
-        common::note(
+        explain::quiet(
             ui,
             &format!(
-                "{} · {} · exit code 0 = no changes, 2 = changes, 1 = error",
+                "{} · {}",
                 common::when(Some(p.at), cx.now),
                 format::millis(p.ms)
             ),
         );
     });
+    kit::secondary(
+        ui,
+        "From the exit code of plan -detailed-exitcode: 0 no changes, 2 changes, 1 error.",
+    );
     match p.outcome {
         PlanOutcome::Failed => {
             cause_box(ui, p.cause.as_deref());
@@ -1015,19 +1086,21 @@ fn configuration(ui: &mut Ui, root: &TfRoot, actions: &mut Vec<Action>) {
                 ]
             })
             .collect();
-        grid(
-            ui,
-            "tf_providers",
-            &[
-                Col::text("Provider"),
-                Col::text("Source"),
-                Col::text("Constraint"),
-                Col::text("Locked"),
-            ],
-            &rows,
-            false,
-            |_, _| {},
-        );
+        crate::devops::pages::layout::wide(ui, "tf_providers", 560.0, |ui| {
+            grid(
+                ui,
+                "tf_providers",
+                &[
+                    Col::text("Provider"),
+                    Col::text("Source"),
+                    Col::text("Constraint"),
+                    Col::text("Locked"),
+                ],
+                &rows,
+                false,
+                |_, _| {},
+            );
+        });
     }
     kit::section(ui, "Modules", Some(info.modules.len()));
     if info.modules.is_empty() {
@@ -1052,21 +1125,23 @@ fn configuration(ui: &mut Ui, root: &TfRoot, actions: &mut Vec<Action>) {
                 ]
             })
             .collect();
-        grid(
-            ui,
-            "tf_modules",
-            &[
-                Col::text("Module"),
-                Col::text("Source"),
-                Col::text("Version"),
-                Col::text("Where"),
-            ],
-            &rows,
-            false,
-            |_, _| {},
-        );
+        crate::devops::pages::layout::wide(ui, "tf_modules", 600.0, |ui| {
+            grid(
+                ui,
+                "tf_modules",
+                &[
+                    Col::text("Module"),
+                    Col::text("Source"),
+                    Col::text("Version"),
+                    Col::text("Where"),
+                ],
+                &rows,
+                false,
+                |_, _| {},
+            );
+        });
         if !root.module_dirs.is_empty() {
-            common::note(
+            kit::secondary(
                 ui,
                 &format!(
                     "Local module directories reached (changes there count for this root): {}",
@@ -1117,19 +1192,21 @@ fn configuration(ui: &mut Ui, root: &TfRoot, actions: &mut Vec<Action>) {
                 ]
             })
             .collect();
-        grid(
-            ui,
-            "tf_vars",
-            &[
-                Col::text("Variable"),
-                Col::text("Default"),
-                Col::text(""),
-                Col::text("Description"),
-            ],
-            &rows,
-            false,
-            |_, _| {},
-        );
+        crate::devops::pages::layout::wide(ui, "tf_vars", 600.0, |ui| {
+            grid(
+                ui,
+                "tf_vars",
+                &[
+                    Col::text("Variable"),
+                    Col::text("Default"),
+                    Col::text(""),
+                    Col::text("Description"),
+                ],
+                &rows,
+                false,
+                |_, _| {},
+            );
+        });
     }
     kit::section(ui, "Contents", None);
     kit::kv(ui, 130.0, |kv| {
