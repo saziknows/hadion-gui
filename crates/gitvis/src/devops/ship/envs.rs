@@ -975,7 +975,14 @@ fn promote_section(
             });
             let to = st.promote_to.clone();
             ins::button_row(ui, |ui| {
-                if form::primary(ui, &format!("Create deployment to {to}…"), true).clicked()
+                // The target is in the select above; a long environment name
+                // in the label made the button wider than the card.
+                if form::primary(ui, "Create deployment…", true)
+                    .on_hover_text(format!(
+                        "Create a deployment of {} to {to}",
+                        short(&cur.sha)
+                    ))
+                    .clicked()
                     && let Some(a) = promote_action(st, &to, false)
                 {
                     actions.push(a.into());

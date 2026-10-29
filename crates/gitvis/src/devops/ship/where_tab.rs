@@ -37,7 +37,8 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         // than the page widens everything below it).
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-            let w = (ui.available_width() - 24.0).min(340.0);
+            // Room for the three buttons beside it while the pane allows.
+            let w = (ui.available_width() - 290.0).clamp(160.0, 340.0);
             let resp = form::input(
                 ui,
                 "ship_where_input",
