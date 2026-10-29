@@ -638,7 +638,7 @@ fn side_line(
         let link = in_graph.contains(&r.sha) && Oid::from_str(&r.sha).is_ok();
         let room = ui.available_width() - if link { 130.0 } else { 0.0 };
         ui.scope(|ui| {
-            ui.set_max_width(room.max(60.0));
+            ui.set_max_width(room.max(60.0).min(ui.available_width()));
             ui.add(
                 egui::Label::new(RichText::new(&r.subject).size(size::SMALL).color(p.text_2))
                     .truncate(),

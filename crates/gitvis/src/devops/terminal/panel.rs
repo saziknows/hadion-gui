@@ -519,7 +519,8 @@ fn failed_view(ui: &mut Ui, st: &mut State, v: &GlobalView, err: &str, actions: 
     let (id, name, cmd) = (tab.id, tab.shell.name.clone(), tab.shell.command_line());
     ui.add_space(space::XL);
     ui.scope(|ui| {
-        ui.set_max_width(kit::PROSE);
+        // Never wider than the panel: `set_max_width` also widens.
+        ui.set_max_width(ui.available_width().min(kit::PROSE));
         kit::callout(ui, Tone::Danger, &format!("Could not start {name}"), err);
         ui.add_space(space::S);
         kit::secondary(ui, "The command gitvis ran:");

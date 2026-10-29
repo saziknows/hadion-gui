@@ -827,6 +827,8 @@ fn wip_panel(
             .id_salt("wip_all")
             .min_scrolled_height(0.0)
             .auto_shrink([false, false])
+            // A visible bar says the commit box is further down.
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
             .show(ui, |ui| {
                 wip_lists(ui, snap, busy, selected_file, &flagged, hook, actions);
                 commit_box(
@@ -851,8 +853,9 @@ fn wip_panel(
 }
 
 /// Smallest and largest height of the commit message box (frame included):
-/// two and twelve lines.
-const MSG_MIN_H: f32 = 2.0 * 18.0 + 14.0;
+/// three lines (the hint, "Summary", a blank line and "Description",
+/// fits whole) and twelve lines.
+const MSG_MIN_H: f32 = 3.0 * 18.0 + 14.0;
 const MSG_MAX_H: f32 = 12.0 * 18.0 + 14.0;
 /// What the file lists keep before the message box stops growing.
 const LISTS_MIN: f32 = 120.0;
@@ -1258,7 +1261,7 @@ fn message_box(
                             .font(FontId::proportional(size::BODY))
                             .text_color(p.text)
                             .hint_text(RichText::new(hint).color(p.text_3))
-                            .desired_rows(2)
+                            .desired_rows(3)
                             .desired_width(f32::INFINITY),
                     )
                 });

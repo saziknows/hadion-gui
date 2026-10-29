@@ -503,7 +503,7 @@ fn toolbar_row(
         }
         if let Some(label) = busy_label.as_deref() {
             ui.scope(|ui| {
-                ui.set_max_width(BUSY_MAX);
+                ui.set_max_width(ui.available_width().min(BUSY_MAX));
                 ui.add(
                     egui::Label::new(RichText::new(label).size(size::SMALL).color(p.text_2))
                         .truncate(),
@@ -901,7 +901,7 @@ fn search_field(
         .corner_radius(CornerRadius::same(theme::radius::M))
         .inner_margin(Margin::symmetric(10, 3))
         .show(ui, |ui| {
-            ui.set_max_width(content_w);
+            ui.set_max_width(ui.available_width().min(content_w));
             // Explicit: `horizontal` would inherit the toolbar's right-to-left layout.
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
@@ -1114,7 +1114,7 @@ mod tests {
         let widths = [60.0, 300.0, 280.0];
         let room = 500.0;
         let cap = tab_name_cap(&widths, room);
-        assert!(cap < 280.0 && cap >= TAB_NAME_MIN);
+        assert!((TAB_NAME_MIN..280.0).contains(&cap));
         let total: f32 = widths.iter().map(|w| w.min(cap) + TAB_CHROME).sum();
         assert!(total <= room + 0.5, "{total} > {room}");
         // Not even the minimum fits: the cap stays at the minimum (the
