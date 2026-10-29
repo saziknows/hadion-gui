@@ -1,12 +1,17 @@
-//! What is running: GHCR packages, Kubernetes, Terraform / OpenTofu.
-//! Its tabs of the Ship page (`devops/pages.rs`): Packages, Kubernetes,
-//! Terraform.
+//! What is running: GHCR packages, Docker containers, Kubernetes,
+//! Terraform / OpenTofu. Its tabs of the Ship page (`devops/pages.rs`):
+//! Packages, Containers, Kubernetes, Terraform.
 //!
 //! - Packages: the owner's container packages (`users|orgs/{owner}/packages`),
 //!   those linked to this repository first, versions with their tags matched
 //!   to commits, git tags and branch tips; `docker pull` lines; deleting a
 //!   version behind a confirmation. A token without `read:packages` gets an
 //!   explanation and the exact `gh auth refresh` line to copy.
+//! - Containers ([`docker`], `docker_view`): the repository's compose
+//!   projects and containers on a docker context (never changed), live
+//!   through `docker events` while shown, health, logs, a shell in a
+//!   terminal tab, which commit each container runs, builds with OCI
+//!   revision labels; destructive and remote writes behind confirmations.
 //! - Kubernetes: contexts and namespaces from the kubeconfig (never
 //!   changed), workloads with rollout state, images matched to commits, pods,
 //!   events, rollout history, logs in the console; restart / undo / scale
@@ -20,6 +25,8 @@
 //! time) or on an explicit click.
 
 mod common;
+pub mod docker;
+mod docker_view;
 mod kube_view;
 mod packages_view;
 mod tf_view;
@@ -62,6 +69,7 @@ fn now() -> i64 {
 #[derive(Default)]
 pub struct State {
     pub pkg: PkgState,
+    pub docker: docker::State,
     pub kube: KubeState,
     pub tf: TfState,
     /// Commits, tags and branches for matching, rebuilt when the history
@@ -540,6 +548,8 @@ pub enum Act {
         target: Target,
         write: KubeWrite,
     },
+    // Containers
+    Docker(docker::Act),
     // Terraform
     TfCheckTools,
     TfRescan,
@@ -604,6 +614,7 @@ pub enum Msg {
         run: u64,
         result: Result<PlanJson, String>,
     },
+    Docker(docker::Msg),
 }
 
 fn n_of(n: usize, one: &str, many: &str) -> String {
@@ -725,6 +736,7 @@ impl Msg {
                 )),
                 Err(e) => Err(e.clone()),
             },
+            Msg::Docker(m) => m.summary(),
             Msg::TfShown { root, result, .. } => match result {
                 Ok(p) => {
                     let c = p.counts();
@@ -750,6 +762,10 @@ pub struct Prefs {
     pub kube_context: Option<String>,
     pub kube_namespaces: BTreeMap<String, String>,
     pub tf_binary: Option<Binary>,
+    /// The docker context of the Containers tab (`None`: docker's current).
+    pub docker_context: Option<String>,
+    /// Show every container of that Docker, not only the repository's.
+    pub docker_all: bool,
 }
 
 impl State {
@@ -759,6 +775,8 @@ impl State {
             kube_context: self.kube.context.clone(),
             kube_namespaces: self.kube.namespaces.clone(),
             tf_binary: self.tf.binary,
+            docker_context: self.docker.context.clone(),
+            docker_all: self.docker.show_all,
         }
     }
 
@@ -767,6 +785,8 @@ impl State {
         self.kube.context = p.kube_context.clone();
         self.kube.namespaces = p.kube_namespaces.clone();
         self.tf.binary = p.tf_binary;
+        self.docker.context = p.docker_context.clone();
+        self.docker.show_all = p.docker_all;
     }
 }
 
@@ -1368,6 +1388,9 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
             });
         }
 
+        // ---- Containers
+        Act::Docker(a) => docker::apply(cx, repo, a),
+
         // ---- Terraform
         Act::TfCheckTools => {
             let tf = &mut repo.devops.runtime.tf;
@@ -1435,6 +1458,10 @@ pub fn apply(cx: &mut Ctx, repo: &mut RepoState, act: Act) {
 }
 
 pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
+    let msg = match msg {
+        Msg::Docker(m) => return docker::on_msg(cx, repo, m),
+        other => other,
+    };
     let rt = &mut repo.devops.runtime;
     match msg {
         Msg::Packages { owner, result } => {
@@ -1558,11 +1585,13 @@ pub fn on_msg(cx: &mut Ctx, repo: &mut RepoState, msg: Msg) {
                 p.json = Some(result);
             }
         }
+        Msg::Docker(_) => unreachable!("handled above"),
     }
 }
 
 /// A console run started by this area (or any other) ended.
 pub fn on_console_done(cx: &mut Ctx, repo: &mut RepoState, run: &ConsoleRun) {
+    docker::on_console_done(cx, repo, run);
     let tf = &mut repo.devops.runtime.tf;
     let Some((root, cmd, binary)) = tf.run_index.get(&run.id).cloned() else {
         return;
@@ -1736,6 +1765,7 @@ pub fn on_tab_shown(cx: &mut Ctx, repo: &mut RepoState, tab: ShipTab) {
                 load_packages(cx, st);
             }
         }
+        ShipTab::Containers => docker::on_tab_shown(cx, repo),
         ShipTab::Kubernetes => {
             let k = &mut repo.devops.runtime.kube;
             if k.tool.is_none() {
@@ -1758,8 +1788,19 @@ pub fn on_tab_shown(cx: &mut Ctx, repo: &mut RepoState, tab: ShipTab) {
     }
 }
 
+/// One of this area's tabs is no longer shown (another Ship tab or another
+/// page): the Containers tab stops its `docker events` stream.
+pub fn on_tab_hidden(repo: &mut RepoState, tab: ShipTab) {
+    if tab == ShipTab::Containers {
+        docker::on_tab_hidden(repo);
+    }
+}
+
 /// `HADION_SCRIPT` commands this area understands.
 pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
+    if let Some(a) = docker::script(cmd, arg) {
+        return Some(vec![Act::Docker(a).into()]);
+    }
     let arg = arg.trim();
     let n = arg.parse::<usize>().ok();
     let act = match cmd {
@@ -1797,9 +1838,10 @@ pub fn show_tab(
     repo: &mut RepoState,
     tab: ShipTab,
     console: &Console,
-    _settings: &Settings,
+    settings: &Settings,
     actions: &mut Vec<Action>,
 ) {
+    let dcx = (tab == ShipTab::Containers).then(|| docker_view::DockerCx::of(repo, settings));
     let RepoState {
         snapshot,
         loaded_at,
@@ -1818,6 +1860,18 @@ pub fn show_tab(
     };
     match tab {
         ShipTab::Packages => packages_view::show(ui, &cx, rt, actions),
+        ShipTab::Containers => {
+            if let Some(d) = &dcx {
+                docker::rescope_if_stale(
+                    &mut rt.docker,
+                    &rt.refs,
+                    || d.remotes.clone(),
+                    &cx.workdir,
+                    *loaded_at,
+                );
+                docker_view::show(ui, &cx, d, rt, console, actions);
+            }
+        }
         ShipTab::Kubernetes => kube_view::show(ui, &cx, rt, console, actions),
         ShipTab::Terraform => tf_view::show(ui, &cx, rt, console, actions),
         _ => {}
@@ -1825,8 +1879,9 @@ pub fn show_tab(
 }
 
 /// A dot on the rail entry and a line for its tooltip, when this area
-/// needs attention: failing pods in the last Kubernetes fetch, drift found
-/// by a drift check.
+/// needs attention: failing pods in the last Kubernetes fetch, a container
+/// of the repository that is unhealthy, restarting or ended with an error
+/// (last Containers listing), drift found by a drift check.
 pub fn rail_badge(repo: &RepoState, _console: &Console) -> Option<(Tone, String)> {
     let rt = &repo.devops.runtime;
     let failing = rt.kube.failing();
@@ -1844,6 +1899,9 @@ pub fn rail_badge(repo: &RepoState, _console: &Console) -> Option<(Tone, String)
                 crate::format::plural(failing.len(), "pod", "pods")
             ),
         ));
+    }
+    if let Some(b) = docker::rail_badge(&rt.docker) {
+        return Some(b);
     }
     let drift = rt.tf.drifting();
     if let Some(first) = drift.first() {

@@ -2,7 +2,11 @@
 //! this machine is refused before it starts: GitHub API writes (non-GET
 //! requests and GraphQL mutations), `gh` subcommands that write, `git push`,
 //! `glab` / `az` writes, `kubectl` / `helm` changes, `terraform apply` and
-//! friends, `docker push`.
+//! friends, `docker push`, and docker commands that change containers,
+//! images or compose projects on a remote endpoint (the context's endpoint
+//! is `tcp://`, `ssh://` or `http(s)://`, see
+//! [`super::runtime::docker::endpoint`]). Local container actions stay
+//! allowed.
 //!
 //! Enforcement sits at the lowest level ([`crate::cli::run_raw`],
 //! [`crate::cli::run_program`], [`super::proc::run_streaming`],
@@ -297,16 +301,33 @@ pub fn remote_write(program: &str, args: &[&str], stdin: Option<&[u8]>) -> Optio
             };
             write.then(|| format!("{name} {verb}"))
         }
-        "docker" => {
-            let verb = sub.first().copied().unwrap_or("");
-            let second = sub.get(1).copied().unwrap_or("");
-            (verb == "push"
-                || (verb == "image" && second == "push")
-                || (verb == "buildx" && args.contains(&"--push")))
-            .then(|| "docker push".to_owned())
-        }
+        // `fake_docker` is the test double (`HADION_DOCKER`).
+        "docker" | "fake_docker" => docker_write(
+            args,
+            &super::runtime::docker::endpoint::DockerEnv::from_process(),
+        ),
         _ => None,
     }
+}
+
+/// A docker command's remote change: a push (to a registry, wherever the
+/// daemon is), or a command that changes containers, images, volumes or
+/// compose projects on a remote endpoint. `env` is the environment docker
+/// reads (`DOCKER_CONFIG`, `DOCKER_HOST`, `DOCKER_CONTEXT`).
+fn docker_write(
+    args: &[&str],
+    env: &super::runtime::docker::endpoint::DockerEnv,
+) -> Option<String> {
+    use super::runtime::docker::{commands, endpoint};
+    let cli = commands::parse_cli(args);
+    if commands::pushes(&cli) {
+        return Some("docker push".to_owned());
+    }
+    let what = commands::mutation(&cli)?;
+    let target = endpoint::resolve(cli.context, cli.host, cli.config, env);
+    target
+        .remote()
+        .then(|| format!("docker {what} on {}", target.describe()))
 }
 
 #[cfg(test)]
@@ -369,6 +390,93 @@ mod tests {
         // others are not classified
         assert!(w("npm", "run deploy").is_none());
         assert!(w("curl", "-sS https://api.anthropic.com/v1/messages").is_none());
+    }
+
+    #[test]
+    fn docker_writes_count_only_on_remote_endpoints() {
+        use crate::devops::runtime::docker::endpoint::{DockerEnv, tests::scratch_config};
+        let dir = scratch_config(
+            "safety",
+            &[
+                ("desktop-linux", "npipe:////./pipe/dockerDesktopLinuxEngine"),
+                ("staging", "ssh://deploy@staging.example.com"),
+            ],
+            Some("desktop-linux"),
+        );
+        let env = DockerEnv {
+            config_dir: Some(dir.clone()),
+            ..DockerEnv::default()
+        };
+        let split = |line: &str| -> Vec<String> {
+            line.split(' ')
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect()
+        };
+        let d = |line: &str, env: &DockerEnv| {
+            let a = split(line);
+            let refs: Vec<&str> = a.iter().map(String::as_str).collect();
+            docker_write(&refs, env)
+        };
+        // Local: allowed in safe mode.
+        assert!(d("--context desktop-linux stop abc", &env).is_none());
+        assert!(
+            d(
+                "--context desktop-linux compose -p shop down --volumes",
+                &env
+            )
+            .is_none()
+        );
+        assert!(d("--context desktop-linux build -t x .", &env).is_none());
+        // Remote writes, with the endpoint named.
+        let w = d("--context staging stop abc", &env).unwrap();
+        assert!(
+            w.contains("docker stop") && w.contains("ssh://deploy@staging.example.com"),
+            "{w}"
+        );
+        assert!(d("--context staging compose -p shop up -d", &env).is_some());
+        assert!(d("--context staging exec -it abc sh", &env).is_some());
+        assert!(d("--context staging rm -f abc", &env).is_some());
+        assert!(d("--context staging build -t x .", &env).is_some());
+        // Remote reads stay allowed.
+        assert!(d("--context staging ps -a --no-trunc --format json", &env).is_none());
+        assert!(d("--context staging logs -f --tail 500 abc", &env).is_none());
+        assert!(
+            d(
+                "--context staging compose -f a.yml config --format json",
+                &env
+            )
+            .is_none()
+        );
+        // Pushes always count.
+        assert!(d("--context desktop-linux push ghcr.io/o/x:1", &env).is_some());
+        assert!(d("--context desktop-linux image push x", &env).is_some());
+        // -H, unknown contexts, DOCKER_HOST.
+        assert!(d("-H tcp://10.0.0.5:2376 rm -f abc", &env).is_some());
+        assert!(
+            d("--context nowhere stop abc", &env).is_some(),
+            "unreadable means remote"
+        );
+        assert!(
+            d("stop abc", &env).is_none(),
+            "the config's current context is local"
+        );
+        let host = DockerEnv {
+            docker_host: Some("ssh://build-box".into()),
+            ..env.clone()
+        };
+        assert!(d("stop abc", &host).is_some());
+        assert!(
+            d("--context desktop-linux stop abc", &host).is_none(),
+            "--context wins"
+        );
+        assert!(
+            d("--context default stop abc", &host).is_some(),
+            "default is DOCKER_HOST"
+        );
+        // The test double is classified like docker.
+        assert_eq!(base_name("C:/t/fake_docker.exe"), "fake_docker");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

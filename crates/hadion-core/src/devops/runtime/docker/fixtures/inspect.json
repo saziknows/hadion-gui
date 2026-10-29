@@ -1,0 +1,250 @@
+[
+  {
+    "Id": "1111111111111111111111111111111111111111111111111111111111111111",
+    "Created": "2026-10-30T07:58:00.123456789Z",
+    "Path": "/docker-entrypoint.sh",
+    "Args": ["nginx", "-g", "daemon off;"],
+    "State": {
+      "Status": "running",
+      "Running": true,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 4242,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-10-30T07:58:01.5Z",
+      "FinishedAt": "0001-01-01T00:00:00Z",
+      "Health": {
+        "Status": "healthy",
+        "FailingStreak": 0,
+        "Log": [
+          {"Start": "2026-10-30T08:00:00Z", "End": "2026-10-30T08:00:00.1Z", "ExitCode": 0, "Output": "ok\n"}
+        ]
+      }
+    },
+    "Image": "sha256:aaaa000000000000000000000000000000000000000000000000000000000001",
+    "Name": "/shop-web-1",
+    "RestartCount": 0,
+    "Platform": "linux",
+    "HostConfig": {
+      "RestartPolicy": {"Name": "unless-stopped", "MaximumRetryCount": 0},
+      "PortBindings": {
+        "80/tcp": [{"HostIp": "", "HostPort": "8080"}],
+        "443/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8443"}]
+      },
+      "AutoRemove": false,
+      "NetworkMode": "shop_default"
+    },
+    "Mounts": [
+      {"Type": "bind", "Source": "C:\\repo\\web\\static", "Destination": "/usr/share/nginx/html", "Mode": "", "RW": true},
+      {"Type": "volume", "Name": "shop_certs", "Source": "/var/lib/docker/volumes/shop_certs/_data", "Destination": "/etc/certs", "Driver": "local", "RW": false}
+    ],
+    "Config": {
+      "Image": "shop-web",
+      "Env": ["API_TOKEN=example-only-value", "NGINX_PORT=80", "PATH=/usr/local/bin:/usr/bin"],
+      "Labels": {
+        "com.docker.compose.project": "shop",
+        "com.docker.compose.service": "web",
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project.working_dir": "C:\\repo",
+        "com.docker.compose.project.config_files": "C:\\repo\\compose.yaml,C:\\repo\\compose.override.yaml",
+        "com.docker.compose.version": "2.40.0"
+      },
+      "ExposedPorts": {"80/tcp": {}, "443/tcp": {}, "9000/tcp": {}},
+      "Healthcheck": {"Test": ["CMD", "curl", "-fs", "http://localhost/healthz"], "Interval": 10000000000, "Timeout": 2000000000, "Retries": 3},
+      "WorkingDir": "/srv",
+      "User": ""
+    },
+    "NetworkSettings": {
+      "Ports": {
+        "80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8080"}, {"HostIp": "::", "HostPort": "8080"}],
+        "443/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8443"}],
+        "9000/tcp": null
+      },
+      "Networks": {"shop_default": {"IPAddress": "172.20.0.3", "Aliases": ["web"]}}
+    }
+  },
+  {
+    "Id": "2222222222222222222222222222222222222222222222222222222222222222",
+    "Created": "2026-10-30T07:57:00Z",
+    "Path": "docker-entrypoint.sh",
+    "Args": ["postgres", "--password=hunter2"],
+    "State": {
+      "Status": "running",
+      "Running": true,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 4100,
+      "ExitCode": 0,
+      "Error": "",
+      "StartedAt": "2026-10-30T07:57:01Z",
+      "FinishedAt": "0001-01-01T00:00:00Z",
+      "Health": {
+        "Status": "unhealthy",
+        "FailingStreak": 4,
+        "Log": [
+          {"Start": "2026-10-30T07:59:50Z", "End": "2026-10-30T07:59:50.2Z", "ExitCode": 0, "Output": "/var/run/postgresql:5432 - accepting connections\n"},
+          {"Start": "2026-10-30T08:00:00Z", "End": "2026-10-30T08:00:05Z", "ExitCode": 1, "Output": "/var/run/postgresql:5432 - no response\n"}
+        ]
+      }
+    },
+    "Image": "sha256:bbbb000000000000000000000000000000000000000000000000000000000002",
+    "Name": "/shop-db-1",
+    "RestartCount": 0,
+    "Platform": "linux",
+    "HostConfig": {
+      "RestartPolicy": {"Name": "always", "MaximumRetryCount": 0},
+      "PortBindings": {},
+      "AutoRemove": false,
+      "NetworkMode": "shop_default"
+    },
+    "Mounts": [
+      {"Type": "volume", "Name": "shop_pgdata", "Source": "/var/lib/docker/volumes/shop_pgdata/_data", "Destination": "/var/lib/postgresql/data", "RW": true}
+    ],
+    "Config": {
+      "Image": "postgres:16-alpine",
+      "Env": ["POSTGRES_PASSWORD=example-only-value", "POSTGRES_USER=shop", "PGDATA=/var/lib/postgresql/data"],
+      "Labels": {
+        "com.docker.compose.project": "shop",
+        "com.docker.compose.service": "db",
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.project.working_dir": "C:\\repo",
+        "com.docker.compose.project.config_files": "C:\\repo\\compose.yaml,C:\\repo\\compose.override.yaml"
+      },
+      "ExposedPorts": {"5432/tcp": {}},
+      "Healthcheck": {"Test": ["CMD-SHELL", "pg_isready -U shop -d shop"], "Interval": 5000000000, "Timeout": 3000000000, "Retries": 5, "StartPeriod": 10000000000}
+    },
+    "NetworkSettings": {
+      "Ports": {"5432/tcp": null},
+      "Networks": {"shop_default": {"IPAddress": "172.20.0.2"}}
+    }
+  },
+  {
+    "Id": "3333333333333333333333333333333333333333333333333333333333333333",
+    "Created": "2026-10-30T07:56:00Z",
+    "Path": "./migrate",
+    "Args": ["up"],
+    "State": {
+      "Status": "exited",
+      "Running": false,
+      "Paused": false,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 0,
+      "ExitCode": 1,
+      "Error": "",
+      "StartedAt": "2026-10-30T07:56:01Z",
+      "FinishedAt": "2026-10-30T07:56:09Z"
+    },
+    "Image": "sha256:cccc000000000000000000000000000000000000000000000000000000000003",
+    "Name": "/shop-migrate-1",
+    "RestartCount": 0,
+    "HostConfig": {
+      "RestartPolicy": {"Name": "no"},
+      "PortBindings": {"5000/tcp": [{"HostIp": "", "HostPort": "5000"}]}
+    },
+    "Mounts": null,
+    "Config": {
+      "Image": "shop-migrate",
+      "Env": null,
+      "Labels": {
+        "com.docker.compose.project": "shop",
+        "com.docker.compose.service": "migrate",
+        "com.docker.compose.oneoff": "True",
+        "com.docker.compose.project.working_dir": "C:\\repo",
+        "com.docker.compose.project.config_files": "C:\\repo\\compose.yaml"
+      }
+    },
+    "NetworkSettings": {"Ports": {}, "Networks": null}
+  },
+  {
+    "Id": "4444444444444444444444444444444444444444444444444444444444444444",
+    "Created": "2026-10-30T07:55:00Z",
+    "Path": "worker",
+    "Args": [],
+    "State": {
+      "Status": "restarting",
+      "Running": true,
+      "Paused": false,
+      "Restarting": true,
+      "OOMKilled": true,
+      "Dead": false,
+      "Pid": 0,
+      "ExitCode": 137,
+      "Error": "",
+      "StartedAt": "2026-10-30T07:59:58Z",
+      "FinishedAt": "2026-10-30T07:59:59Z"
+    },
+    "Image": "sha256:dddd000000000000000000000000000000000000000000000000000000000004",
+    "Name": "/shop-worker-1",
+    "RestartCount": 7,
+    "HostConfig": {"RestartPolicy": {"Name": "on-failure", "MaximumRetryCount": 10}},
+    "Config": {
+      "Image": "shop-worker",
+      "Labels": {
+        "com.docker.compose.project": "shop",
+        "com.docker.compose.service": "worker",
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.project.working_dir": "C:\\repo",
+        "com.docker.compose.project.config_files": "C:\\repo\\compose.yaml"
+      }
+    },
+    "NetworkSettings": {}
+  },
+  {
+    "Id": "5555555555555555555555555555555555555555555555555555555555555555",
+    "Created": "2026-10-30T07:50:00Z",
+    "Path": "redis-server",
+    "Args": [],
+    "State": {
+      "Status": "paused",
+      "Running": true,
+      "Paused": true,
+      "Restarting": false,
+      "OOMKilled": false,
+      "Dead": false,
+      "Pid": 3900,
+      "ExitCode": 0,
+      "StartedAt": "2026-10-30T07:50:01Z",
+      "FinishedAt": "0001-01-01T00:00:00Z"
+    },
+    "Image": "sha256:eeee000000000000000000000000000000000000000000000000000000000005",
+    "Name": "/devtools-cache-1",
+    "RestartCount": 0,
+    "HostConfig": {"RestartPolicy": {"Name": "no"}},
+    "Config": {
+      "Image": "redis:7",
+      "Labels": {
+        "com.docker.compose.project": "devtools",
+        "com.docker.compose.service": "cache",
+        "com.docker.compose.container-number": "1",
+        "com.docker.compose.project.working_dir": "C:\\repo\\ops",
+        "com.docker.compose.project.config_files": "C:\\repo\\ops\\compose.yaml"
+      }
+    },
+    "NetworkSettings": {"Networks": {"devtools_default": {"IPAddress": "172.21.0.2"}}}
+  },
+  {
+    "Id": "6666666666666666666666666666666666666666666666666666666666666666",
+    "Created": "2026-10-30T07:40:00Z",
+    "Path": "sleep",
+    "Args": ["infinity"],
+    "State": {
+      "Status": "created",
+      "Running": false,
+      "ExitCode": 0,
+      "StartedAt": "0001-01-01T00:00:00Z",
+      "FinishedAt": "0001-01-01T00:00:00Z"
+    },
+    "Image": "sha256:ffff000000000000000000000000000000000000000000000000000000000006",
+    "Name": "/never-started",
+    "Config": {"Image": "alpine:3.20", "Labels": null}
+  }
+]

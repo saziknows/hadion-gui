@@ -351,6 +351,9 @@ pub fn on_console_done(cx: &mut Ctx, repo: &mut RepoState, run: &ConsoleRun) {
 
 /// A page became visible: let its area fetch what it needs.
 pub fn page_shown(cx: &mut Ctx, repo: &mut RepoState, page: Page) {
+    if page != Page::Ship {
+        pages::page_left(repo);
+    }
     let forge = repo.github_remote.is_none() && repo.forge_remote.is_some();
     match page {
         Page::Review if forge => forge::on_page_shown(cx, repo, page),

@@ -25,7 +25,7 @@ pub use make::{justfile, makefile, taskfile};
 pub use node::{
     PackageManager, composer, deno, json_member_lines, package_manager, package_scripts,
 };
-pub use other::{compose, dotnet, go, gradle, maven, python};
+pub use other::{COMPOSE_FILES, compose, dotnet, go, gradle, maven, python};
 
 /// Where a task comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

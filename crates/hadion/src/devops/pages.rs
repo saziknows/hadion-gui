@@ -22,6 +22,7 @@ pub enum ShipTab {
     WhereIsMyCommit,
     Dora,
     Packages,
+    Containers,
     Kubernetes,
     Terraform,
 }
@@ -45,11 +46,28 @@ const NAV: [(&str, &[ShipTab]); 3] = [
     ),
     (
         "Running",
-        &[ShipTab::Packages, ShipTab::Kubernetes, ShipTab::Terraform],
+        &[
+            ShipTab::Packages,
+            ShipTab::Containers,
+            ShipTab::Kubernetes,
+            ShipTab::Terraform,
+        ],
     ),
 ];
 
 impl ShipTab {
+    /// Every tab in navigation order (the palette lists them from here).
+    pub const ALL: [ShipTab; 8] = [
+        ShipTab::Releases,
+        ShipTab::Environments,
+        ShipTab::WhereIsMyCommit,
+        ShipTab::Dora,
+        ShipTab::Packages,
+        ShipTab::Containers,
+        ShipTab::Kubernetes,
+        ShipTab::Terraform,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             ShipTab::Releases => "Releases",
@@ -57,6 +75,7 @@ impl ShipTab {
             ShipTab::WhereIsMyCommit => "Where is my commit",
             ShipTab::Dora => "DORA metrics",
             ShipTab::Packages => "Packages",
+            ShipTab::Containers => "Containers",
             ShipTab::Kubernetes => "Kubernetes",
             ShipTab::Terraform => "Terraform",
         }
@@ -75,6 +94,9 @@ impl ShipTab {
                 "Deployment frequency, lead time, change failure rate and time to restore"
             }
             ShipTab::Packages => "Container images on GitHub Packages, matched to commits",
+            ShipTab::Containers => {
+                "Containers and compose projects of this repository on Docker: live state, health, logs, which commit runs"
+            }
             ShipTab::Kubernetes => "Deployments, images, rollouts and pod logs through kubectl",
             ShipTab::Terraform => "Terraform roots, validate, plan and drift",
         }
@@ -82,7 +104,9 @@ impl ShipTab {
 
     pub fn owner(self) -> Owner {
         match self {
-            ShipTab::Packages | ShipTab::Kubernetes | ShipTab::Terraform => Owner::Runtime,
+            ShipTab::Packages | ShipTab::Containers | ShipTab::Kubernetes | ShipTab::Terraform => {
+                Owner::Runtime
+            }
             _ => Owner::Ship,
         }
     }
@@ -95,6 +119,7 @@ impl ShipTab {
             "where" | "commit" | "where-is-my-commit" => ShipTab::WhereIsMyCommit,
             "dora" | "metrics" => ShipTab::Dora,
             "packages" | "ghcr" => ShipTab::Packages,
+            "containers" | "docker" | "compose" => ShipTab::Containers,
             "kubernetes" | "k8s" => ShipTab::Kubernetes,
             "terraform" | "tf" => ShipTab::Terraform,
             _ => return None,
@@ -104,8 +129,20 @@ impl ShipTab {
 
 /// Switch tab and let its owner fetch what it needs.
 pub fn set_tab(cx: &mut Ctx, repo: &mut RepoState, tab: ShipTab) {
+    let old = repo.devops.ship_tab;
+    if old != tab && old.owner() == Owner::Runtime {
+        runtime::on_tab_hidden(repo, old);
+    }
     repo.devops.ship_tab = tab;
     tab_shown(cx, repo);
+}
+
+/// The Ship page is no longer shown (another page): its tab is hidden.
+pub fn page_left(repo: &mut RepoState) {
+    let tab = repo.devops.ship_tab;
+    if tab.owner() == Owner::Runtime {
+        runtime::on_tab_hidden(repo, tab);
+    }
 }
 
 /// The Ship page (or its tab) became visible.
