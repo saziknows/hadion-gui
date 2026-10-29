@@ -310,8 +310,10 @@ pub fn parse_wsl_list(raw: &[u8]) -> Vec<String> {
     let utf16 = raw.starts_with(&[0xff, 0xfe]) || (raw.len() >= 2 && raw[1] == 0);
     let text = if utf16 && raw.len().is_multiple_of(2) {
         let units: Vec<u16> = raw
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&c| u16::from_le_bytes(c))
             .collect();
         String::from_utf16_lossy(&units)
     } else {
