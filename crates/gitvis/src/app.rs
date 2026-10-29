@@ -1838,7 +1838,6 @@ impl GitVis {
                 let (name, cwd) = (r.name.clone(), r.workdir.display().to_string());
                 match result {
                     Ok(report) => {
-                        let before = r.sec_page.staged_count();
                         let summary = format!(
                             "{} · {} sensitive file(s) · staged: {} · {} lines of diff · {} untracked files read",
                             format::plural(report.findings.len(), "secret", "secrets"),
@@ -1851,23 +1850,6 @@ impl GitVis {
                         r.sec_page.quick = Some(*report);
                         r.sec_page.quick_at = Some(Instant::now());
                         r.sec_page.rebuild();
-                        let after = r.sec_page.staged_count();
-                        let first_staged = r.sec_page.report.as_ref().and_then(|rep| {
-                            rep.staged()
-                                .map(|f| {
-                                    format!(
-                                        "{} in {}",
-                                        f.name,
-                                        f.paths().first().copied().unwrap_or("?")
-                                    )
-                                })
-                                .next()
-                                .or_else(|| {
-                                    rep.staged_files()
-                                        .map(|f| format!("{} ({})", f.rule.name, f.path))
-                                        .next()
-                                })
-                        });
                         self.log(
                             ActivityKind::Read,
                             name,
@@ -1878,15 +1860,6 @@ impl GitVis {
                             elapsed_ms,
                             None,
                         );
-                        if after > before
-                            && let Some(what) = first_staged
-                        {
-                            self.toast(
-                                ToastKind::Error,
-                                "Possible secret in the staged changes",
-                                format!("{what}\nThe commit button will ask before committing it."),
-                            );
-                        }
                     }
                     Err(e) => self.log(
                         ActivityKind::Read,
@@ -4304,7 +4277,7 @@ impl eframe::App for GitVis {
             let p = theme::pal(ui);
             egui::Panel::bottom("activity_log")
                 .resizable(true)
-                .default_size(280.0)
+                .default_size((ui.available_height() * 0.4).clamp(140.0, 280.0))
                 .size_range(140.0..=760.0)
                 .frame(
                     Frame::NONE

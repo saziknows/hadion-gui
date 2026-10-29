@@ -920,25 +920,30 @@ pub fn list(
     is_selected: impl Fn(usize) -> bool,
     mut row: impl FnMut(&mut Ui, Rect, &Response, usize),
 ) {
-    egui::ScrollArea::vertical()
-        .id_salt(id)
-        .auto_shrink([false, false])
-        .show_rows(ui, row_h, n, |ui, range| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            for i in range {
-                let (rect, resp) =
-                    ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
-                if !ui.is_rect_visible(rect) {
-                    continue;
+    // `show_rows` spaces rows by `row_h` plus `item_spacing.y`: unless the
+    // spacing is zero before the call, rows are scrolled further apart than
+    // they are painted and the list ends short of its last rows.
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        egui::ScrollArea::vertical()
+            .id_salt(id)
+            .auto_shrink([false, false])
+            .show_rows(ui, row_h, n, |ui, range| {
+                for i in range {
+                    let (rect, resp) =
+                        ui.allocate_exact_size(vec2(ui.available_width(), row_h), Sense::click());
+                    if !ui.is_rect_visible(rect) {
+                        continue;
+                    }
+                    let sel = is_selected(i);
+                    row_background(ui, rect, resp.hovered(), sel);
+                    row(ui, rect, &resp, i);
+                    if resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
                 }
-                let sel = is_selected(i);
-                row_background(ui, rect, resp.hovered(), sel);
-                row(ui, rect, &resp, i);
-                if resp.hovered() {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                }
-            }
-        });
+            });
+    });
 }
 
 /// Header above a list: title, count, and widgets on the right.

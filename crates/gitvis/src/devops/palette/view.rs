@@ -666,6 +666,11 @@ fn no_results(ui: &mut Ui, st: &State) {
 /// be none.
 fn list(ui: &mut Ui, st: &mut State, cx: &Cx, explained: bool, actions: &mut Vec<Action>) {
     let n = st.results.rows.len();
+    if n > 0 {
+        // Keep the selection on an entry row (a scripted move can run past
+        // the end, and headers are not selectable).
+        st.selected = st.results.selectable(st.selected);
+    }
     if n == 0 {
         if explained {
             ui.add_space(space::S);
@@ -711,51 +716,57 @@ fn list(ui: &mut Ui, st: &mut State, cx: &Cx, explained: bool, actions: &mut Vec
     }
     let now = crate::format::now_secs();
     let mut clicked: Option<(usize, bool)> = None;
-    let out = area.show_rows(ui, ROW_H, n, |ui, range| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        for i in range {
-            let (rect, resp) =
-                ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
-            if !ui.is_rect_visible(rect) {
-                continue;
-            }
-            let selected = i == st.selected;
-            let State {
-                results,
-                ranker,
-                cache,
-                ..
-            } = &mut *st;
-            let results::Results {
-                rows,
-                query,
-                mode,
-                scope,
-                ..
-            } = results;
-            let mode = *mode;
-            let kinds = mode == Mode::Start || *scope == Scope::All;
-            match &mut rows[i] {
-                Row::Header(t) => header(ui, rect, t),
-                Row::Entry(e) => {
-                    if e.hl.is_none() {
-                        e.hl = Some(results::highlight(ranker.matcher(), mode, query, e));
+    // show_rows spaces rows by ROW_H plus item_spacing.y: zero it before the
+    // call so rows are scrolled as far apart as they are drawn.
+    let out = ui
+        .scope(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            area.show_rows(ui, ROW_H, n, |ui, range| {
+                for i in range {
+                    let (rect, resp) =
+                        ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
+                    if !ui.is_rect_visible(rect) {
+                        continue;
                     }
-                    let hovered = resp.hovered();
-                    kit::row_background(ui, rect, hovered, selected);
-                    entry_row(ui, rect, e, mode, selected, kinds, &cache.catalog, now);
-                    if hovered {
-                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                    }
-                    if resp.clicked() {
-                        clicked = Some((i, false));
-                    } else if resp.secondary_clicked() {
-                        clicked = Some((i, true));
+                    let selected = i == st.selected;
+                    let State {
+                        results,
+                        ranker,
+                        cache,
+                        ..
+                    } = &mut *st;
+                    let results::Results {
+                        rows,
+                        query,
+                        mode,
+                        scope,
+                        ..
+                    } = results;
+                    let mode = *mode;
+                    let kinds = mode == Mode::Start || *scope == Scope::All;
+                    match &mut rows[i] {
+                        Row::Header(t) => header(ui, rect, t),
+                        Row::Entry(e) => {
+                            if e.hl.is_none() {
+                                e.hl = Some(results::highlight(ranker.matcher(), mode, query, e));
+                            }
+                            let hovered = resp.hovered();
+                            kit::row_background(ui, rect, hovered, selected);
+                            entry_row(ui, rect, e, mode, selected, kinds, &cache.catalog, now);
+                            if hovered {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+                            if resp.clicked() {
+                                clicked = Some((i, false));
+                            } else if resp.secondary_clicked() {
+                                clicked = Some((i, true));
+                            }
+                        }
                     }
                 }
-            }
-        }
-    });
+            })
+        })
+        .inner;
     st.scroll_offset = out.state.clamped_offset().y;
     if let Some((i, secondary)) = clicked {
         st.selected = i;
