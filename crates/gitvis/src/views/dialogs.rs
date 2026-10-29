@@ -8,7 +8,7 @@
 
 use egui::{
     Align, Color32, CornerRadius, FontId, Frame, Key, Label, Layout, Margin, Response, RichText,
-    Sense, Stroke, Ui, pos2, vec2,
+    Sense, Stroke, Ui, vec2,
 };
 
 use gitvis_core::Snapshot;
@@ -16,6 +16,7 @@ use gitvis_core::ops::{GitOp, MergeMode, ResetMode};
 
 use crate::state::{Action, Dialog};
 use crate::theme::{Tone, medium, pal, palette, radius, semibold, size, space};
+use crate::views::form::{self, InputOpts};
 use crate::views::icons::IconButton;
 use crate::views::kit;
 
@@ -95,8 +96,8 @@ fn label(ui: &mut Ui, s: &str) {
     ui.label(RichText::new(s).size(size::SMALL).family(medium()).color(c));
 }
 
-/// A text input in the kit's style: sunken fill, hairline border that
-/// turns accent while focused.
+/// A text input: the form style (`views::form`), so dialogs and pages
+/// share one input height, border, hint and focus colour.
 fn input(
     ui: &mut Ui,
     id_salt: &str,
@@ -105,41 +106,12 @@ fn input(
     rows: usize,
     width: f32,
 ) -> Response {
-    let p = *pal(ui);
-    let id = ui.make_persistent_id(("dialog_input", id_salt));
-    let focused = ui.memory(|m| m.has_focus(id));
-    Frame::NONE
-        .fill(if ui.visuals().dark_mode {
-            p.chrome
-        } else {
-            p.canvas
-        })
-        .stroke(Stroke::new(
-            1.0,
-            if focused { p.accent } else { p.border_strong },
-        ))
-        .corner_radius(CornerRadius::same(radius::M))
-        .inner_margin(Margin::symmetric(10, 6))
-        .show(ui, |ui| {
-            let edit = if rows > 1 {
-                egui::TextEdit::multiline(value).desired_rows(rows)
-            } else {
-                // Centre single-line text vertically (egui puts it at the top).
-                egui::TextEdit::singleline(value)
-                    .margin(Margin::ZERO)
-                    .align(egui::Align2::LEFT_CENTER)
-                    .min_size(egui::vec2(0.0, 22.0))
-            };
-            ui.add(
-                edit.id(id)
-                    .frame(Frame::NONE)
-                    .font(FontId::proportional(size::BODY))
-                    .text_color(p.text)
-                    .hint_text(RichText::new(hint).color(p.text_3))
-                    .desired_width(width),
-            )
-        })
-        .inner
+    form::input(
+        ui,
+        ("dialog_input", id_salt),
+        value,
+        InputOpts::new(hint).rows(rows).width(width),
+    )
 }
 
 /// A labelled single-line input; takes the focus when the dialog opens.
@@ -151,8 +123,27 @@ fn field(
     fresh: &mut bool,
     hint: &str,
 ) -> Response {
+    name_field(ui, id_salt, label_text, value, fresh, hint, false)
+}
+
+/// [`field`] whose border turns red while `invalid` (the error line under
+/// it says why), like the form inputs on the pages.
+fn name_field(
+    ui: &mut Ui,
+    id_salt: &str,
+    label_text: &str,
+    value: &mut String,
+    fresh: &mut bool,
+    hint: &str,
+    invalid: bool,
+) -> Response {
     label(ui, label_text);
-    let resp = input(ui, id_salt, value, hint, 1, f32::INFINITY);
+    let resp = form::input(
+        ui,
+        ("dialog_input", id_salt),
+        value,
+        InputOpts::new(hint).invalid(invalid),
+    );
     if *fresh {
         resp.request_focus();
         *fresh = false;
@@ -160,95 +151,19 @@ fn field(
     resp
 }
 
-/// A checkbox whose box stays visible on the dialog surface (egui's own
-/// box is filled with the input colour, which the overlay swallows).
-fn checkbox(ui: &mut Ui, value: &mut bool, s: &str) -> Response {
-    let p = *pal(ui);
-    let g = ui.painter().layout_no_wrap(
-        s.to_owned(),
-        FontId::proportional(size::BODY),
-        Color32::PLACEHOLDER,
-    );
-    let (rect, mut resp) =
-        ui.allocate_exact_size(vec2(16.0 + 8.0 + g.size().x, 22.0), Sense::click());
-    if resp.clicked() {
-        *value = !*value;
-        resp.mark_changed();
-    }
-    let hovered = resp.hovered();
-    let bx =
-        egui::Rect::from_center_size(pos2(rect.left() + 8.0, rect.center().y), vec2(16.0, 16.0));
-    if *value {
-        let fill = if hovered {
-            p.accent.lerp_to_gamma(Color32::WHITE, 0.10)
-        } else {
-            p.accent
-        };
-        ui.painter()
-            .rect_filled(bx, CornerRadius::same(radius::S), fill);
-        crate::views::icons::paint(
-            ui.painter(),
-            crate::views::icons::Icon::Check,
-            bx.center(),
-            11.0,
-            Color32::WHITE,
-        );
-    } else {
-        ui.painter().rect(
-            bx,
-            CornerRadius::same(radius::S),
-            if ui.visuals().dark_mode {
-                p.chrome
-            } else {
-                p.canvas
-            },
-            Stroke::new(1.0, if hovered { p.text_3 } else { p.border_strong }),
-            egui::StrokeKind::Inside,
-        );
-    }
-    ui.painter().galley(
-        pos2(bx.right() + 8.0, rect.center().y - g.size().y / 2.0),
-        g,
-        if hovered { p.text_strong } else { p.text },
-    );
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+/// The error of a name check, when there is one to show.
+fn name_error(r: &Result<(), String>) -> Option<String> {
+    r.as_ref().err().filter(|e| !e.is_empty()).cloned()
 }
 
-/// A filled button in the danger colour, sized like the kit's buttons.
+/// A checkbox whose box stays visible on the dialog surface (the form one).
+fn checkbox(ui: &mut Ui, value: &mut bool, s: &str) -> Response {
+    form::checkbox(ui, value, s)
+}
+
+/// A filled button in the danger colour (the form one).
 fn danger_button(ui: &mut Ui, s: &str, enabled: bool) -> Response {
-    let p = *pal(ui);
-    let g = ui.painter().layout_no_wrap(
-        s.to_owned(),
-        FontId::new(size::BODY, medium()),
-        Color32::WHITE,
-    );
-    let sense = if enabled {
-        Sense::click()
-    } else {
-        Sense::hover()
-    };
-    let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 22.0, 30.0), sense);
-    let fill = if !enabled {
-        p.danger.gamma_multiply(0.38)
-    } else if resp.is_pointer_button_down_on() {
-        p.danger.lerp_to_gamma(Color32::BLACK, 0.15)
-    } else if resp.hovered() {
-        p.danger.lerp_to_gamma(Color32::WHITE, 0.10)
-    } else {
-        p.danger
-    };
-    ui.painter()
-        .rect_filled(rect, CornerRadius::same(radius::M), fill);
-    ui.painter().galley(
-        pos2(rect.left() + 11.0, rect.center().y - g.size().y / 2.0),
-        g,
-        Color32::WHITE,
-    );
-    if enabled {
-        resp.on_hover_cursor(egui::CursorIcon::PointingHand)
-    } else {
-        resp
-    }
+    form::danger(ui, s, enabled)
 }
 
 /// Right-aligned Cancel / Confirm buttons. Enter confirms when `enter_submits`.
@@ -436,16 +351,18 @@ fn body(
         } => {
             title(ui, "Create branch");
             explain(ui, &format!("Starts at {start_label}"));
-            field(
+            let err = name_error(&validate_ref_name(name, &branch_names));
+            name_field(
                 ui,
                 "branch_name",
                 "Branch name",
                 name,
                 fresh,
                 "feature/my-change",
+                err.is_some(),
             );
             let valid = validate_ref_name(name, &branch_names);
-            error_line(ui, &valid.as_ref().err().filter(|e| !e.is_empty()).cloned());
+            error_line(ui, &name_error(&valid));
             checkbox(ui, checkout, "Check out the new branch");
             let o = buttons(ui, "Create branch", valid.is_ok(), false, true);
             if matches!(o, Outcome::Confirm) {
@@ -465,9 +382,18 @@ fn body(
         } => {
             title(ui, "Create tag");
             explain(ui, &format!("Points at {target_label}"));
-            field(ui, "tag_name", "Tag name", name, fresh, "v1.2.0");
+            let err = name_error(&validate_ref_name(name, &tag_names));
+            name_field(
+                ui,
+                "tag_name",
+                "Tag name",
+                name,
+                fresh,
+                "v1.2.0",
+                err.is_some(),
+            );
             let valid = validate_ref_name(name, &tag_names);
-            error_line(ui, &valid.as_ref().err().filter(|e| !e.is_empty()).cloned());
+            error_line(ui, &name_error(&valid));
             label(ui, "Message (optional, makes an annotated tag)");
             let msg = input(ui, "tag_message", message, "", 3, f32::INFINITY);
             let o = buttons(ui, "Create tag", valid.is_ok(), false, !msg.has_focus());
@@ -482,15 +408,16 @@ fn body(
         }
         Dialog::RenameBranch { from, to } => {
             title(ui, &format!("Rename {from}"));
-            field(ui, "rename_to", "New name", to, fresh, "");
             let others: Vec<&str> = branch_names
                 .iter()
                 .copied()
                 .filter(|b| *b != from.as_str())
                 .collect();
+            let err = name_error(&validate_ref_name(to, &others));
+            name_field(ui, "rename_to", "New name", to, fresh, "", err.is_some());
             let valid = validate_ref_name(to, &others);
             let unchanged = to.trim() == from;
-            error_line(ui, &valid.as_ref().err().filter(|e| !e.is_empty()).cloned());
+            error_line(ui, &name_error(&valid));
             let o = buttons(ui, "Rename", valid.is_ok() && !unchanged, false, true);
             if matches!(o, Outcome::Confirm) {
                 actions.push(Action::Run(GitOp::RenameBranch {
@@ -544,7 +471,15 @@ fn body(
             ops,
         } => {
             title(ui, t);
-            text(ui, body);
+            // A long body scrolls, so the buttons stay on screen in a
+            // short window.
+            let max_h = (ui.ctx().content_rect().height() - 220.0).max(120.0);
+            egui::ScrollArea::vertical()
+                .id_salt("confirm_body")
+                .max_height(max_h)
+                .min_scrolled_height(0.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| text(ui, body));
             let o = buttons(ui, confirm, true, *danger, true);
             if matches!(o, Outcome::Confirm) {
                 actions.push(Action::RunSeq(ops.clone()));
@@ -578,9 +513,11 @@ fn body(
                     .inner_margin(Margin::symmetric(10, 8))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
+                        let room = ui.ctx().content_rect().height() - 300.0;
                         egui::ScrollArea::vertical()
                             .id_salt("confirm_details")
-                            .max_height(260.0)
+                            .max_height(room.clamp(100.0, 260.0))
+                            .min_scrolled_height(0.0)
                             .auto_shrink([false, true])
                             .show(ui, |ui| {
                                 for d in details.iter() {
@@ -668,14 +605,12 @@ fn body(
                         *remote = i;
                     }
                 } else {
-                    egui::ComboBox::from_id_salt("push_remote")
-                        .width(220.0)
-                        .selected_text(remotes.get(*remote).cloned().unwrap_or_default())
-                        .show_ui(ui, |ui| {
-                            for (i, r) in remotes.iter().enumerate() {
-                                ui.selectable_value(remote, i, r);
-                            }
-                        });
+                    let opts: Vec<(usize, String)> = remotes
+                        .iter()
+                        .enumerate()
+                        .map(|(i, r)| (i, r.clone()))
+                        .collect();
+                    form::select(ui, "push_remote", remote, &opts, 220.0);
                 }
                 ui.add_space(2.0);
                 checkbox(

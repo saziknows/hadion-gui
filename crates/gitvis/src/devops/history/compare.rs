@@ -218,7 +218,14 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
     };
     let snap_suggest = quick_pairs(repo);
     let c = &mut repo.devops.history.compare;
-    revision_bar(ui, c, &suggestions, actions);
+    // A short window: numbers on one line instead of tiles, and the
+    // explanations and the A / B details behind a "Details" toggle, so the
+    // file list and the diff keep their room.
+    let compact = ui.available_height() < 600.0;
+    let details_id = ui.make_persistent_id("hist_cmp_details_open");
+    let details_open = ui.data(|d| d.get_temp::<bool>(details_id)).unwrap_or(false);
+    let show_details = !compact || details_open;
+    revision_bar(ui, c, &suggestions, show_details, actions);
     let p = *pal(ui);
     let empty = |ui: &mut Ui, add: &mut dyn FnMut(&mut Ui)| {
         egui::CentralPanel::default()
@@ -245,7 +252,7 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
                 if !snap_suggest.is_empty() {
                     ui.add_space(12.0);
                     ui.vertical_centered(|ui| {
-                        ui.set_max_width(520.0);
+                        ui.set_max_width(ui.available_width().min(520.0));
                         ui.horizontal_wrapped(|ui| {
                             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
                             for (label, a, b) in &snap_suggest {
@@ -284,14 +291,17 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         }
         Some(Ok(cmp)) => cmp.clone(),
     };
-    summary(ui, &cmp, &in_graph, actions);
+    if let Some(open) = summary(ui, &cmp, &in_graph, compact, details_open, actions) {
+        ui.data_mut(|d| d.insert_temp(details_id, open));
+    }
     let tab = c.tab;
     let selected = c.selected;
     let commit_sel = c.commit;
+    let (list_min, list_max) = widgets::split_range(ui.available_width(), 280.0, 760.0, 380.0);
     egui::Panel::left("hist_cmp_list")
         .resizable(true)
-        .default_size(420.0)
-        .size_range(300.0..=760.0)
+        .default_size(420.0f32.clamp(list_min, list_max))
+        .size_range(list_min..=list_max)
         .frame(Frame::NONE.fill(p.panel).inner_margin(Margin {
             left: 8,
             right: 8,
@@ -370,7 +380,13 @@ fn quick_pairs(repo: &RepoState) -> Vec<(String, String, Option<String>)> {
     v
 }
 
-fn revision_bar(ui: &mut Ui, c: &mut Compare, suggestions: &[String], actions: &mut Vec<Action>) {
+fn revision_bar(
+    ui: &mut Ui,
+    c: &mut Compare,
+    suggestions: &[String],
+    explain: bool,
+    actions: &mut Vec<Action>,
+) {
     Frame::NONE
         .inner_margin(Margin {
             left: 24,
@@ -380,8 +396,12 @@ fn revision_bar(ui: &mut Ui, c: &mut Compare, suggestions: &[String], actions: &
         })
         .show(ui, |ui| {
             let mut submit = false;
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
+            // The inputs give up width first (everything else in the row
+            // takes about 500 points); a window narrower still wraps the
+            // row instead of pushing the Compare button off the page.
+            let input_w = ((ui.available_width() - 500.0) / 2.0).clamp(120.0, 230.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
                 widgets::bar_label(ui, "A");
                 let (ra, picked_a) = widgets::rev_input(
                     ui,
@@ -389,7 +409,7 @@ fn revision_bar(ui: &mut Ui, c: &mut Compare, suggestions: &[String], actions: &
                     &mut c.a,
                     "main, v1.2, a1b2c3d, HEAD~3",
                     suggestions,
-                    230.0,
+                    input_w,
                     false,
                 );
                 submit |= widgets::submitted(ui, &ra) || picked_a;
@@ -410,7 +430,7 @@ fn revision_bar(ui: &mut Ui, c: &mut Compare, suggestions: &[String], actions: &
                         ("hist_rev", "cmp_b_wt"),
                         &mut wt,
                         crate::views::form::InputOpts::new("")
-                            .width(230.0)
+                            .width(input_w)
                             .enabled(false),
                     );
                 } else {
@@ -420,7 +440,7 @@ fn revision_bar(ui: &mut Ui, c: &mut Compare, suggestions: &[String], actions: &
                         &mut c.b,
                         "devops, HEAD",
                         suggestions,
-                        230.0,
+                        input_w,
                         false,
                     );
                     if c.focus_b {
@@ -450,18 +470,28 @@ fn revision_bar(ui: &mut Ui, c: &mut Compare, suggestions: &[String], actions: &
             if submit {
                 actions.push(Act::RunCompare.into());
             }
-            ui.add_space(4.0);
-            kit::secondary(ui, c.mode.explain());
+            // What the mode means (behind "Details" in a short window,
+            // unless there is no result yet to show details for).
+            if explain || c.result.is_none() {
+                ui.add_space(4.0);
+                kit::secondary(ui, c.mode.explain());
+            }
         });
     kit::hairline(ui);
 }
 
+/// The numbers, the ahead / behind sentence and what A and B resolved to.
+/// `compact`: numbers on one line, and the rest behind a "Details" toggle
+/// (`details_open`); returns the toggle's new state when it was clicked.
 fn summary(
     ui: &mut Ui,
     cmp: &Comparison,
     in_graph: &std::collections::HashSet<String>,
+    compact: bool,
+    details_open: bool,
     actions: &mut Vec<Action>,
-) {
+) -> Option<bool> {
+    let mut toggled = None;
     let p = *pal(ui);
     let (added, deleted) = numstat::totals(&cmp.files);
     let b_name = cmp
@@ -478,36 +508,43 @@ fn summary(
         .inner_margin(Margin {
             left: 24,
             right: 16,
-            top: 12,
-            bottom: 12,
+            top: if compact { 8 } else { 12 },
+            bottom: if compact { 8 } else { 12 },
         })
         .show(ui, |ui| {
-            crate::views::insights::stats(
-                ui,
-                &[
-                    Stat::new(
-                        "Merge base",
-                        cmp.merge_base
-                            .as_ref()
-                            .map(|m| m.short().to_owned())
-                            .unwrap_or_else(|| "none".into()),
-                    )
-                    .tip(&base_tip),
-                    Stat::new(&format!("Only in {}", cmp.a.input), format::count(cmp.count_a)),
-                    Stat::new(&format!("Only in {b_name}"), format::count(cmp.count_b)),
-                    Stat::new("Files changed", format::count(cmp.files.len())),
-                    Stat::new(
-                        "Lines",
-                        format!(
-                            "+{} \u{2212}{}",
-                            format::count(added as usize),
-                            format::count(deleted as usize)
-                        ),
+            if compact {
+                ui.spacing_mut().item_spacing.y = 4.0;
+            }
+            let only_a = format!("Only in {}", cmp.a.input);
+            let only_b = format!("Only in {b_name}");
+            let stats = [
+                Stat::new(
+                    "Merge base",
+                    cmp.merge_base
+                        .as_ref()
+                        .map(|m| m.short().to_owned())
+                        .unwrap_or_else(|| "none".into()),
+                )
+                .tip(&base_tip),
+                Stat::new(&only_a, format::count(cmp.count_a)),
+                Stat::new(&only_b, format::count(cmp.count_b)),
+                Stat::new("Files changed", format::count(cmp.files.len())),
+                Stat::new(
+                    "Lines",
+                    format!(
+                        "+{} \u{2212}{}",
+                        format::count(added as usize),
+                        format::count(deleted as usize)
                     ),
-                    Stat::new("Time", format::millis(cmp.elapsed_ms)),
-                ],
-            );
-            ui.add_space(6.0);
+                ),
+                Stat::new("Time", format::millis(cmp.elapsed_ms)),
+            ];
+            if compact {
+                widgets::compact_stats(ui, &stats);
+            } else {
+                crate::views::insights::stats(ui, &stats);
+                ui.add_space(6.0);
+            }
             let ahead = if cmp.count_b == 0 && cmp.count_a == 0 {
                 format!("{} and {b_name} point at the same history.", cmp.a.input)
             } else {
@@ -518,7 +555,27 @@ fn summary(
                     format::count(cmp.count_a)
                 )
             };
-            kit::body(ui, &ahead);
+            if compact {
+                // The sentence, then the toggle for the rest.
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 10.0;
+                    ui.label(RichText::new(&ahead).size(size::BODY).color(p.text));
+                    let label = if details_open {
+                        "Hide details"
+                    } else {
+                        "Details"
+                    };
+                    if kit::link(ui, label).clicked() {
+                        toggled = Some(!details_open);
+                    }
+                });
+                if !details_open {
+                    return;
+                }
+                kit::secondary(ui, cmp.request.mode.explain());
+            } else {
+                kit::body(ui, &ahead);
+            }
             side_line(ui, "A", &cmp.a, in_graph, actions);
             match &cmp.b {
                 Some(b) => {
@@ -557,6 +614,7 @@ fn summary(
             }
         });
     kit::hairline(ui);
+    toggled
 }
 
 /// `A = main  a1b2c3d4e5  Subject…  Open the commit`.
@@ -580,7 +638,7 @@ fn side_line(
         let link = in_graph.contains(&r.sha) && Oid::from_str(&r.sha).is_ok();
         let room = ui.available_width() - if link { 130.0 } else { 0.0 };
         ui.scope(|ui| {
-            ui.set_max_width(room.max(60.0));
+            ui.set_max_width(room.max(60.0).min(ui.available_width()));
             ui.add(
                 egui::Label::new(RichText::new(&r.subject).size(size::SMALL).color(p.text_2))
                     .truncate(),
@@ -622,31 +680,33 @@ fn file_list(
         return;
     }
     let two_lines = cmp.files.iter().any(|f| file_note(f).is_some());
-    kit::list(
-        ui,
-        "hist_cmp_files",
-        shown.len(),
-        if two_lines { 46.0 } else { 32.0 },
-        |k| selected == Some(shown[k]),
-        |ui, rect, resp, k| {
-            let f = &cmp.files[shown[k]];
-            let sub = file_note(f);
-            widgets::paint_file_row(
-                ui,
-                rect,
-                widgets::change_kind(f.change),
-                &f.path,
-                sub.as_deref(),
-                f.added,
-                f.deleted,
-                f.binary,
-                selected == Some(shown[k]),
-            );
-            if resp.clicked() {
-                actions.push(Act::SelectCompareFile(shown[k]).into());
-            }
-        },
-    );
+    widgets::rows_ui(ui, |ui| {
+        kit::list(
+            ui,
+            "hist_cmp_files",
+            shown.len(),
+            if two_lines { 46.0 } else { 32.0 },
+            |k| selected == Some(shown[k]),
+            |ui, rect, resp, k| {
+                let f = &cmp.files[shown[k]];
+                let sub = file_note(f);
+                widgets::paint_file_row(
+                    ui,
+                    rect,
+                    widgets::change_kind(f.change),
+                    &f.path,
+                    sub.as_deref(),
+                    f.added,
+                    f.deleted,
+                    f.binary,
+                    selected == Some(shown[k]),
+                );
+                if resp.clicked() {
+                    actions.push(Act::SelectCompareFile(shown[k]).into());
+                }
+            },
+        )
+    });
 }
 
 /// The second line of a file row: renames, copies, mode changes.
@@ -837,9 +897,13 @@ fn commit_lists(
             ui.add_space(8.0);
             continue;
         }
-        let h = ((total_h - 70.0 - empty_count * 40.0) / non_empty).max(120.0);
+        // Shared out of what the pane has; 64 is the least a list (a
+        // scroll area) takes.
+        let h = ((total_h - 70.0 - empty_count * 40.0) / non_empty).max(64.0);
         let now = format::now_secs();
         ui.allocate_ui(vec2(ui.available_width(), h), |ui| {
+            // Rows edge to edge: see `widgets::rows_ui`.
+            ui.spacing_mut().item_spacing.y = 0.0;
             kit::list(
                 ui,
                 &format!("hist_cmp_commits_{side:?}"),

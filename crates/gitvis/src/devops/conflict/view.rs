@@ -29,10 +29,14 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, _settings: &Settings, actions: &m
         .resizable(false)
         .frame(Frame::NONE.fill(p.canvas))
         .show(ui, |ui| header(ui, st, busy, actions));
+    // The panes keep at least 520 points: a narrow window narrows the file
+    // list first (it was squeezing the three panes to a few words each).
+    let hi = (ui.available_width() - 520.0).clamp(160.0, 440.0);
+    let lo = 160.0f32.min(hi);
     egui::Panel::left("conflict_files")
         .resizable(true)
-        .default_size(250.0)
-        .size_range(180.0..=440.0)
+        .default_size(250.0f32.clamp(lo, hi))
+        .size_range(lo..=hi)
         .frame(Frame::NONE.fill(p.panel).inner_margin(Margin {
             left: 6,
             right: 6,
@@ -183,12 +187,28 @@ fn header(ui: &mut Ui, st: &mut State, busy: bool, actions: &mut Vec<Action>) {
                     format::plural(others, "other file", "other files")
                 ),
             };
-            ui.label(
-                RichText::new(status)
-                    .size(size::BODY)
-                    .family(crate::theme::medium())
-                    .color(p.text),
-            );
+            // The status, then a toggle for the file's details (line
+            // endings, marker style, where the base comes from…): they used
+            // to be one long dot-separated line under it.
+            let text_file = s.filter(|s| s.is_text() && conflicted);
+            let details_id = ui.make_persistent_id("conflict_file_details");
+            let mut open = ui.data(|d| d.get_temp::<bool>(details_id)).unwrap_or(false);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                ui.label(
+                    RichText::new(status)
+                        .size(size::BODY)
+                        .family(crate::theme::medium())
+                        .color(p.text),
+                );
+                if text_file.is_some()
+                    && kit::link(ui, if open { "Hide file details" } else { "File details" })
+                        .clicked()
+                {
+                    open = !open;
+                    ui.data_mut(|d| d.insert_temp(details_id, open));
+                }
+            });
             if let Some(op) = &op {
                 ui.add(
                     Label::new(
@@ -196,15 +216,26 @@ fn header(ui: &mut Ui, st: &mut State, busy: bool, actions: &mut Vec<Action>) {
                             .size(size::SMALL)
                             .color(p.text_2),
                     )
-                    .truncate(),
+                    .wrap(),
                 );
             }
-            if let Some(s) = s.filter(|s| s.is_text() && conflicted) {
-                ui.label(
-                    RichText::new(meta_line(s))
-                        .size(size::SMALL)
-                        .color(p.text_3),
-                );
+            if let Some(s) = text_file {
+                if !s.load.utf8 {
+                    kit::callout(
+                        ui,
+                        Tone::Warning,
+                        "Not UTF-8 text",
+                        "Choose a side for each conflict; editing the text is off for this file.",
+                    );
+                }
+                if open {
+                    ui.add_space(2.0);
+                    kit::kv(ui, 120.0, |kv| {
+                        for (label, value) in meta_rows(s) {
+                            kv.text(label, RichText::new(value).size(size::SMALL));
+                        }
+                    });
+                }
             }
             if op.as_ref().is_some_and(|o| o.swapped()) && conflicted {
                 ui.add_space(2.0);
@@ -268,48 +299,64 @@ fn header(ui: &mut Ui, st: &mut State, busy: bool, actions: &mut Vec<Action>) {
     }
 }
 
-/// `LF line endings · merge style · markers of 7 · base from the index
-/// stages for 3 of 3 · read in 42 ms`.
-fn meta_line(s: &super::Session) -> String {
+/// The file's details, one per row: line endings, final newline, marker
+/// style and size, where the base comes from, the stage merge, encoding
+/// and how long the read took.
+fn meta_rows(s: &super::Session) -> Vec<(&'static str, String)> {
     let d = &s.doc;
-    let mut parts = vec![if d.crlf_lines > 0 && d.lf_lines > 0 {
-        format!(
-            "mixed line endings ({} CRLF, {} LF)",
-            d.crlf_lines, d.lf_lines
-        )
-    } else {
-        format!("{} line endings", d.eol.label())
-    }];
-    if !d.final_newline {
-        parts.push("no final newline".into());
-    }
-    parts.push(d.style().label().to_owned());
-    parts.push(format!("markers of {}", d.marker_size));
+    let mut rows = vec![(
+        "Line endings",
+        if d.crlf_lines > 0 && d.lf_lines > 0 {
+            format!("mixed: {} CRLF, {} LF", d.crlf_lines, d.lf_lines)
+        } else {
+            d.eol.label().to_owned()
+        },
+    )];
+    rows.push((
+        "Final newline",
+        if d.final_newline { "yes" } else { "no" }.to_owned(),
+    ));
+    rows.push(("Marker style", d.style().label().to_owned()));
+    rows.push(("Marker size", format!("{} characters", d.marker_size)));
     let hunks = s.hunks();
     let staged = hunks.iter().filter(|h| h.base_from_stages).count();
     let known = hunks.iter().filter(|h| h.base.is_some()).count();
     let added = s.load.entry.kind == gitvis_core::devops::conflict::ConflictKind::BothAdded;
-    if added {
-        parts.push("no common ancestor (added on both sides)".into());
+    let base = if added {
+        "no common ancestor (added on both sides)".to_owned()
     } else if staged > 0 {
-        parts.push(format!(
-            "base from the index stages for {staged} of {}",
-            hunks.len()
-        ));
+        format!(
+            "from the index stages for {staged} of {}",
+            format::plural(hunks.len(), "conflict", "conflicts")
+        )
     } else if known < hunks.len() {
-        parts.push(format!("base known for {known} of {}", hunks.len()));
-    }
+        format!(
+            "known for {known} of {}",
+            format::plural(hunks.len(), "conflict", "conflicts")
+        )
+    } else {
+        "in the markers".to_owned()
+    };
+    rows.push(("Base", base));
     if let Some(n) = s.load.stage_conflicts {
-        parts.push(format!(
-            "{} in the diff3 merge of the stages",
-            format::plural(n, "conflict", "conflicts")
+        rows.push((
+            "Stage merge",
+            format!(
+                "{} in the diff3 merge of the stages",
+                format::plural(n, "conflict", "conflicts")
+            ),
         ));
     }
-    if !s.load.utf8 {
-        parts.push("not UTF-8: choose sides, editing is off".into());
-    }
-    parts.push(format!("read in {} ms", s.load.elapsed_ms));
-    parts.join("  ·  ")
+    rows.push((
+        "Encoding",
+        if s.load.utf8 {
+            "UTF-8".to_owned()
+        } else {
+            "not UTF-8: choose sides, editing is off".to_owned()
+        },
+    ));
+    rows.push(("Read in", format!("{} ms", s.load.elapsed_ms)));
+    rows
 }
 
 fn toolbar(ui: &mut Ui, st: &mut State, busy: bool, actions: &mut Vec<Action>) {
@@ -327,8 +374,40 @@ fn toolbar(ui: &mut Ui, st: &mut State, busy: bool, actions: &mut Vec<Action>) {
         .inner_margin(Margin::symmetric(14, 6))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
+            // Save and Mark resolved first, at the right; the navigation and
+            // the bulk choices wrap in the width they leave (they used to
+            // run under Save and push Mark resolved off a narrow window).
+            ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let mark = IconButton::new(Icon::Check, "Mark resolved")
+                    .primary(true)
+                    .enabled(left.is_empty() && !busy)
+                    .show(ui);
+                let mark = if left.is_empty() {
+                    mark.on_hover_text("git add: record this file as resolved")
+                } else {
+                    mark
+                };
+                if mark.clicked() {
+                    actions.push(Act::MarkResolved.into());
+                }
+                if IconButton::text("Save")
+                    .enabled(dirty && !busy)
+                    .show(ui)
+                    .on_hover_text("Write the result to disk (Ctrl+S)")
+                    .clicked()
+                {
+                    actions.push(Act::Save.into());
+                }
+                if busy {
+                    ui.add(egui::Spinner::new().size(14.0).color(p.text_2));
+                }
+                ui.add_space(space::M);
+                ui.with_layout(
+                    // Top-aligned: a centred wrapping row fills the page height.
+                    Layout::left_to_right(Align::Min).with_main_wrap(true),
+                    |ui| {
+                ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
                 if IconButton::new(Icon::ChevronUp, "Previous")
                     .compact()
                     .enabled(n > 0)
@@ -347,15 +426,24 @@ fn toolbar(ui: &mut Ui, st: &mut State, busy: bool, actions: &mut Vec<Action>) {
                 {
                     actions.push(Act::Next.into());
                 }
-                ui.label(
-                    RichText::new(if n == 0 {
-                        "No conflicts".to_owned()
-                    } else {
-                        format!("Conflict {} of {n}", focus + 1)
-                    })
-                    .size(size::SMALL)
-                    .color(p.text_2),
-                );
+                // Centred on the buttons' height (the row is top-aligned).
+                let counter = RichText::new(if n == 0 {
+                    "No conflicts".to_owned()
+                } else {
+                    format!("Conflict {} of {n}", focus + 1)
+                })
+                .size(size::SMALL)
+                .color(p.text_2);
+                let counter_w = ui
+                    .painter()
+                    .layout_no_wrap(
+                        counter.text().to_owned(),
+                        egui::FontId::proportional(size::SMALL),
+                        p.text_2,
+                    )
+                    .size()
+                    .x;
+                ui.add_sized(vec2(counter_w + 2.0, 26.0), Label::new(counter));
                 ui.add_space(space::M);
                 if IconButton::text("Take all ours")
                     .compact()
@@ -411,32 +499,8 @@ fn toolbar(ui: &mut Ui, st: &mut State, busy: bool, actions: &mut Vec<Action>) {
                             );
                         }
                     });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    let mark = IconButton::new(Icon::Check, "Mark resolved")
-                        .primary(true)
-                        .enabled(left.is_empty() && !busy)
-                        .show(ui);
-                    let mark = if left.is_empty() {
-                        mark.on_hover_text("git add: record this file as resolved")
-                    } else {
-                        mark
-                    };
-                    if mark.clicked() {
-                        actions.push(Act::MarkResolved.into());
-                    }
-                    if IconButton::text("Save")
-                        .enabled(dirty && !busy)
-                        .show(ui)
-                        .on_hover_text("Write the result to disk (Ctrl+S)")
-                        .clicked()
-                    {
-                        actions.push(Act::Save.into());
-                    }
-                    if busy {
-                        ui.add(egui::Spinner::new().size(14.0).color(p.text_2));
-                    }
-                });
+                    },
+                );
             });
             if !left.is_empty() {
                 ui.add_space(2.0);
@@ -573,6 +637,9 @@ fn file_list(ui: &mut Ui, st: &mut State, actions: &mut Vec<Action>) {
         );
         return;
     }
+    // Rows edge to edge: `show_rows` (inside `kit::list`) adds the
+    // caller's item spacing to the row pitch.
+    ui.spacing_mut().item_spacing.y = 0.0;
     kit::list(
         ui,
         "conflict_file_list",

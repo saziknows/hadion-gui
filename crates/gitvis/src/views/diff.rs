@@ -957,16 +957,25 @@ fn draw_split(
                     );
                 }
                 let clip = painter.with_clip_rect(pane.intersect(painter.clip_rect()));
-                draw_text(
-                    &clip,
-                    p,
-                    pane.left() + gutter_w + 6.0,
-                    pane,
-                    line,
-                    spans,
-                    geo,
-                    dark,
-                );
+                let text_x = pane.left() + gutter_w + 6.0;
+                draw_text(&clip, p, text_x, pane, line, spans, geo, dark);
+                // A line longer than its pane is cut there: say so with an
+                // ellipsis instead of stopping mid-word.
+                let text_w = line.text.chars().count() as f32 * geo.char_w;
+                if text_x + text_w > pane.right() - 2.0 {
+                    let cut = Rect::from_min_max(pos2(pane.right() - 18.0, pane.top()), pane.max);
+                    painter.rect_filled(cut, 0, p.canvas);
+                    if bg != Color32::TRANSPARENT {
+                        painter.rect_filled(cut, 0, bg);
+                    }
+                    painter.text(
+                        cut.center(),
+                        Align2::CENTER_CENTER,
+                        "\u{2026}",
+                        geo.font.clone(),
+                        p.text_3,
+                    );
+                }
             }
             None => {
                 painter.rect_filled(pane, 0, p.panel);

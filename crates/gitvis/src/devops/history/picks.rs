@@ -578,6 +578,9 @@ pub fn panel(ui: &mut Ui, h: &HookCx, picked: &[Oid], actions: &mut Vec<Action>)
         Some(Ok(t)) => Some(&t.per_commit),
         _ => None,
     };
+    // Rows edge to edge: `show_rows` (inside `kit::list`) adds the
+    // caller's item spacing to the row pitch.
+    ui.spacing_mut().item_spacing.y = 0.0;
     kit::list(
         ui,
         "hist_picked",

@@ -91,9 +91,13 @@ pub fn show(
                     {
                         actions.push(Action::ToggleVerbose);
                     }
+                    // What the chips on the left leave, up to 200 points:
+                    // a narrow window shrinks the filter instead of
+                    // drawing it over the chips.
+                    let w = (ui.available_width() - 10.0).clamp(96.0, 200.0);
                     let resp = ui
                         .allocate_ui_with_layout(
-                            vec2(200.0, 28.0),
+                            vec2(w, 28.0),
                             Layout::left_to_right(Align::Center),
                             |ui| kit::search_box(ui, "activity_filter", &mut text, "Filter"),
                         )
@@ -459,11 +463,13 @@ fn reflog(ui: &mut Ui, repo: Option<&RepoState>, actions: &mut Vec<Action>) {
     }
     let p = *pal(ui);
     let now = format::now_secs();
+    // Rows edge to edge: `show_rows` adds the caller's spacing to the row
+    // pitch, so it must be zero before the call.
+    ui.spacing_mut().item_spacing.y = 0.0;
     egui::ScrollArea::vertical()
         .id_salt("reflog")
         .auto_shrink([false, false])
         .show_rows(ui, ROW_H, repo.reflog.len(), |ui, range| {
-            ui.spacing_mut().item_spacing.y = 0.0;
             for e in &repo.reflog[range] {
                 let (rect, resp) =
                     ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
@@ -496,13 +502,27 @@ fn reflog(ui: &mut Ui, repo: Option<&RepoState>, actions: &mut Vec<Action>) {
                     FontId::proportional(size::SMALL),
                     p.text_3,
                 );
+                // Unreachable entries say so on the row (they used to say
+                // it only in a tooltip on every row).
+                let mut right = when.left() - 16.0;
+                if !in_graph {
+                    right = kit::paint_badge(
+                        painter,
+                        &p,
+                        ui.visuals().dark_mode,
+                        right,
+                        mid,
+                        "not in the graph",
+                        Tone::Neutral,
+                    ) - 12.0;
+                }
                 let x = rect.left() + 186.0;
                 let g = truncated(
                     painter,
                     &e.message,
                     FontId::proportional(size::BODY),
                     p.text,
-                    (when.left() - 16.0 - x).max(40.0),
+                    (right - x).max(40.0),
                 );
                 painter.galley(pos2(x, mid - g.size().y / 2.0), g, p.text);
                 if resp.clicked() && in_graph {
@@ -511,7 +531,24 @@ fn reflog(ui: &mut Ui, repo: Option<&RepoState>, actions: &mut Vec<Action>) {
                 let sha = e.new.to_string();
                 let short = gitvis_core::repo::short_id(e.new);
                 resp.context_menu(|ui| {
-                    menus::begin(ui, 220.0);
+                    menus::begin(ui, 260.0);
+                    // What the row does not show: both full ids and the
+                    // exact time.
+                    ui.add(
+                        Label::new(
+                            RichText::new(format!(
+                                "{} \u{2192} {}\n{}",
+                                gitvis_core::repo::short_id(e.old),
+                                short,
+                                format::absolute_long(e.time)
+                            ))
+                            .size(size::SMALL)
+                            .color(pal(ui).text_2),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(4.0);
+                    menus::separator(ui);
                     if in_graph {
                         menus::action(ui, "Show in graph", actions, Action::JumpTo(e.new));
                     }
@@ -553,19 +590,6 @@ fn reflog(ui: &mut Ui, repo: Option<&RepoState>, actions: &mut Vec<Action>) {
                         Action::Copy(e.old.to_string()),
                     );
                 });
-                // What the row does not show: both full ids and the exact time.
-                let tip = format!(
-                    "{} \u{2192} {}\n{}{}",
-                    e.old,
-                    e.new,
-                    format::absolute_long(e.time),
-                    if in_graph {
-                        ""
-                    } else {
-                        "\nNot in the graph (unreachable from any branch or tag)"
-                    }
-                );
-                resp.on_hover_text(tip);
             }
         });
 }
