@@ -5,6 +5,9 @@ Native Git client (Rust + egui 0.37) focused on branch visualisation; see README
 ## Commands
 
 - `cargo build` / `cargo run -p gitvis -- <repo>` — debug build; deps are built with opt-level 2 so it stays usable.
+  Never share one `CARGO_TARGET_DIR` between worktrees of this repository: cargo names the workspace crates'
+  artifacts the same in every worktree and then treats another worktree's build as up to date, so an exe can
+  silently contain another branch's code (check with `grep -a -o 'gitvis-wt[\/][a-z0-9-]*' exe | sort -u`).
 - `cargo test` — unit tests plus `crates/gitvis-core/tests/fixture_repo.rs`, which builds throwaway repos with the real `git` binary.
 - `cargo run --release -p gitvis-core --example bench -- <repo>` — loader timings (`GITVIS_TIMING=1` prints phases).
 - `cargo build --release` — the shippable binary at `target/release/gitvis.exe`.
@@ -346,6 +349,11 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   `on_hover_text_at_pointer` there. Do not put a tooltip on every list item or path label: moving across
   a dense page then pops tooltips continuously, which the user reads as "glitching". `tooltip_grace_time`
   is 0 in `theme.rs` for the same reason.
+- `ScrollArea::show_rows(ui, row_h, n, ..)` spaces rows by `row_h + item_spacing.y`: set `item_spacing.y = 0`
+  BEFORE the call (in a `ui.scope`), not inside the closure, or rows are scrolled further apart than they are
+  drawn and the list ends short of its last rows with an empty band (the "black box" in the file viewer).
+- `ui.set_max_width(W)` sets the width exactly; it does not cap it. Write
+  `ui.set_max_width(ui.available_width().min(W))`, or a narrow window gets a page wider than itself.
 - Readability rules learnt the hard way (`views/insights/mod.rs` has the helpers): explanations at 12.5 px
   or more (never `.small()` for prose), prose capped at `PROSE_WIDTH`, section headers with a hairline,
   `why_box` with a caption, 20 px tile values. `.small()` is for badges only.
