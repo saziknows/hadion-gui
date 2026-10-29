@@ -719,9 +719,9 @@ fn overview_tiles(ui: &mut Ui, co: &CoState, has_gh: bool) {
     kit::secondary(
         ui,
         &format!(
-            "{} ({} comments, {} blank), {}.{}",
+            "{} ({}, {} blank), {}.{}",
             format::plural(p.lines, "line", "lines"),
-            p.comment_lines,
+            format::plural(p.comment_lines, "comment", "comments"),
             p.blank_lines,
             format::bytes(p.bytes),
             match a {

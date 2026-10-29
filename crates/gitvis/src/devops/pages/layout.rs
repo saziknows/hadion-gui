@@ -30,7 +30,8 @@ fn take_pending_scroll() -> Option<f32> {
 }
 
 /// `kit::page_with_nav` with a narrower navigation column in a narrow
-/// window (its labels still fit), so the content keeps more of the room.
+/// window (its labels still fit), so the content keeps more of the room:
+/// 196 points below 1100, as on main.
 pub fn page_with_nav(
     ui: &mut Ui,
     id: &str,
@@ -38,8 +39,8 @@ pub fn page_with_nav(
     content: impl FnOnce(&mut Ui),
 ) {
     let p = *pal(ui);
-    let nav_w = if ui.available_width() < 900.0 {
-        184.0
+    let nav_w = if ui.available_width() < 1100.0 {
+        196.0
     } else {
         228.0
     };
@@ -96,8 +97,6 @@ pub fn input_width(ui: &Ui, max: f32) -> f32 {
 
 /// The narrowest a list pane gets.
 pub const LIST_MIN: f32 = 240.0;
-/// The width the detail pane keeps before the list pane gives way.
-pub const DETAIL_MIN: f32 = 360.0;
 
 /// Cap the width of `ui` at `max` without ever growing it past what it
 /// has (`set_max_width` alone would).
@@ -106,17 +105,15 @@ pub fn cap_width(ui: &mut Ui, max: f32) {
     ui.set_max_width(w);
 }
 
-/// The list pane on the left, `default` points wide on a wide window. It
-/// never takes so much that the detail gets under [`DETAIL_MIN`]: a
-/// remembered width larger than that is clamped while the window is
-/// narrow, and comes back when it is wide again.
+/// The list pane on the left, sized from the room like `kit::split_keyed`
+/// on main: 40% of it on a first show (260 to 420 points, and not more
+/// than `default`), and never more than 55% (260 to 760), so the detail
+/// keeps a readable width in a narrow window.
 pub fn list_pane(ui: &mut Ui, id: &str, default: f32, add: impl FnOnce(&mut Ui)) {
     let p = *pal(ui);
     let avail = ui.available_width();
-    let max = (avail - DETAIL_MIN).clamp(LIST_MIN, 760.0);
-    // At most 40% of the room on a first show, so a mid-size window keeps
-    // a usable detail pane.
-    let default = default.min(avail * 0.4).min(max).max(LIST_MIN.min(max));
+    let max = (avail * 0.55).clamp(260.0, 760.0);
+    let default = default.min((avail * 0.4).clamp(260.0, 420.0)).min(max);
     egui::Panel::left(id)
         .resizable(true)
         .default_size(default)
