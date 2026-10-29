@@ -106,6 +106,9 @@ pub enum Cmd {
     /// Resize the window to this inner size in points (`window 900 560`,
     /// the smallest the window allows).
     Window(f32, f32),
+    /// Close the open dialog without confirming it (after a screenshot of
+    /// a confirmation, so the session can go on).
+    DialogCancel,
     Quit,
 }
 
@@ -209,6 +212,7 @@ fn parse(s: &str) -> Option<Cmd> {
         "recover" => Cmd::Recover,
         "ins-item" => Cmd::InsItem(num(arg)?),
         "blame" => Cmd::Blame(arg.to_owned()),
+        "dialog-cancel" => Cmd::DialogCancel,
         "quit" => Cmd::Quit,
         other => Cmd::Ext(other.to_owned(), arg.to_owned()),
     };

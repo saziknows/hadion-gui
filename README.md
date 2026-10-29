@@ -26,7 +26,8 @@ Updates). Each release lists SHA-256 checksums in `SHA256SUMS`.
 gitvis needs `git` on `PATH`. Everything else is optional and only used by the features that
 need it: [`gh`](https://cli.github.com/) for GitHub (gitvis uses your `gh auth` and stores no
 GitHub token), `glab` / `az` for GitLab and Azure DevOps, `kubectl`, `terraform` / `tofu`,
-`act`, `trivy` / `grype`, `pre-commit`, `semgrep`, and `curl` for osv.dev and AI assist. A
+`act`, `trivy` / `grype`, `pre-commit`, `semgrep`, `curl` for osv.dev and the Claude API, and
+Claude Code (`claude`) for AI assist on your Claude plan. A
 missing tool is reported where it is needed, with how to install it.
 
 **Platforms.** gitvis is developed and used every day on Windows 11. Linux builds and passes
@@ -310,18 +311,33 @@ the multi-selection panel, or the palette's `>compare`)
   Tab, arrows); only `` Ctrl+` `` hides the panel. `Ctrl+C` copies a selection, otherwise
   it interrupts.
 
-**AI assist** (Claude API; Settings → AI assist)
+**AI assist** (your Claude Code or the Claude API; Settings → AI assist)
 - Write the commit message from the staged diff, write a pull request description, explain
   a failed CI job from its log, summarise a pull request (risky areas, questions for the
   author), and explain a commit with a risk badge.
-- Runs only when you click. A confirmation shows the model, effort, size, estimated tokens
-  and cost, the sources and files, and what was redacted, before anything is sent. Secrets
-  found by the Exposure rules are replaced with `[REDACTED:<rule>]`, private-key blocks
-  and files such as `.env` are left out, and large inputs are cut to the budgets you set.
+- Two ways to Claude: **Claude Code**, your own `claude` CLI signed in with your Claude plan
+  (requests count against the plan's limits instead of a per-token bill), or the **Claude
+  API** with an API key (billed per token). **Auto**, the default, uses Claude Code when it is
+  signed in with a plan, otherwise the API key, and otherwise says how to set up either.
+  Model and effort are chosen per way and per feature.
+- gitvis runs Claude Code from an empty folder with its tools, MCP servers, plugins, hooks,
+  slash commands and CLAUDE.md files off (`--safe-mode --tools ""`), for one turn, without
+  saving the session. The material goes on standard input, never on the command line, and
+  `ANTHROPIC_*` / `CLAUDE*` variables are removed so it uses its own sign-in. gitvis never
+  reads or stores Claude Code's credentials: it reads `claude auth status`, shows how to
+  install Claude Code or sign in (`claude auth login`, which you run yourself), and warns
+  when Claude Code is signed in with an API key, which bills that account.
+- Runs only when you click. A confirmation shows the exact `claude` command line or API
+  request, the model, effort, size, estimated tokens and API cost, the sources and files, and
+  what was redacted, before anything is sent. Secrets found by the Exposure rules are
+  replaced with `[REDACTED:<rule>]`, private-key blocks and files such as `.env` are left
+  out, and large inputs are cut to the budgets you set.
 - The API key lives in the OS keychain (or `ANTHROPIC_API_KEY`) and reaches `curl` on
-  standard input only. Answers stream in; refusals, `max_tokens`, rate limits (Retry waits
-  out `retry-after`) and model fallbacks are shown as such. A session usage table lists
-  requests, tokens and estimated cost per model and feature.
+  standard input only. Answers stream in; refusals, `max_tokens`, rate and plan limits (with
+  reset times), retries and model fallbacks are shown as such, and Stop ends a request. The
+  session usage table lists requests and tokens per way, model and feature, with the
+  estimated cost of API requests; Claude Code's own estimate is shown as covered by your
+  plan.
 
 **Settings** (`Ctrl+,`, the gear on the rail)
 - **Appearance** and **Behaviour**.
@@ -557,7 +573,9 @@ request comments, Bitbucket, Linux and macOS packages.
 GitHub, GitLab and Azure DevOps writes are covered by request-builder tests and were
 exercised up to their confirmation dialogs; they have not yet been run against a sandbox
 repository. The same goes for LFS locks, uploading a key to GitHub and `gh release
-download` during an update. AI assist was tested against a fake `curl`, not the real API;
+download` during an update. AI assist was tested against a fake `curl` and a fake `claude`
+(the `fake_claude` example), not the real API; three trivial real Claude Code calls confirmed
+its stream format;
 `pre-commit` and `semgrep` were not installed while it was built.
 
 ## Contributing

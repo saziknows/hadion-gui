@@ -1016,7 +1016,7 @@ pub fn wip_tools(ui: &mut Ui, h: &HookCx, actions: &mut Vec<Action>) {
         |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
             let enabled = staged && !h.busy;
-            let resp = IconButton::new(Icon::Edit, "Write with Claude")
+            let resp = IconButton::new(Icon::Sparkles, "Write with Claude")
                 .compact()
                 .enabled(enabled)
                 .show(ui);
@@ -1120,7 +1120,7 @@ pub fn new_pr_tools(ui: &mut Ui, h: &HookCx, actions: &mut Vec<Action>) {
                     ui.spacing_mut().item_spacing.x = 8.0;
                     let busy =
                         ask.is_some_and(|a| a.running() || matches!(a.phase, Phase::Confirming));
-                    if IconButton::new(Icon::Edit, "Write title and description with Claude")
+                    if IconButton::new(Icon::Sparkles, "Write title and description with Claude")
                         .enabled(!busy)
                         .show(ui)
                         .on_hover_text(
@@ -1294,7 +1294,7 @@ pub fn pr_tools(ui: &mut Ui, h: &HookCx, number: u64, actions: &mut Vec<Action>)
                 Layout::left_to_right(Align::Center),
                 |ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
-                    if IconButton::new(Icon::Comment, "Summarise with Claude")
+                    if IconButton::new(Icon::Sparkles, "Summarise with Claude")
                         .show(ui)
                         .on_hover_text(
                             "A summary, the risky areas and questions for the author, from the description, the diff and the review threads",
@@ -1329,7 +1329,7 @@ pub fn commit_panel(ui: &mut Ui, h: &HookCx, c: &Commit, actions: &mut Vec<Actio
     let ask = st.asks.get(&target);
     let busy = ask.is_some_and(|a| a.running() || matches!(a.phase, Phase::Confirming));
     kit::section_with(ui, "Claude", None, |ui| {
-        if IconButton::new(Icon::Comment, "Explain this commit")
+        if IconButton::new(Icon::Sparkles, "Explain this commit")
             .compact()
             .enabled(!busy)
             .show(ui)
@@ -1390,7 +1390,7 @@ pub fn log_tools(ui: &mut Ui, h: &LogHookCx, run: u64, job: u64, actions: &mut V
         return;
     }
     let busy = ask.is_some_and(|a| a.running() || matches!(a.phase, Phase::Confirming));
-    if IconButton::new(Icon::Bug, "Explain with Claude")
+    if IconButton::new(Icon::Sparkles, "Explain with Claude")
         .compact()
         .enabled(!busy)
         .show(ui)

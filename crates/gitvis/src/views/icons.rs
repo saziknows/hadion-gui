@@ -107,6 +107,8 @@ pub enum Icon {
     Wrench,
     /// A pulse line: the activity log.
     Activity,
+    /// Sparkles: an AI action (Claude).
+    Sparkles,
 }
 
 /// The Lucide icon font's family (`theme::install_fonts` registers it).
@@ -182,6 +184,7 @@ impl Icon {
             Icon::Star => 0xe176,        // star
             Icon::Wrench => 0xe1b1,      // wrench
             Icon::Activity => 0xe038,    // activity
+            Icon::Sparkles => 0xe412,    // sparkles
         };
         char::from_u32(cp).unwrap_or('\u{fffd}')
     }

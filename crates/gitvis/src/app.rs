@@ -3006,6 +3006,7 @@ impl GitVis {
                     self.apply(ctx, Action::SelectInsight(Some(format!("file:{path}"))));
                     self.apply(ctx, Action::BlameFile(path));
                 }
+                Cmd::DialogCancel => self.dialog = None,
                 Cmd::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             }
         }

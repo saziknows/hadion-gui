@@ -138,7 +138,7 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
     `Page::Compare`, graph multi-select in `RepoState::multi`, filters, file tree, inline blame, signature
     verification), `gitplus` (Tools tabs Submodules / Git LFS / Patches / Hooks via `workbench::Tab::gitplus`,
     stash selected files, split a commit, `gitvis hook pre-commit` through `gitplus::cli_main` in `main.rs`),
-    `ai` (Claude API buttons; config in `Settings::ext.ai`). `devops::on_snapshot` runs after every load.
+    `ai` (Claude buttons through the owner's Claude Code CLI or the Claude API; config in `Settings::ext.ai`). `devops::on_snapshot` runs after every load.
   - App-wide areas (`devops/global.rs`: state in `Globals`, prefs in `Settings::ext: ExtPrefs`; contract
     `apply(cx, &mut State, &mut GlobalCx, act)`, `on_msg`, `tick` every frame, `script`; `GlobalView` for
     views): `palette` (Ctrl+K overlay), `identity` (git config, identities, keys and signing, GitHub
@@ -230,7 +230,17 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
     outcome and stale ones swept), SSE parser, redaction through the exposure rules, budgets,
     prices (estimates), refusal / `max_tokens` / fallback handling; the answer streams into an
     `Arc<Mutex<Live>>` the views read. `GITVIS_AI_KEYCHAIN_NAME` (only `gitvis-test-…`), a fake
-    curl first on PATH; `--test ai_curl` (Windows) and `--test ai_inputs`.
+    curl first on PATH; `--test ai_curl` (Windows) and `--test ai_inputs`. Claude Code route (`cli.rs`):
+    `find` (`GITVIS_CLAUDE`, `~/.local/bin/claude.exe`, PATH, the npm shim's
+    `node_modules/@anthropic-ai/claude-code/bin/claude.exe`; never the `.cmd`, whose batch arguments cannot
+    carry a multi-line system prompt), `detect` (`--version` + `auth status`, cached five minutes), `args`,
+    `env_plan` (removes `ANTHROPIC_*` / `CLAUDE*`, so the plan's sign-in is used), one fixed empty folder
+    `%TEMP%\gitvis-claude-code`, `Stream` (stream-json; `tools` must be empty), Stop = `kill_tree`.
+    `total_cost_usd` is an estimate: covered by a plan, billed for an API-key sign-in. The commit and
+    failed-job answers open in windows. Test double: `cargo build -p gitvis-core --example fake_claude` +
+    `GITVIS_CLAUDE=<exe>` (`FAKE_CLAUDE_AUTH` plan|env_key|api_key|none, `FAKE_CLAUDE_SCENARIO` /
+    `FAKE_CLAUDE_SEQ`, `FAKE_CLAUDE_LOG`); `--test ai_cli`. Never run `claude auth login/logout`,
+    `setup-token` or `update` from gitvis or tests.
   - `palette`: core `fuzzy` (alignment + quality filter), `frecency`, `scope`, `item`, `sources`,
     `rank` (narrowing search while the query grows), `files`; app `commands`, `verbs`, `sources`
     (cached by stamp), `results`, `view`. `cargo test -p gitvis-core --lib palette_perf -- --ignored
@@ -265,7 +275,8 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   notification), `GITVIS_CURL` (issue lookups), `GITVIS_KEYCHAIN_TEST=1` (`gitvis-test-*` entries),
   `GITVIS_UPDATE_DIR` / `GITVIS_UPDATE_THROTTLE_KIB` / `GITVIS_SCRIPT_AFTER_UPDATE` (updates from a
   folder), `GITVIS_DATA_DIR` / `GITVIS_CRASH_DIR`, `GITVIS_ALLOW_CRASH_TEST=1` (with a script, for
-  `crash-test`). Never call the real Claude API while testing (it costs money and sends code).
+  `crash-test`), `GITVIS_CLAUDE` (a fake Claude Code CLI). Never call the real Claude API while testing (it
+  costs money and sends code).
 - Script commands per area (each area's `script` fn has the full list): review `review`, `prs`,
   `issues`, `pr N`, `pr-tab conversation|files|commits|checks`, `pr-file N`, `issue N`, `new-pr`,
   `pr-lines A B`, `pr-comment TEXT`, `pr-review approve|changes|comment TEXT`, `pr-submit` /
@@ -288,7 +299,8 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   `verify`; gitplus `stashes`, `stash N`, `stash-form`, `stash-files P1,P2 MSG`, `submodules`,
   `lfs`, `patches`, `patch-preview PATH`, `hooks`, `hook-view NAME`, `install-secret-hook`,
   `split-commit SHA|head`; ai `ai-commit`, `ai-send`, `ai-pr`, `ai-explain [RUN JOB]`, `ai-summary
-  [N]`, `ai-commit-explain SHA|head`, `ai-model NAME`, `ai-ask on|off`; palette `palette-query
+  [N]`, `ai-commit-explain SHA|head`, `ai-model NAME`, `ai-ask on|off`, `ai-provider auto|cli|api`,
+  `ai-cli-model default|opus|sonnet|haiku|fable`, `ai-cli-check`, `ai-settings [usage|cli|api]`; palette `palette-query
   TEXT`, `palette-down|up N`, `palette-run`, `palette-actions`, `palette-close`; identity
   `config-tab …`, `config-edit KEY VALUE [scope]`, `identity-form …`, `check-path PATH`,
   `ssh-test`, `signing-form ssh|gpg`, `upload-key N`, `gh-switch …`; terminal `term-new SHELL`,
@@ -342,7 +354,8 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
 
 `GITVIS_SCRIPT="wait 10; tab 1; head; open path/in/commit; wait 2; shot out.png; split; shot out2.png; quit"`
 drives the app from inside and saves PNGs rendered by egui (works whatever is on screen).
-Commands: `wait S`, `shot PATH`, `window W H` (inner size in points; 900 × 560 is the minimum), `tab N`, `head`, `wip`, `open PATH`, `open-wip PATH`, `split`,
+Commands: `wait S`, `shot PATH`, `window W H` (inner size in points; 900 × 560 is the minimum), `dialog-cancel`
+(close the open dialog), `tab N`, `head`, `wip`, `open PATH`, `open-wip PATH`, `split`,
 `unified`, `select HUNK FROM TO`, `activity`, `reflog`, `collapse KEY`, `stage PATH`, `undo`,
 (scripted runs never save settings, window geometry or egui memory, so they cannot change your own
 session; run a copy of the exe under another name, e.g. `gitvis-test.exe`, so the build is never locked),
