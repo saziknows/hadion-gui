@@ -788,6 +788,10 @@ fn wip_panel(
         .unwrap_or((110.0, MSG_MIN_H));
     let avail = ui.available_height();
     let msg_max = (avail - others_h - LISTS_MIN).clamp(MSG_MIN_H, MSG_MAX_H);
+    // A short panel lists fewer of the staged secrets (none below about
+    // 450 points: the title, the row icons and the confirmation before
+    // committing still name them), so the file lists keep their room.
+    let secret_rows = ((avail - 420.0) / 30.0).floor().clamp(0.0, 4.0) as usize;
     let commit_h = others_h + msg_natural.clamp(MSG_MIN_H, msg_max);
     let measured = if avail >= commit_h {
         // Lists above, commit box below.
@@ -812,6 +816,7 @@ fn wip_panel(
             &staged_secrets,
             hook,
             msg_max,
+            secret_rows,
             actions,
         )
     } else {
@@ -833,6 +838,7 @@ fn wip_panel(
                     &staged_secrets,
                     hook,
                     MSG_MIN_H,
+                    secret_rows,
                     actions,
                 )
             })
@@ -1046,6 +1052,7 @@ fn commit_box(
     staged_secrets: &[String],
     hook: &HookCx,
     msg_max: f32,
+    secret_rows: usize,
     actions: &mut Vec<Action>,
 ) -> (f32, f32) {
     let st = &snap.status;
@@ -1078,14 +1085,14 @@ fn commit_box(
         );
         kit::callout_with(ui, Tone::Danger, &title, "", |ui| {
             let p = *pal(ui);
-            for s in staged_secrets.iter().take(4) {
+            for s in staged_secrets.iter().take(secret_rows) {
                 ui.add(
                     egui::Label::new(RichText::new(s).size(size::SMALL).color(p.text_2)).truncate(),
                 );
             }
-            if staged_secrets.len() > 4 {
+            if secret_rows > 0 && staged_secrets.len() > secret_rows {
                 ui.label(
-                    RichText::new(format!("and {} more", staged_secrets.len() - 4))
+                    RichText::new(format!("and {} more", staged_secrets.len() - secret_rows))
                         .size(size::SMALL)
                         .color(p.text_3),
                 );
@@ -1193,7 +1200,10 @@ fn commit_box(
                 Head::Detached(_) => Some(("detached HEAD".to_owned(), p.warning)),
                 _ => None,
             };
-            if let Some((text, color)) = label {
+            // Only with room for some of the name: "to …" says nothing.
+            if let Some((text, color)) = label
+                && ui.available_width() >= 56.0
+            {
                 ui.add(
                     egui::Label::new(RichText::new(text).size(size::SMALL).color(color)).truncate(),
                 );

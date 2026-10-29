@@ -437,3 +437,25 @@ pub fn show(
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rail_entries_fit_the_window() {
+        // 12 entries (a GitHub repository) in the tallest window: labels.
+        assert_eq!(Density::fitting(12, 900.0 - 46.0), Density::Full);
+        // At the smallest window (560) the rail has about 514 points below
+        // the app mark: 9 + 3 entries only fit as icons.
+        assert_eq!(Density::fitting(12, 514.0), Density::Icons);
+        // 10 entries (no remote) fit with small labels.
+        assert_eq!(Density::fitting(10, 514.0), Density::Compact);
+        for n in [3, 7, 10, 12] {
+            let d = Density::fitting(n, 514.0);
+            if d != Density::Icons {
+                assert!(n as f32 * (d.entry_h() + GAP) + 20.0 <= 514.0);
+            }
+        }
+    }
+}

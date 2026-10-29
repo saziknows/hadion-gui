@@ -123,13 +123,37 @@ fn field(
     fresh: &mut bool,
     hint: &str,
 ) -> Response {
+    name_field(ui, id_salt, label_text, value, fresh, hint, false)
+}
+
+/// [`field`] whose border turns red while `invalid` (the error line under
+/// it says why), like the form inputs on the pages.
+fn name_field(
+    ui: &mut Ui,
+    id_salt: &str,
+    label_text: &str,
+    value: &mut String,
+    fresh: &mut bool,
+    hint: &str,
+    invalid: bool,
+) -> Response {
     label(ui, label_text);
-    let resp = input(ui, id_salt, value, hint, 1, f32::INFINITY);
+    let resp = form::input(
+        ui,
+        ("dialog_input", id_salt),
+        value,
+        InputOpts::new(hint).invalid(invalid),
+    );
     if *fresh {
         resp.request_focus();
         *fresh = false;
     }
     resp
+}
+
+/// The error of a name check, when there is one to show.
+fn name_error(r: &Result<(), String>) -> Option<String> {
+    r.as_ref().err().filter(|e| !e.is_empty()).cloned()
 }
 
 /// A checkbox whose box stays visible on the dialog surface (the form one).
@@ -327,16 +351,18 @@ fn body(
         } => {
             title(ui, "Create branch");
             explain(ui, &format!("Starts at {start_label}"));
-            field(
+            let err = name_error(&validate_ref_name(name, &branch_names));
+            name_field(
                 ui,
                 "branch_name",
                 "Branch name",
                 name,
                 fresh,
                 "feature/my-change",
+                err.is_some(),
             );
             let valid = validate_ref_name(name, &branch_names);
-            error_line(ui, &valid.as_ref().err().filter(|e| !e.is_empty()).cloned());
+            error_line(ui, &name_error(&valid));
             checkbox(ui, checkout, "Check out the new branch");
             let o = buttons(ui, "Create branch", valid.is_ok(), false, true);
             if matches!(o, Outcome::Confirm) {
@@ -356,9 +382,18 @@ fn body(
         } => {
             title(ui, "Create tag");
             explain(ui, &format!("Points at {target_label}"));
-            field(ui, "tag_name", "Tag name", name, fresh, "v1.2.0");
+            let err = name_error(&validate_ref_name(name, &tag_names));
+            name_field(
+                ui,
+                "tag_name",
+                "Tag name",
+                name,
+                fresh,
+                "v1.2.0",
+                err.is_some(),
+            );
             let valid = validate_ref_name(name, &tag_names);
-            error_line(ui, &valid.as_ref().err().filter(|e| !e.is_empty()).cloned());
+            error_line(ui, &name_error(&valid));
             label(ui, "Message (optional, makes an annotated tag)");
             let msg = input(ui, "tag_message", message, "", 3, f32::INFINITY);
             let o = buttons(ui, "Create tag", valid.is_ok(), false, !msg.has_focus());
@@ -373,15 +408,16 @@ fn body(
         }
         Dialog::RenameBranch { from, to } => {
             title(ui, &format!("Rename {from}"));
-            field(ui, "rename_to", "New name", to, fresh, "");
             let others: Vec<&str> = branch_names
                 .iter()
                 .copied()
                 .filter(|b| *b != from.as_str())
                 .collect();
+            let err = name_error(&validate_ref_name(to, &others));
+            name_field(ui, "rename_to", "New name", to, fresh, "", err.is_some());
             let valid = validate_ref_name(to, &others);
             let unchanged = to.trim() == from;
-            error_line(ui, &valid.as_ref().err().filter(|e| !e.is_empty()).cloned());
+            error_line(ui, &name_error(&valid));
             let o = buttons(ui, "Rename", valid.is_ok() && !unchanged, false, true);
             if matches!(o, Outcome::Confirm) {
                 actions.push(Action::Run(GitOp::RenameBranch {

@@ -1100,3 +1100,49 @@ fn pending_banner(ui: &mut Ui, repo: &RepoState, actions: &mut Vec<Action>) {
             });
         });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tab_names_share_the_strip() {
+        // Everything fits: no cap.
+        assert_eq!(tab_name_cap(&[80.0, 90.0], 1000.0), f32::INFINITY);
+        // Too wide: the long names are cut to a common cap, the short one
+        // keeps its width, and the total fits.
+        let widths = [60.0, 300.0, 280.0];
+        let room = 500.0;
+        let cap = tab_name_cap(&widths, room);
+        assert!(cap < 280.0 && cap >= TAB_NAME_MIN);
+        let total: f32 = widths.iter().map(|w| w.min(cap) + TAB_CHROME).sum();
+        assert!(total <= room + 0.5, "{total} > {room}");
+        // Not even the minimum fits: the cap stays at the minimum (the
+        // strip scrolls).
+        assert_eq!(tab_name_cap(&[300.0; 12], 400.0), TAB_NAME_MIN);
+    }
+
+    #[test]
+    fn toolbar_labels_go_before_overlap() {
+        assert!(Fit::Full < Fit::NoNote && Fit::NoNote < Fit::Secondary);
+        assert!(Fit::Secondary < Fit::Icons);
+        assert_eq!(
+            tool_tip("Fetch", true, "Fetch all remotes"),
+            "Fetch all remotes"
+        );
+        assert_eq!(
+            tool_tip("Fetch", false, "Fetch all remotes and prune"),
+            "Fetch all remotes and prune",
+            "a tip that already names the button is kept as it is"
+        );
+        assert_eq!(
+            tool_tip("Pop", false, "Apply and drop"),
+            "Pop\nApply and drop"
+        );
+        assert!(
+            RIGHT_FITS
+                .windows(2)
+                .all(|w| w[0].search_w >= w[1].search_w)
+        );
+    }
+}

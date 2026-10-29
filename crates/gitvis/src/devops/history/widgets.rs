@@ -767,6 +767,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn side_panes_leave_the_content_its_room() {
+        // A wide window: the pane's own range.
+        assert_eq!(split_range(1600.0, 240.0, 760.0, 380.0), (240.0, 760.0));
+        // A narrow one: the pane may not take more than total - content.
+        let (lo, hi) = split_range(780.0, 240.0, 760.0, 380.0);
+        assert_eq!((lo, hi), (240.0, 400.0));
+        // Narrower than both minimums: the pane keeps its minimum.
+        assert_eq!(split_range(500.0, 240.0, 760.0, 380.0), (240.0, 240.0));
+    }
+
+    #[test]
     fn text_doc_lines_and_colours() {
         let d = TextDoc::new(b"fn main() {\n\tlet x = 1;\r\n}\n", "a.rs", true);
         assert_eq!(d.lines, vec!["fn main() {", "    let x = 1;", "}"]);

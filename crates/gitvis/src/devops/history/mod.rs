@@ -968,6 +968,40 @@ mod tests {
         assert!(acts("hist-mode", "files")[0].contains("Files"));
         assert!(script("verify", "").is_some());
         assert!(script("unknown", "").is_none());
+        // Testing aids.
+        assert!(acts("browse-line", "120")[0].contains("BrowseLine(120)"));
+        assert!(script("browse-line", "x").is_none());
+        assert!(acts("commit-msg", "Fix it\\n\\nBody")[0].contains("Fix it\\n\\nBody"));
+        assert!(acts("commit-focus", "")[0].contains("FocusCommitMessage"));
+        for d in [
+            "stash",
+            "branch",
+            "branch-invalid",
+            "tag",
+            "rename",
+            "delete-branch",
+            "push",
+            "reset",
+            "confirm",
+            "confirm-action",
+            "clone",
+        ] {
+            assert!(script("dialog", d).is_some(), "dialog {d}");
+        }
+        assert!(script("dialog", "nonsense").is_none());
+        assert!(acts("toast", "error Push failed")[0].contains("Error"));
+        assert!(acts("toast", "Fetched")[0].contains("Info"));
+    }
+
+    #[test]
+    fn confirm_dialogs_from_scripts_run_nothing() {
+        // `dialog confirm` must never be able to run a git operation.
+        let Some(Action::Dialog(crate::state::Dialog::Confirm { ops, .. })) =
+            test_dialog("confirm")
+        else {
+            panic!("not a confirmation");
+        };
+        assert!(ops.is_empty());
     }
 
     #[test]
