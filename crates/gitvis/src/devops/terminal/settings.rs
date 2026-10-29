@@ -278,7 +278,10 @@ fn detected_section(ui: &mut Ui, st: &mut State, actions: &mut Vec<Action>) {
                         Col::text("Shell"),
                         Col::text("Command"),
                         Col::text("Found via"),
-                        Col::text("Script name"),
+                        // Short ids: kept at full width (a text column was
+                        // squeezed below its header, which then ran past the
+                        // page edge on a narrow window).
+                        Col::num("Script name"),
                     ],
                     &rows,
                 );

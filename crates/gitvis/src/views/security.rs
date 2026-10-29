@@ -1168,7 +1168,9 @@ pub(crate) fn detail_head(
         .iter()
         .map(|(t, _)| kit::badge_width(ui.painter(), t) + 6.0)
         .sum();
-    let beside = badges_w + known + 12.0 <= ui.available_width();
+    let avail = ui.available_width();
+    let fits = |actions_w: f32| badges_w + actions_w + 12.0 <= avail;
+    let beside = fits(known);
     let mut measured = 0.0;
     let mut actions_ui = Some(actions_ui);
     let mut actions_row = |ui: &mut Ui| {
@@ -1196,8 +1198,12 @@ pub(crate) fn detail_head(
     }
     if (measured - known).abs() > 1.0 {
         ui.ctx().data_mut(|d| d.insert_temp(id, measured));
-        ui.ctx()
-            .request_discard("detail head actions changed width");
+        // Redo the pass only when the actions move between the badge row
+        // and a row of their own; at most once a frame.
+        if fits(measured) != beside && ui.ctx().current_pass_index() == 0 {
+            ui.ctx()
+                .request_discard("detail head actions changed width");
+        }
     }
     ui.add_space(2.0);
     kit::title(ui, title);

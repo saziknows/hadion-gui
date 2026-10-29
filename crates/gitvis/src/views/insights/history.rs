@@ -845,11 +845,35 @@ pub fn timeline(ui: &mut Ui, cx: &Cx, rep: &InsightsReport, actions: &mut Vec<Ac
     let t = &rep.history.timeline;
     kit::scroll_page(ui, "ins_timeline", |ui| {
         let p = *pal(ui);
-        let first = format!("First commit {}", format::absolute(t.first_commit));
+        // No commits read (an empty repository): no age and no busiest
+        // time, rather than "today" and "Mon 00:00".
+        let none = t.months.is_empty() && t.heat.iter().flatten().all(|n| *n == 0);
+        let first = if none {
+            String::new()
+        } else {
+            format!("First commit {}", format::absolute(t.first_commit))
+        };
+        let busiest = if none {
+            "–".to_owned()
+        } else {
+            format!(
+                "{} {:02}:00",
+                WEEKDAYS[(t.peak_weekday as usize).min(6)],
+                t.peak_hour
+            )
+        };
         super::stats(
             ui,
             &[
-                Stat::new("Age", days_text(t.age_days)).tip(&first),
+                Stat::new(
+                    "Age",
+                    if none {
+                        "–".to_owned()
+                    } else {
+                        days_text(t.age_days)
+                    },
+                )
+                .tip(&first),
                 Stat::new("Authors", t.authors.len().to_string())
                     .tip("Distinct author e-mails in the commits read"),
                 Stat::new("Active", t.active_authors.to_string())
@@ -858,15 +882,8 @@ pub fn timeline(ui: &mut Ui, cx: &Cx, rep: &InsightsReport, actions: &mut Vec<Ac
                     .tip("Calendar months between the first and last commit"),
                 Stat::new("Files", format::count(t.total_files)).tip("Tracked files"),
                 Stat::new("Size", format::bytes(t.total_bytes as usize)).tip("HEAD tree"),
-                Stat::new(
-                    "Busiest",
-                    format!(
-                        "{} {:02}:00",
-                        WEEKDAYS[(t.peak_weekday as usize).min(6)],
-                        t.peak_hour
-                    ),
-                )
-                .tip("Weekday and hour (each author's local time) with most commits"),
+                Stat::new("Busiest", busiest)
+                    .tip("Weekday and hour (each author's local time) with most commits"),
             ],
         );
         kit::section(ui, "Commits per month", None);

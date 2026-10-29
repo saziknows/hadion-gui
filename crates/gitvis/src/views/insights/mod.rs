@@ -550,8 +550,6 @@ pub(crate) fn grid(
     if cols.is_empty() || rows.is_empty() {
         return;
     }
-    let p = *pal(ui);
-    let dark = ui.visuals().dark_mode;
     let row_h = 30.0;
     let head_h = 24.0;
     let gap = 20.0;
@@ -598,34 +596,98 @@ pub(crate) fn grid(
             .sum();
         fit_columns(&mut widths, &flex, (avail - fixed - gaps).max(60.0));
     }
-    let table_w = (widths.iter().sum::<f32>() + gaps).min(avail);
+    let table_w = widths.iter().sum::<f32>() + gaps;
+    let g = Geometry {
+        widths,
+        gap,
+        table_w,
+        row_h,
+        head_h,
+    };
+    if table_w > avail + 0.5 {
+        // Even the narrowest columns do not fit (a narrow pane): scroll
+        // sideways instead of drawing past the edge.
+        // The bar stays visible (the floating style hides it until hovered),
+        // so the columns off to the right are found; room under the last
+        // row keeps the bar from covering it.
+        ui.scope(|ui| {
+            let s = &mut ui.spacing_mut().scroll;
+            s.dormant_handle_opacity = 0.6;
+            s.dormant_background_opacity = 0.4;
+            egui::ScrollArea::horizontal()
+                .id_salt((id, "grid_x"))
+                .auto_shrink([false, true])
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                .show(ui, |ui| {
+                    paint_grid(ui, id, cols, rows, click, &g, &mut on_row);
+                    ui.add_space(12.0);
+                });
+        });
+    } else {
+        paint_grid(ui, id, cols, rows, click, &g, &mut on_row);
+    }
+    ui.add_space(2.0);
+}
+
+/// Column widths and row metrics of a [`grid`].
+struct Geometry {
+    widths: Vec<f32>,
+    gap: f32,
+    table_w: f32,
+    row_h: f32,
+    head_h: f32,
+}
+
+fn paint_grid(
+    ui: &mut Ui,
+    id: &str,
+    cols: &[Col],
+    rows: &[Vec<Cell>],
+    click: bool,
+    g: &Geometry,
+    on_row: &mut impl FnMut(usize, &Response),
+) {
+    let p = *pal(ui);
+    let dark = ui.visuals().dark_mode;
+    let font = FontId::proportional(size::SMALL + 0.5);
+    let mono_font = FontId::monospace(size::MONO);
+    let head_font = FontId::new(size::CAPTION, theme::medium());
+    let painter = ui.painter().clone();
+    let Geometry {
+        widths,
+        gap,
+        table_w,
+        row_h,
+        head_h,
+    } = g;
+    let (gap, table_w, row_h, head_h) = (*gap, *table_w, *row_h, *head_h);
     let (rect, _) = ui.allocate_exact_size(
         vec2(table_w, head_h + row_h * rows.len() as f32),
         Sense::hover(),
     );
     let mut xs = Vec::with_capacity(cols.len());
     let mut x = rect.left();
-    for w in &widths {
+    for w in widths.iter() {
         xs.push(x);
         x += w + gap;
     }
     for (i, c) in cols.iter().enumerate() {
-        let (pos, align) = if c.numeric {
-            (
-                pos2(xs[i] + widths[i], rect.top() + head_h / 2.0),
-                egui::Align2::RIGHT_CENTER,
-            )
-        } else {
-            (
-                pos2(xs[i], rect.top() + head_h / 2.0),
-                egui::Align2::LEFT_CENTER,
-            )
-        };
-        painter.text(
-            pos,
-            align,
-            c.title.to_uppercase(),
+        // Cut to the column: a squeezed column's title ran into the next.
+        let t = truncated(
+            &painter,
+            &c.title.to_uppercase(),
             head_font.clone(),
+            p.text_3,
+            widths[i],
+        );
+        let x = if c.numeric {
+            xs[i] + widths[i] - t.size().x
+        } else {
+            xs[i]
+        };
+        painter.galley(
+            pos2(x, rect.top() + head_h / 2.0 - t.size().y / 2.0),
+            t,
             p.text_3,
         );
     }
@@ -709,7 +771,6 @@ pub(crate) fn grid(
         };
         on_row(r, &resp);
     }
-    ui.add_space(2.0);
 }
 
 /// `kit::stats` split into rows that fit the available width. The kit's
