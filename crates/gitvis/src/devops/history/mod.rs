@@ -529,6 +529,9 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
 /// `dialog NAME` (scripts): open a dialog with sample values to look at it.
 /// Scripts never confirm a dialog; the operations are harmless anyway
 /// (`confirm` runs nothing).
+const NO_SUCH_BRANCH: &str = "gitvis-test/no-such-branch";
+const NO_SUCH_REMOTE: &str = "gitvis-test-no-such-remote";
+
 fn test_dialog(name: &str) -> Option<Action> {
     use crate::state::Dialog;
     use gitvis_core::ops::ResetMode;
@@ -556,26 +559,30 @@ fn test_dialog(name: &str) -> Option<Action> {
             target_label: s("8d2d4ba Speed up startup"),
             message: String::new(),
         },
+        // The ones that would change a branch or a remote name targets
+        // that do not exist, so a click on Confirm in a test window (the
+        // owner sometimes clicks in them) fails harmlessly: no push, reset
+        // or delete ever reaches a real branch or remote.
         "rename" => Dialog::RenameBranch {
-            from: s("feature/ui/details"),
-            to: s("feature/ui/details"),
+            from: s(NO_SUCH_BRANCH),
+            to: s(NO_SUCH_BRANCH),
         },
         "delete-branch" => Dialog::DeleteBranch {
-            name: s("feature/ui/details"),
+            name: s(NO_SUCH_BRANCH),
             force: false,
-            remote: Some((s("origin"), s("feature/ui/details"))),
+            remote: Some((s(NO_SUCH_REMOTE), s(NO_SUCH_BRANCH))),
             delete_remote: false,
         },
         "push" => Dialog::Push {
-            branch: s("main"),
-            remotes: vec![s("origin"), s("upstream")],
+            branch: s(NO_SUCH_BRANCH),
+            remotes: vec![s(NO_SUCH_REMOTE), s("gitvis-test-other-remote")],
             remote: 0,
             set_upstream: true,
             force: true,
         },
         "reset" => Dialog::Reset {
             branch: s("main"),
-            target: s("HEAD~1"),
+            target: s("gitvis-test-no-such-commit"),
             target_label: s("3ba97ba Describe worker threads"),
             mode: ResetMode::Hard,
         },
@@ -1006,13 +1013,37 @@ mod tests {
 
     #[test]
     fn confirm_dialogs_from_scripts_run_nothing() {
+        use crate::state::Dialog;
         // `dialog confirm` must never be able to run a git operation.
-        let Some(Action::Dialog(crate::state::Dialog::Confirm { ops, .. })) =
-            test_dialog("confirm")
-        else {
+        let Some(Action::Dialog(Dialog::Confirm { ops, .. })) = test_dialog("confirm") else {
             panic!("not a confirmation");
         };
         assert!(ops.is_empty());
+        // The dialogs that change branches or remotes point at ones that
+        // do not exist, so a stray click on Confirm fails harmlessly.
+        let Some(Action::Dialog(Dialog::Push {
+            remotes, branch, ..
+        })) = test_dialog("push")
+        else {
+            panic!("not a push");
+        };
+        assert!(remotes.iter().all(|r| r.starts_with("gitvis-test")));
+        assert!(branch.starts_with("gitvis-test"));
+        let Some(Action::Dialog(Dialog::Reset { target, .. })) = test_dialog("reset") else {
+            panic!("not a reset");
+        };
+        assert!(target.starts_with("gitvis-test"));
+        let Some(Action::Dialog(Dialog::DeleteBranch { name, remote, .. })) =
+            test_dialog("delete-branch")
+        else {
+            panic!("not a delete");
+        };
+        assert!(name.starts_with("gitvis-test"));
+        assert!(remote.is_some_and(|(r, _)| r.starts_with("gitvis-test")));
+        let Some(Action::Dialog(Dialog::RenameBranch { from, .. })) = test_dialog("rename") else {
+            panic!("not a rename");
+        };
+        assert!(from.starts_with("gitvis-test"));
     }
 
     #[test]

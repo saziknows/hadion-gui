@@ -45,7 +45,6 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
         snapshot,
         selection,
         details,
-        details_loading,
         commit_message,
         amend,
         busy,
@@ -125,7 +124,6 @@ pub fn show(ui: &mut Ui, repo: &mut RepoState, settings: &Settings, actions: &mu
                     commit_panel(ui, &cx, commit, d, actions)
                 }
                 None => {
-                    let _ = details_loading;
                     header(ui, &commit.summary);
                     ui.add_space(8.0);
                     kit::loading(ui, "Loading details…");

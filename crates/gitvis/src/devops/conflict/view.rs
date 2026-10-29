@@ -637,6 +637,9 @@ fn file_list(ui: &mut Ui, st: &mut State, actions: &mut Vec<Action>) {
         );
         return;
     }
+    // Rows edge to edge: `show_rows` (inside `kit::list`) adds the
+    // caller's item spacing to the row pitch.
+    ui.spacing_mut().item_spacing.y = 0.0;
     kit::list(
         ui,
         "conflict_file_list",
