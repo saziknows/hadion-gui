@@ -7,7 +7,7 @@
 //! One test function: it changes the process environment, which the other
 //! test binaries do not share.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use hadion_core::devops::identity::config::{self, Snapshot};
@@ -63,6 +63,20 @@ fn repo(dir: &Path) {
     assert!(git(dir, &["config", "core.autocrlf", "false"]).0);
 }
 
+/// The temp folder by its real name. GitHub's Windows runners set TEMP to an
+/// 8.3 short path (`C:\Users\RUNNER~1\…`), and git for Windows sees the
+/// repository under the long name, so a `gitdir:` pattern built from the
+/// short one never matches.
+fn temp_root() -> PathBuf {
+    let t = std::env::temp_dir();
+    let real = t.canonicalize().unwrap_or(t);
+    // `canonicalize` gives a verbatim `\\?\C:\…` path on Windows.
+    match real.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        Some(s) if !s.starts_with("UNC") => PathBuf::from(s),
+        _ => real,
+    }
+}
+
 fn rules_now(dir: &Path, home: &Path) -> (Snapshot, Vec<includes::Rule>) {
     let mut cmds = Vec::new();
     let snap = config::load(dir, &mut cmds).unwrap();
@@ -77,7 +91,7 @@ fn identity_signing_and_config_edits_apply() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let root = std::env::temp_dir().join(format!("hadion-identity-{}-{nanos}", std::process::id()));
+    let root = temp_root().join(format!("hadion-identity-{}-{nanos}", std::process::id()));
     let home = root.join("home");
     std::fs::create_dir_all(&home).unwrap();
     let global = home.join(".gitconfig");
