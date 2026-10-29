@@ -30,9 +30,10 @@ The first public release.
   protection, CODEOWNERS, environments, secrets and variables.
 - **Tools**: tasks, a process console, interactive rebase, bisect, worktrees, file history,
   stashes, submodules, Git LFS, patches and hooks (including a pre-commit secret check).
-- **App**: command palette, terminal panel, AI assist through the Claude API, settings for git
-  config, identities, keys and signing, safe mode, desktop notifications, repository groups,
-  issue-tracker links, in-app updates and crash reports.
+- **App**: command palette, terminal panel, AI assist through your own Claude Code CLI (your
+  Claude plan) or the Claude API, settings for git config, identities, keys and signing, safe
+  mode, desktop notifications, repository groups, issue-tracker links, in-app updates and crash
+  reports. Icons from the Lucide set; every page fits windows down to 900 × 560.
 
 [Unreleased]: https://github.com/saziknows/hadion-gui/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/saziknows/hadion-gui/releases/tag/v0.1.0

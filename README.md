@@ -487,9 +487,9 @@ the multi-selection panel, or the palette's `>compare`)
   onto the window.
 - API keys and tokens live in the OS keychain (service `gitvis`), never in settings files or
   logs.
-- Inter and JetBrains Mono (both SIL Open Font Licence, bundled in
-  `crates/gitvis/assets/fonts` with their licences), dark and light themes, relative or
-  absolute dates.
+- Inter and JetBrains Mono (both SIL Open Font Licence) and Lucide icons (ISC), bundled in
+  `crates/gitvis/assets/fonts` with their licences; dark and light themes; relative or
+  absolute dates. Every page fits windows down to 900 × 560.
 - Settings and per-repository preferences persist between runs.
 
 ## Keyboard
