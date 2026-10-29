@@ -1066,12 +1066,22 @@ fn github_section(
                         .wrap(),
                     );
                 }
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 12.0;
-                    if kit::link(ui, "Try again").clicked() {
+                // Whole links that move to the next line in a narrow pane
+                // (a wrapping link broke "Copy the error" over three lines).
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(12.0, 2.0);
+                    let link = |ui: &mut Ui, text: &str| {
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(text).color(p.accent))
+                                .sense(Sense::click())
+                                .wrap_mode(egui::TextWrapMode::Extend),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    };
+                    if link(ui, "Try again").clicked() {
                         actions.push(Action::RefreshGitHub);
                     }
-                    if kit::link(ui, "Copy the error").clicked() {
+                    if link(ui, "Copy the error").clicked() {
                         actions.push(Action::Copy(err.to_owned()));
                     }
                 });
