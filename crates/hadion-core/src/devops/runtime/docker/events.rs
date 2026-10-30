@@ -62,6 +62,7 @@ impl Event {
             "destroy" => format!("{n} was removed"),
             "create" => format!("{n} was created"),
             "rename" => format!("{n} was renamed"),
+            "update" => format!("{n} had its settings changed"),
             other => format!("{n}: {other}"),
         }
     }

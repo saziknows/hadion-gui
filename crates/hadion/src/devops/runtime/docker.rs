@@ -1283,7 +1283,9 @@ fn compose_write(
     );
 }
 
-fn head_info(repo: &RepoState) -> Option<(String, String, Option<String>, bool)> {
+/// HEAD's full and short id, the newest tag at HEAD, and whether the
+/// working tree has changes: what a build's labels say.
+pub(super) fn head_info(repo: &RepoState) -> Option<(String, String, Option<String>, bool)> {
     let s = repo.snapshot.as_ref()?;
     let head = s.head.target()?;
     let full = head.to_string();
@@ -1430,7 +1432,11 @@ fn build(cx: &mut Ctx, repo: &mut RepoState) {
             created: hadion_core::devops::ci::rfc3339(now_secs()),
         }),
     };
-    let scan = form.scan.then(|| form.scanners.first().copied()).flatten();
+    // A scanner looks for the image on this machine's engine: not after a
+    // build on a remote one.
+    let scan = (form.scan && !st.remote())
+        .then(|| form.scanners.first().copied())
+        .flatten();
     let run = Act::BuildRun {
         context: context.clone(),
         plan: plan.clone(),

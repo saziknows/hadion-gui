@@ -159,7 +159,7 @@ fn images(w: &World) -> Vec<Img> {
         ),
         (
             "org.opencontainers.image.created".to_owned(),
-            rfc3339(now() - 3600),
+            rfc3339(now() - 4 * 3600),
         ),
     ]);
     vec![
@@ -169,7 +169,7 @@ fn images(w: &World) -> Vec<Img> {
             digests: vec![],
             labels: web_labels,
             size: 48_300_000,
-            age: 3600,
+            age: 4 * 3600,
         },
         Img {
             id: format!("sha256:{}", id_of("img-worker")),
@@ -185,7 +185,7 @@ fn images(w: &World) -> Vec<Img> {
             digests: vec![],
             labels: compose_labels("migrate"),
             size: 38_000_000,
-            age: 7200,
+            age: 3 * 3600,
         },
         Img {
             id: format!("sha256:{}", id_of("img-postgres")),
@@ -472,7 +472,7 @@ fn containers(w: &World) -> Vec<Ctr> {
             exit: 0,
             health: None,
             project: None,
-            ports: vec![],
+            ports: vec![(5432, 5434)],
             labels: vec![],
             env: vec!["POSTGRES_PASSWORD"],
             restarts: 0,
@@ -516,7 +516,19 @@ fn labels_of(c: &Ctr, images: &[Img]) -> serde_json::Map<String, Value> {
 fn inspect_json(c: &Ctr, images: &[Img]) -> Value {
     let t = now();
     let running = matches!(c.state, "running" | "paused" | "restarting");
+    // As docker writes them: the configuration names one binding on every
+    // interface, the running container reports it for IPv4 and IPv6.
     let bindings: serde_json::Map<String, Value> = c
+        .ports
+        .iter()
+        .map(|(cp, hp)| {
+            (
+                format!("{cp}/tcp"),
+                json!([{"HostIp": "", "HostPort": hp.to_string()}]),
+            )
+        })
+        .collect();
+    let bound: serde_json::Map<String, Value> = c
         .ports
         .iter()
         .map(|(cp, hp)| {
@@ -565,7 +577,7 @@ fn inspect_json(c: &Ctr, images: &[Img]) -> Value {
     };
     let image_ref = c.image.clone();
     let live_ports: serde_json::Map<String, Value> = if running && c.state != "restarting" {
-        bindings.clone()
+        bound
     } else {
         serde_json::Map::new()
     };

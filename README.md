@@ -221,6 +221,19 @@ every crate compiled into Hadion; `scripts/package.ps1` puts them in
 - **Packages**: container images on GitHub Packages with their tags matched to commits,
   tags, branches and pull requests, `docker pull` lines, delete a version (needs the
   `read:packages` / `delete:packages` scopes; the page shows the `gh auth refresh` command).
+- **Containers** through `docker` (any context, never switched): the compose projects and
+  containers of this repository (found by their working directory, compose files, image
+  source or revision label), its compose files not started yet, and on request every other
+  container of that Docker. Live while the tab is shown (`docker events`), with state, health
+  and the last probes, exit codes explained, ports as links, mounts, environment variable
+  names (never their values), live CPU / memory / I/O, and which commit each container runs
+  (revision label, image tag or digest, with its distance to the default branch). Logs and
+  compose output in the console, a shell in a terminal tab, start / stop / restart / pause,
+  compose up / down / pull / build, and builds that label the image with the commit, the
+  remote and the time (optionally scanned with Trivy or Grype). Kill, remove, compose down
+  and every change on a remote Docker ask first with the exact command; safe mode refuses
+  changes on remote Docker endpoints. Errors come with the fix (engine not running,
+  permissions, unknown context, missing Compose plugin, unreachable host).
 - **Kubernetes** through `kubectl` (any context, never switched): workloads with rollout
   state and the commit each image runs, pods with restarts and last termination, events,
   rollout history, streamed logs; restart, undo and scale after a confirmation.
@@ -346,8 +359,10 @@ the multi-selection panel, or the palette's `>compare`)
 - **Appearance** and **Behaviour**.
 - **Safety**: **safe mode** refuses every change outside this machine before it starts:
   `git push`, GitHub / GitLab / Azure writes and GraphQL mutations, `gh` subcommands that
-  write, LFS locks, kubectl / helm / terraform / docker push. Reads and local git changes
-  stay possible; task scripts and commands typed in the terminal are not covered.
+  write, LFS locks, kubectl / helm / terraform / docker push, and docker commands that change
+  containers, images or compose projects on a remote Docker endpoint (`ssh://`, `tcp://`).
+  Reads, local containers and local git changes stay possible; task scripts and commands
+  typed in the terminal are not covered.
 - **Git config**: the common settings with explanations, git's default, a recommended value
   and warnings; every entry with scope, file and line and what overrides it; the files git
   read. Edit or unset in global or local scope with the exact `git config` command.
@@ -517,7 +532,7 @@ the multi-selection panel, or the palette's `>compare`)
 | `Ctrl+Shift+H` | Home: open repositories and the GitHub inbox |
 | `Ctrl+Shift+R` | Review page (pull requests, issues) |
 | `Ctrl+Shift+G` | Actions page (runs, workflows, artifacts, caches, validation, local runs); `Esc` returns to the graph |
-| `Ctrl+Shift+D` | Ship page (releases, environments, DORA, packages, Kubernetes, Terraform) |
+| `Ctrl+Shift+D` | Ship page (releases, environments, DORA, packages, containers, Kubernetes, Terraform) |
 | `Ctrl+Shift+A` | Govern page (alerts, SBOM, images, protection, CODEOWNERS, secrets) |
 | `Ctrl+Shift+T` | Tools page (tasks, console, interactive rebase, bisect, file history, worktrees) |
 | `Ctrl+Shift+S` | Exposure page (secrets, sensitive files, configuration); `Esc` returns to the graph |

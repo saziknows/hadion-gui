@@ -111,15 +111,21 @@ fn looks_secret(name: &str) -> bool {
 }
 
 /// Mask the values of secret-looking `--flag=value` / `NAME=value` words and
-/// of the word after a secret-looking flag (`--password hunter2`), then run
-/// the exposure rules over the result.
-pub fn mask_command(words: &[String]) -> String {
+/// of the word after a secret-looking flag (`--password hunter2`); a word
+/// with spaces (`sh -c "export DB_PASSWORD=x && run"`) is masked word by
+/// word inside.
+pub fn mask_words(words: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::with_capacity(words.len());
     let mut hide_next = false;
     for w in words {
         if hide_next {
             out.push("•••".into());
             hide_next = false;
+            continue;
+        }
+        if w.contains(char::is_whitespace) {
+            let inner: Vec<String> = w.split(' ').map(str::to_owned).collect();
+            out.push(mask_words(&inner).join(" "));
             continue;
         }
         if let Some((k, _)) = w.split_once('=')
@@ -131,9 +137,15 @@ pub fn mask_command(words: &[String]) -> String {
         if w.starts_with('-') && w.len() > 2 && looks_secret(w.trim_start_matches('-')) {
             hide_next = true;
         }
-        out.push(quote(w));
+        out.push(w.clone());
     }
-    redact(&out.join(" "))
+    out
+}
+
+/// [`mask_words`] as one command line, then the exposure rules.
+pub fn mask_command(words: &[String]) -> String {
+    let masked: Vec<String> = mask_words(words).iter().map(|w| quote(w)).collect();
+    redact(&masked.join(" "))
 }
 
 /// The exposure rules over free text (probe output, labels).
@@ -926,7 +938,8 @@ fn container_from_raw(r: RawInspect) -> Container {
             return None;
         }
         let test = if kind == "CMD-SHELL" {
-            redact(&rest.join(" "))
+            // One shell string: masked word by word, not quoted.
+            redact(&mask_words(rest).join(" "))
         } else {
             mask_command(rest)
         };
@@ -1043,8 +1056,10 @@ pub fn merge_status(containers: &mut [Container], ps: &[PsRow]) {
 }
 
 /// `docker inspect` JSON with every environment value replaced by `•••`
-/// (keys named `Env`, anywhere), pretty-printed, then run through the
-/// exposure rules: for the "Inspect" view.
+/// (keys named `Env`, anywhere) and secret-looking words of command lines
+/// masked (`Args`, `Cmd`, `Entrypoint`, a health check's `Test`; see
+/// [`mask_words`]), pretty-printed, then run through the exposure rules:
+/// for the "Inspect" view.
 pub fn mask_inspect(bytes: &[u8]) -> Result<String, String> {
     let mut v: Value =
         serde_json::from_slice(bytes).map_err(|e| format!("docker inspect: not JSON ({e})"))?;
@@ -1061,6 +1076,17 @@ pub fn mask_inspect(bytes: &[u8]) -> Result<String, String> {
                                 *it = Value::String(format!("{name}=•••"));
                             }
                         }
+                        continue;
+                    }
+                    if matches!(k.as_str(), "Args" | "Cmd" | "Entrypoint" | "Test")
+                        && let Value::Array(items) = x
+                        && items.iter().all(Value::is_string)
+                    {
+                        let words: Vec<String> = items
+                            .iter()
+                            .filter_map(|i| i.as_str().map(str::to_owned))
+                            .collect();
+                        *items = mask_words(&words).into_iter().map(Value::String).collect();
                         continue;
                     }
                     walk(x);
@@ -1408,6 +1434,9 @@ mod tests {
         let m = mask_inspect(INSPECT.as_bytes()).unwrap();
         assert!(!m.contains("example-only-value"));
         assert!(m.contains("POSTGRES_PASSWORD=•••"));
+        // A password on the command line is masked too.
+        assert!(!m.contains("hunter2"), "{m}");
+        assert!(m.contains("--password=•••"));
         assert!(mask_inspect(b"{").is_err());
     }
 
@@ -1425,6 +1454,19 @@ mod tests {
         assert_eq!(
             mask_command(&w(&["sh", "-c", "echo hi"])),
             "sh -c \"echo hi\""
+        );
+        // Inside a shell string, word by word.
+        assert_eq!(
+            mask_words(&w(&[
+                "sh",
+                "-c",
+                "export DB_PASSWORD=x && run --token t1 --port 80"
+            ])),
+            w(&[
+                "sh",
+                "-c",
+                "export DB_PASSWORD=••• && run --token ••• --port 80"
+            ])
         );
     }
 

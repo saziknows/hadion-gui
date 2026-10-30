@@ -111,7 +111,7 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
 | `home` (global state in `Hadion.home`) | Home (`Page::Home`) | inbox, dashboard rows |
 | `review` | Review (`Page::Review`) | PRs, reviews, threads, issues |
 | `ci` | Actions tabs beside Runs (`ci::Tab`; Runs is `views/github.rs`) | dispatch, artifacts, caches, history, compare, lint, act |
-| `ship`, `runtime` | Ship (`devops/pages.rs` owns the nav, `ShipTab`) | releases, deployments, DORA / GHCR, kubectl, terraform |
+| `ship`, `runtime` | Ship (`devops/pages.rs` owns the nav, `ShipTab`, `ShipTab::ALL` for the palette) | releases, deployments, DORA / GHCR, docker, kubectl, terraform |
 | `govern` | Govern (`Page::Govern`) | alerts, SBOM, images, protection, CODEOWNERS, envs, secrets |
 | `workbench` | Tools (`Page::Workbench`) | tasks, interactive rebase, bisect, worktrees, file history |
 | `forge` | Review / Actions when `RepoState::forge_remote` is GitLab / Azure | `glab api`, `az` |
@@ -212,6 +212,56 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
     `logs -f`, which Stop ends), `terraform` (plan / drift use `-detailed-exitcode`, so their
     `ProcSpec::ok_codes(&[2])` makes the console show exit 2 as passed), `matching` (image tag →
     commit / tag / branch / PR), `fixtures/`.
+  - `runtime` Containers tab (Ship → Running → Containers): core `runtime/docker/` (`commands`
+    builders, `model`, `compose` (`compose config`, the repository's compose files through the
+    workbench's `COMPOSE_FILES` list, and Dockerfiles), `scope`, `revision`, `triage`, `events`,
+    `endpoint`), app `runtime/docker.rs` (state, acts, `frame`, `rows`, writes, build form, rail
+    badge) and `docker_view.rs`. Rules: every docker command starts with `--context NAME` (the one
+    exception is `context ls`, which must run without it to report the current context); Hadion
+    never runs `context use/create/rm`. Environment variables (inspect `Config.Env`, `compose config`
+    `environment` and build `args`) are reduced to their NAMES while decoding, so no value reaches a
+    model, the log or the screen; `compose config` resolves `.env` (secrets), its raw output is never
+    kept; Inspect shows `inspect` with every `Env` value replaced by `•••` and the values of
+    secret-looking flags and `NAME=value` words in `Args` / `Cmd` / `Entrypoint` / healthcheck `Test`
+    masked (`model::mask_words`; a command line can carry `--password=…`), then the exposure rules.
+    Scope: a compose project is the repository's when its `working_dir` label or a config file is
+    inside the work dir (`scope::real_key` canonicalises, so 8.3 short names and `\\?\` compare
+    equal; the keys are computed off the UI thread); a standalone container when its image's
+    `org.opencontainers.image.source` names a remote or its revision label a loaded commit.
+    Live updates: `events::follow` runs `docker events` (filtered to state, die, health… events;
+    health probes' `exec_*` events come every few seconds and are ignored) inside a `Ctx::read` task,
+    with a second thread as a watchdog. The view beats `Follow::beat` every frame and asks for a
+    redraw every 1.5 s while live; five seconds without a beat (another page or repository tab, a
+    minimised window) and the watchdog kills it; `pages::set_tab` / `devops::page_shown` stop it at
+    once, and `Stream`'s `Drop` kills the process tree on the spot (repository tab closed, app exit).
+    Events only mark the listing dirty; `frame` re-lists after 0.5 s of quiet (2 s at most). If docker
+    ends the stream, the tab polls every 10 s and says so in the header. Writes: start / stop /
+    restart / pause / unpause, compose up / start / stop / restart / pull / build, logs and builds
+    run in the console; kill, remove, compose down (and every write on a remote context, saying
+    "remote") go through `explain::confirm` with the exact command. Shell opens
+    `terminal::Act::Exec` (`docker exec -it ID sh -c "bash, else sh"`), checked against safe mode
+    first because the terminal is not covered by it. Builds label the image with
+    `org.opencontainers.image.revision` (HEAD), `.source` (https remote without credentials),
+    `.created`, `.version` (a tag at HEAD) and `hadion.dirty=true`; for a compose service the tag is
+    compose's own image name (`image:` or `<project>-<service>`), so the next Up runs it. Safe mode
+    (`safety::docker_write`): pushes always count; other mutating commands count when the endpoint
+    is `tcp://`, `ssh://` or `http(s)://` (`-H`, else `--context` through
+    `<DOCKER_CONFIG|~/.docker>/contexts/meta/<sha256 of the name>/meta.json`, else `DOCKER_HOST`,
+    `DOCKER_CONTEXT`, `currentContext`; a context whose meta file cannot be read counts as remote).
+    Learnt the hard way: `docker version` prints the client JSON with `"Server": null` and exits 1
+    when the engine is down; a stopped container keeps reporting health `starting`
+    (`Container::health_status` says `None` unless it is up); `ps`'s `Labels` is one comma-joined
+    string while `config_files` itself contains commas (so labels come from `inspect`); `compose
+    config --format json` is one pretty-printed object, not NDJSON (`model::json_rows` takes both);
+    `inspect` of an id that vanished prints the others and exits 1. Test double:
+    `cargo build -p hadion-core --example fake_docker`, then `HADION_DOCKER=<exe>` with
+    `FAKE_DOCKER_SCENARIO=normal|down|empty|remote|no-compose`, `FAKE_DOCKER_REPO=<the opened
+    repository's path>` (its compose projects' working dir), `FAKE_DOCKER_REVISION=<a commit of it>`,
+    `FAKE_DOCKER_SOURCE=<a remote URL>`, `FAKE_DOCKER_EVENTS=end` (the stream fails: polling),
+    `FAKE_DOCKER_LOG`; `--test runtime_docker` drives the loaders, scope, the events watchdog, a write
+    and safe mode against it. The owner's Docker Desktop is read-only for tests: only `version`,
+    `context ls`, `ps`, `inspect`, `image inspect`, `compose ls`, `compose config`, `stats`, `events`,
+    `logs`.
   - `govern`: core `alerts`, `sbom` (CycloneDX 1.5 / SPDX 2.3 from `osint::parse_manifest`),
     `docker` (Dockerfile parser + lint, scanner JSON), `protection` (the PUT always sends the four
     required keys), `codeowners` (GitHub semantics: last match wins, `docs/*` is not recursive),
@@ -280,7 +330,8 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
     `.old`, move `.new` in, relaunch, roll back; refuses exes inside a Cargo target folder: never
     run it on `target/debug` or `target/release`), `crash` (panic hook, redacted reports), `issue`,
     `paths`; `scripts/package.ps1`, `packaging/windows/hadion.iss`, `.github/workflows/{ci,release}.yml`.
-- Test doubles: `HADION_GH` (any area), `HADION_KUBECTL`, `HADION_TERRAFORM` replace the executables.
+- Test doubles: `HADION_GH` (any area), `HADION_DOCKER` (`fake_docker`, see `runtime` above),
+  `HADION_KUBECTL`, `HADION_TERRAFORM` replace the executables.
   `cargo build -p hadion-core --example gh_guard`, then `HADION_GH=target/debug/examples/gh_guard.exe`
   passes reads to the real gh and blocks every write (non-GET, GraphQL mutations, other subcommands),
   logging to `GH_GUARD_LOG`; `GH_GUARD_FAIL=msg` forces error states. Use it for every UI session
@@ -298,9 +349,14 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   `pr-lines A B`, `pr-comment TEXT`, `pr-review approve|changes|comment TEXT`, `pr-submit` /
   `pr-merge` / `create-pr` (stop at the confirmation); ci `actions-tab runs|workflows|artifacts|
   caches|validate|local`, `workflow N`, `dispatch N`, `select-runs N`, `compare`, `analyse-jobs`;
-  ship `ship releases|envs|where|dora|packages|k8s|terraform`, `release N`, `new-release`, `where
-  SHA|head`, `env N`, `dora-source …`, `dora-period N`; runtime `k8s-context NAME`, `workload N`,
-  `pod-logs N`, `tf-root N`, `tf-validate`, `pkg N`; govern `gov-tab dependabot|code-scanning|sbom|
+  ship `ship releases|envs|where|dora|packages|containers|k8s|terraform`, `release N`, `new-release`, `where
+  SHA|head`, `env N`, `dora-source …`, `dora-period N`, `ship-scroll Y`; runtime `k8s-context NAME`, `workload N`,
+  `pod-logs N`, `tf-root N`, `tf-validate`, `pkg N`, and for Containers `docker-context NAME`,
+  `docker-all on|off`, `container N` (N-th container row), `compose N` (N-th project or compose
+  file row), `docker-refresh`, `docker-relist`, `docker-ask start|stop|restart|pause|unpause|kill|rm|
+  down|down-volumes|up|up-build|build` (on the selection), `docker-logs`, `docker-shell`,
+  `docker-inspect`, `docker-build-form`, `docker-build`, `docker-build-close`, `docker-overview`,
+  `docker-filter TEXT`, `docker-hide-console`; govern `gov-tab dependabot|code-scanning|sbom|
   images|protection|codeowners|environments|secrets|variables`, `gov-item N`, `codeowners-test PATH`,
   `secret-form`; tools `tools-tab tasks|console|rebase|bisect|history|worktrees`, `select-task N`,
   `rebase BASE`, `bisect`, `history PATH`, `worktree N`; home `home`, `home-tab …`, `inbox-item N`,
@@ -320,14 +376,16 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   TEXT`, `palette-down|up N`, `palette-run`, `palette-actions`, `palette-close`; identity
   `config-tab …`, `config-edit KEY VALUE [scope]`, `identity-form …`, `check-path PATH`,
   `ssh-test`, `signing-form ssh|gpg`, `upload-key N`, `gh-switch …`; terminal `term-new SHELL`,
-  `term-type TEXT`, `term-press KEYS`, `term-scroll N`, `term-select …`, `term-restart`,
+  `term-exec PROGRAM ARGS…` (a tab running a program), `term-type TEXT`, `term-press KEYS`, `term-scroll N`, `term-select …`, `term-restart`,
   `term-close`; automation `notify-on|off|test|poll|list`, `groups`, `group-new NAME`, `group-add
   NAME PATH`, `group-fetch|pull NAME`, `links-test TEXT`, `links-jira BASE [K,K]`, `release-prep
   VERSION`; packaging `update-check`, `update-download`, `update-confirm-restart`, `crash-open N`,
   `crash-report N`. Commands that would write stop at the confirmation dialog, except
   `rebase-run-now`, `bisect-run-now CMD`, `task N`, `fetch-all-in DIR`, `conflict-resolve`,
-  `conflict-choice-now X`, `group-run-now NAME …`, `release-commit-now VERSION` and
-  `update-restart` (test mode only), which act for real and are for scratch repositories only.
+  `conflict-choice-now X`, `group-run-now NAME …`, `release-commit-now VERSION`,
+  `update-restart` (test mode only), and on a local docker context `docker-ask
+  start|stop|restart|pause|unpause|up|up-build|build`, `docker-build` and `docker-shell`, which act
+  for real and are for scratch repositories (or the `fake_docker` double) only.
 
 ## egui 0.37 gotchas (verified against the crate source)
 
@@ -342,6 +400,9 @@ one core module (no UI) + one app module; `app.rs` only routes (`Action::DevOps`
   explicitly inside right-aligned toolbars.
 - GitHub data comes from `gh api` (the user's `gh auth`); syntect's bundled grammars lack
   TypeScript/Swift/Kotlin, so `highlight.rs` falls back to JS/C/Java and hides the language label.
+- A `ui.horizontal(..)` nested in `horizontal_wrapped` cannot wrap as a unit (its size is only
+  known after it is laid out), so a row of them runs off the pane: make each unit one widget, e.g.
+  a `Label` of a `LayoutJob` with `.extend()` (`docker_view::stat_tiles`).
 - Never put `Label::truncate()` cells in an `egui::Grid`: a column is as wide as its widest cell and a
   truncating label is happy with any width, so the column collapses ("2026-1…"). Use
   `wrap_mode(TextWrapMode::Extend)` for grid values.

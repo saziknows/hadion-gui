@@ -54,7 +54,8 @@ impl Evidence {
 /// `sha256:0123456789ab…` → `sha256:0123456789ab`.
 pub fn short_digest(d: &str) -> String {
     let (algo, hex) = d.split_once(':').unwrap_or(("", d));
-    let hex = &hex[..hex.len().min(12)];
+    // Characters, not bytes: labels and tags are free text.
+    let hex: String = hex.chars().take(12).collect();
     if algo.is_empty() {
         hex.to_owned()
     } else {

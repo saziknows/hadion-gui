@@ -47,22 +47,8 @@ pub struct DockerCx {
 
 impl DockerCx {
     pub fn of(repo: &RepoState, settings: &Settings) -> Self {
-        let head = repo.snapshot.as_ref().and_then(|s| {
-            let h = s.head.target()?;
-            let full = h.to_string();
-            let tag = s
-                .tags
-                .iter()
-                .filter(|t| t.target == h)
-                .map(|t| t.name.clone())
-                .next();
-            Some((
-                full.clone(),
-                full[..7].to_owned(),
-                tag,
-                !s.status.is_clean(),
-            ))
-        });
+        // The same HEAD facts the build itself labels the image with.
+        let head = docker::head_info(repo);
         Self {
             remotes: repo
                 .snapshot
@@ -171,6 +157,26 @@ fn first_port(c: &Container) -> Option<String> {
             String::new()
         }
     ))
+}
+
+/// The first port of a service without a container, in `first_port`'s
+/// form (`8081 → 80 +1`; only a protocol other than TCP is named).
+fn service_port(ports: &[compose::ServicePort]) -> String {
+    let Some(p) = ports.first() else {
+        return String::new();
+    };
+    let target = match p.protocol.as_str() {
+        "" | "tcp" => p.target.to_string(),
+        proto => format!("{}/{proto}", p.target),
+    };
+    let first = match &p.published {
+        Some(h) => format!("{h} → {target}"),
+        None => target,
+    };
+    match ports.len() {
+        1 => first,
+        n => format!("{first} +{}", n - 1),
+    }
 }
 
 fn status_text(c: &Container) -> String {
@@ -954,9 +960,9 @@ fn last_event_line(ui: &mut Ui, st: &State) {
     let now = Instant::now();
     let text = match (&st.live.mode, st.live.last_event()) {
         (LiveMode::Live, Some((e, at))) => format!(
-            "Live: the last change, {} ago, was {}.",
-            format::millis(now.duration_since(at).as_millis() as u64),
-            e.text()
+            "Live: {} {} ago.",
+            e.text(),
+            format::millis(now.duration_since(at).as_millis() as u64)
         ),
         (LiveMode::Live, None) => "Live: no container has changed since the tab opened.".into(),
         (LiveMode::Polling(why), _) => format!("Polling every 10 s: {why}."),
@@ -1480,13 +1486,7 @@ fn services_table(
             (Some(c), _) if c.ports.iter().any(|p| p.published()) => {
                 Cell::Mono(first_port(c).unwrap_or_default())
             }
-            (_, Some(s)) if !s.ports.is_empty() => Cell::Mono(
-                s.ports
-                    .iter()
-                    .map(|p| p.text())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            ),
+            (_, Some(s)) if !s.ports.is_empty() => Cell::Mono(service_port(&s.ports)),
             _ => Cell::Muted("–".into()),
         };
         let commit = match first {
@@ -1991,7 +1991,12 @@ fn container_detail(
                 }
             });
         }
-        if c.ports.iter().any(|p| p.url(&host).is_some()) {
+        if !c.state.up() {
+            common::note(
+                ui,
+                "The ports the container asks for; docker binds them while it runs.",
+            );
+        } else if c.state.running() && c.ports.iter().any(|p| p.url(&host).is_some()) {
             common::note(ui, "Links open in your browser, only when clicked.");
         }
     }
@@ -2129,7 +2134,7 @@ fn container_detail(
         Some((id, Some(Ok(json)))) if id == &c.id => {
             common::note(
                 ui,
-                "docker inspect with every environment value replaced by •••, then the exposure rules.",
+                "docker inspect with every environment value and every secret-looking value on the command line replaced by •••, then the exposure rules.",
             );
             kit::code_block(ui, json, actions);
             if IconButton::new(Icon::Close, "Hide")
@@ -2668,7 +2673,12 @@ fn build_card(ui: &mut Ui, d: &DockerCx, st: &State, console: &Console, actions:
                 kit::code_block(ui, &labels.join("\n"), actions);
             },
         );
-        if f.scanners.is_empty() {
+        if st.remote() {
+            common::note(
+                ui,
+                "No scan after a build on a remote Docker: the scanners look for the image on this machine.",
+            );
+        } else if f.scanners.is_empty() {
             common::note(
                 ui,
                 "Install Trivy or Grype to scan the image after the build.",
