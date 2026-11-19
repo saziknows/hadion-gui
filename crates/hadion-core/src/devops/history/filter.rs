@@ -172,13 +172,9 @@ impl Local {
         {
             return false;
         }
-        if !self.author.is_empty()
-            && !c.author.to_lowercase().contains(&self.author)
-            && !c.email.to_lowercase().contains(&self.author)
-        {
-            return false;
-        }
-        true
+        self.author.is_empty()
+            || c.author.to_lowercase().contains(&self.author)
+            || c.email.to_lowercase().contains(&self.author)
     }
 
     pub fn is_empty(&self) -> bool {
