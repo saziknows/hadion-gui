@@ -6,6 +6,22 @@ All notable changes to Hadion are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Ship › Containers**: the compose projects and containers of the open repository on any
+  docker context (never switched), live through `docker events` while the tab is shown
+  (polling every 10 s if the stream ends): state, health with the last probes, exit codes
+  explained, ports, mounts, environment variable names only, live stats, and which commit
+  each container runs. Logs in the console, a shell in a terminal tab, start / stop /
+  restart / pause, compose up / down / pull / build, and builds labelled with the commit,
+  remote and time (optionally scanned with Trivy or Grype). Kill, remove, compose down and
+  every change on a remote Docker ask first with the exact command.
+- Safe mode also refuses docker commands that change containers, images or compose
+  projects on a remote endpoint (`ssh://`, `tcp://`, `http(s)://`).
+- The terminal can open a tab running a program instead of a shell (`term-exec` in
+  scripts).
+- `fake_docker` example: a docker test double for `HADION_DOCKER`.
+
 ## [0.1.1] - 2026-10-30
 
 The first release with downloads; 0.1.0 below lists what Hadion does.

@@ -141,6 +141,9 @@ fn strip(ui: &mut Ui, st: &mut State, v: &GlobalView, actions: &mut Vec<Action>)
             Status::Running { .. } => {
                 let alt = tab.view.as_ref().is_some_and(|(_, v)| v.alt_screen);
                 let tip = match repo {
+                    // A program tab (`docker exec`): a `cd` would be typed
+                    // into the program, not into a shell of this machine.
+                    _ if tab.program => String::new(),
                     Some(r) if alt => format!(
                         "A full-screen program is running; quit it to change to {}",
                         native_path(&r.workdir)
@@ -156,12 +159,13 @@ fn strip(ui: &mut Ui, st: &mut State, v: &GlobalView, actions: &mut Vec<Action>)
                     None => "No repository is open".to_owned(),
                 };
                 let enabled = repo.is_some() && !alt;
-                if IconButton::new(Icon::Folder, "Go to repository")
-                    .compact()
-                    .enabled(enabled)
-                    .show(ui)
-                    .on_hover_text(tip)
-                    .clicked()
+                if !tab.program
+                    && IconButton::new(Icon::Folder, "Go to repository")
+                        .compact()
+                        .enabled(enabled)
+                        .show(ui)
+                        .on_hover_text(tip)
+                        .clicked()
                 {
                     picked = Some(Act::CdRepo);
                 }

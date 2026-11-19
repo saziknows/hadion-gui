@@ -936,15 +936,7 @@ type PageRow = (
     bool,
 );
 
-const SHIP_TABS: [ShipTab; 7] = [
-    ShipTab::Releases,
-    ShipTab::Environments,
-    ShipTab::WhereIsMyCommit,
-    ShipTab::Dora,
-    ShipTab::Packages,
-    ShipTab::Kubernetes,
-    ShipTab::Terraform,
-];
+const SHIP_TABS: [ShipTab; 8] = ShipTab::ALL;
 
 const TOOLS_TABS: [workbench::Tab; 11] = [
     workbench::Tab::Tasks,

@@ -320,6 +320,15 @@ pub fn python(
     Ok(out)
 }
 
+/// The compose file names looked for in each directory, in order (also the
+/// Ship page's Containers tab's list of the repository's compose files).
+pub const COMPOSE_FILES: [&str; 4] = [
+    "compose.yaml",
+    "compose.yml",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+];
+
 /// docker compose: up (detached), down, build, ps and the recent logs.
 pub fn compose(dir: &str, file_name: &str, text: &str) -> Result<Vec<Task>, String> {
     let v: serde_yaml::Value =
@@ -422,12 +431,8 @@ pub(crate) fn scan(root: &Path, info: &DirInfo, found: &mut Found) {
             Err(e) => found.problem(&info.rel_file("pyproject.toml"), e),
         }
     }
-    if let Some(name) = info.first(&[
-        "compose.yaml",
-        "compose.yml",
-        "docker-compose.yml",
-        "docker-compose.yaml",
-    ]) && let Some(text) = found.read(root, &info.rel_file(&name))
+    if let Some(name) = info.first(&COMPOSE_FILES)
+        && let Some(text) = found.read(root, &info.rel_file(&name))
     {
         match compose(&info.rel, &name, &text) {
             Ok(t) => found.add(t),

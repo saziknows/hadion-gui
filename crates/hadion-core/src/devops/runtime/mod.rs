@@ -1,22 +1,29 @@
 //! What is running: container packages on GHCR mapped to commits and tags,
-//! Kubernetes through `kubectl` (contexts, namespaces, deployments with
-//! images matched to commits / branches / tags, rollout status, pods, logs,
-//! rollout restart and undo) and Terraform / OpenTofu (roots in the
-//! repository, which roots a change touches, `validate`, `fmt -check`,
-//! `plan` with a parsed summary, drift through `plan -refresh-only`).
+//! the repository's Docker containers and compose projects (live state,
+//! health, logs, which commit each runs), Kubernetes through `kubectl`
+//! (contexts, namespaces, deployments with images matched to commits /
+//! branches / tags, rollout status, pods, logs, rollout restart and undo)
+//! and Terraform / OpenTofu (roots in the repository, which roots a change
+//! touches, `validate`, `fmt -check`, `plan` with a parsed summary, drift
+//! through `plan -refresh-only`).
 //!
 //! - [`matching`]: image tags, OCI revision labels and digests → commits,
 //!   git tags and branch tips, and how far a commit is behind a branch.
 //! - [`packages`]: GitHub Container Registry requests and models.
+//! - [`docker`]: `docker` / `docker compose` argument builders (always
+//!   `--context`), models that keep environment variable names only,
+//!   repository scope, revision matching, error triage, `docker events`.
 //! - [`kube`]: `kubectl` argument builders (always `--context` and
 //!   `--request-timeout`), JSON models, rollout state, error triage.
 //! - [`terraform`]: root detection, loose HCL facts, command lines and
 //!   parsers for `validate -json`, plan text, `show -json` and drift.
 //!
 //! Nothing here writes on its own: writes (deleting a package version,
-//! `rollout restart` / `undo`, `scale`) are pure builders the app runs after
-//! a confirmation.
+//! container and compose actions, image builds, `rollout restart` / `undo`,
+//! `scale`) are pure builders the app runs in the console or after a
+//! confirmation.
 
+pub mod docker;
 pub mod kube;
 pub mod matching;
 pub mod packages;

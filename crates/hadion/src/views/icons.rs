@@ -109,6 +109,14 @@ pub enum Icon {
     Activity,
     /// Sparkles: an AI action (Claude).
     Sparkles,
+    /// A shipping container: Docker containers.
+    Container,
+    /// Pause bars in a circle: pause a container.
+    Pause,
+    /// A hammer: build an image.
+    Hammer,
+    /// A scroll of text: logs.
+    Logs,
 }
 
 /// The Lucide icon font's family (`theme::install_fonts` registers it).
@@ -185,6 +193,10 @@ impl Icon {
             Icon::Wrench => 0xe1b1,      // wrench
             Icon::Activity => 0xe038,    // activity
             Icon::Sparkles => 0xe412,    // sparkles
+            Icon::Container => 0xe4d5,   // container
+            Icon::Pause => 0xe07f,       // circle-pause
+            Icon::Hammer => 0xe0ec,      // hammer
+            Icon::Logs => 0xe45f,        // scroll-text
         };
         char::from_u32(cp).unwrap_or('\u{fffd}')
     }

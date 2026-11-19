@@ -6,7 +6,9 @@
 //!   threads; the UI only reads the screen (with `try_term`, so a busy
 //!   reader never stalls a frame) and sends bytes through a channel.
 //! - Life-cycle work goes through [`Act`] (new, close, restart, cd, clear,
-//!   shell discovery). Keystrokes, pastes, mouse reports, scrolling and
+//!   shell discovery). [`Act::Exec`] opens a tab running a program instead
+//!   of a shell (the Containers tab's "Shell": `docker exec -it …`); any
+//!   area can ask for it with an `Action`. Keystrokes, pastes, mouse reports, scrolling and
 //!   selection are the widget's own input and go straight to the session.
 //! - Keyboard: while the grid has focus, [`tick`] (which runs before the
 //!   app's shortcuts each frame) takes every key, text, copy, cut and paste
@@ -104,7 +106,13 @@ impl Shells {
 /// One terminal tab.
 pub struct Tab {
     pub id: u64,
+    /// The shell, or for a program tab ([`Act::Exec`]) the program with
+    /// the tab's title as its name.
     pub shell: Shell,
+    /// Runs a program rather than a shell: the title is fixed and there is
+    /// no "go to the repository" (a `cd` typed into `docker exec` would land
+    /// in the container).
+    pub program: bool,
     pub cwd: PathBuf,
     pub session: Session,
     /// Times the shell was restarted in this tab.
@@ -170,8 +178,11 @@ impl Tab {
     }
 
     /// What the tab says: the program's title, or the shell's name when
-    /// the title is only the program path.
+    /// the title is only the program path; a program tab keeps its own.
     pub fn title(&self) -> String {
+        if self.program {
+            return self.shell.name.clone();
+        }
         let t = self.meta_title.clone();
         let lower = t.to_ascii_lowercase();
         if t.is_empty() || lower.ends_with(".exe") || lower == "wsl" {
@@ -347,11 +358,16 @@ impl State {
 
     fn open_tab(&mut self, shell: Shell) {
         let cwd = self.start_dir();
+        self.open_tab_in(shell, cwd, false);
+    }
+
+    fn open_tab_in(&mut self, shell: Shell, cwd: PathBuf, program: bool) {
         let session = self.spawn_session(&shell, &cwd);
         self.next_id += 1;
         self.tabs.push(Tab {
             id: self.next_id,
             shell,
+            program,
             cwd,
             session,
             restarts: 0,
@@ -389,6 +405,16 @@ impl State {
 pub enum Act {
     /// A new tab with this shell (id or name); `None` = the default shell.
     New(Option<String>),
+    /// A new tab running `program` instead of a shell (`docker exec -it …`
+    /// from the Containers tab), named `title`; when the program exits the
+    /// tab shows its exit code, and Restart runs it again. `cwd` defaults
+    /// to where shells start.
+    Exec {
+        title: String,
+        program: String,
+        args: Vec<String>,
+        cwd: Option<PathBuf>,
+    },
     Close(u64),
     CloseActive,
     /// Start the tab's shell again (same shell, same folder).
@@ -437,10 +463,24 @@ impl Msg {
 
 pub fn apply(_cx: &mut Ctx, st: &mut State, g: &mut GlobalCx, act: Act) {
     refresh_env(st, g);
-    if matches!(act, Act::New(_)) {
+    if matches!(act, Act::New(_) | Act::Exec { .. }) {
         g.settings.show_terminal = true;
     }
     handle(st, act);
+}
+
+/// The shell entry a program tab runs (resolved through PATH and PATHEXT,
+/// so `docker` finds `docker.exe`).
+fn program_shell(title: &str, program: &str, args: Vec<String>) -> Shell {
+    Shell {
+        id: "program".into(),
+        name: title.to_owned(),
+        kind: shells::ShellKind::Posix,
+        program: hadion_core::devops::proc::resolve(program)
+            .unwrap_or_else(|| PathBuf::from(program)),
+        args,
+        found_via: "started by Hadion".into(),
+    }
 }
 
 /// Run an act (from `apply`, or from the panel when there is no
@@ -451,6 +491,16 @@ fn handle(st: &mut State, act: Act) {
             st.pending_new.push(name);
             st.discover(false);
             st.flush_pending();
+        }
+        Act::Exec {
+            title,
+            program,
+            args,
+            cwd,
+        } => {
+            let shell = program_shell(&title, &program, args);
+            let cwd = cwd.filter(|d| d.is_dir()).unwrap_or_else(|| st.start_dir());
+            st.open_tab_in(shell, cwd, true);
         }
         Act::Close(id) => {
             if let Some(i) = st.tab_index(id) {
@@ -503,7 +553,7 @@ fn handle(st: &mut State, act: Act) {
             let Some(dir) = st.env.repo_dir.clone() else {
                 return;
             };
-            if let Some(t) = st.active_tab_mut() {
+            if let Some(t) = st.active_tab_mut().filter(|t| !t.program) {
                 let mut bytes = shells::clear_line(t.shell.kind).to_vec();
                 bytes.extend_from_slice(shells::cd_command(t.shell.kind, &dir).as_bytes());
                 bytes.push(b'\r');
@@ -645,7 +695,8 @@ pub fn tick(_cx: &mut Ctx, st: &mut State, g: &mut GlobalCx) {
 }
 
 /// `HADION_SCRIPT` commands this area understands: `term-new SHELL`,
-/// `term-type TEXT` (then Enter), `term-keys NAME`, `term-tab N`,
+/// `term-exec PROGRAM ARGS…` (a tab running that program, see
+/// [`Act::Exec`]), `term-type TEXT` (then Enter), `term-keys NAME`, `term-tab N`,
 /// `term-close`, `term-scroll N` (lines up; negative down; 0 bottom),
 /// `term-select R0 C0 R1 C1` (view rows / columns), `term-select-all`,
 /// `term-copy`, `term-focus`, `term-restart`, `term-kill`, `term-cd`,
@@ -658,6 +709,16 @@ pub fn script(cmd: &str, arg: &str) -> Option<Vec<Action>> {
     let num = |s: &str| s.trim().parse::<isize>().ok();
     let a = match cmd {
         "term-new" => Act::New((!arg.trim().is_empty()).then(|| arg.trim().to_owned())),
+        "term-exec" => {
+            let mut words = arg.split_whitespace().map(str::to_owned);
+            let program = words.next()?;
+            Act::Exec {
+                title: program.clone(),
+                program,
+                args: words.collect(),
+                cwd: None,
+            }
+        }
         "term-type" => Act::Type(arg.to_owned()),
         "term-keys" => Act::Keys(arg.trim().to_owned()),
         "term-tab" => Act::Activate(num(arg)?.max(0) as usize),
@@ -728,6 +789,20 @@ mod tests {
         assert_eq!(one("term-select", "0 0 2"), None);
         assert_eq!(one("term-scroll", "-5"), Some(1));
         assert_eq!(one("term-close", ""), Some(1));
+        assert_eq!(one("term-exec", ""), None);
+        match &script("term-exec", "git --version").unwrap()[0] {
+            Action::DevOps(crate::devops::DevOpsAction::Terminal(Act::Exec {
+                title,
+                program,
+                args,
+                cwd,
+            })) => {
+                assert_eq!((title.as_str(), program.as_str()), ("git", "git"));
+                assert_eq!(args, &["--version"]);
+                assert!(cwd.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
         assert_eq!(one("unrelated", ""), None);
         match &script("term-new", " bash ").unwrap()[0] {
             Action::DevOps(crate::devops::DevOpsAction::Terminal(Act::New(Some(s)))) => {

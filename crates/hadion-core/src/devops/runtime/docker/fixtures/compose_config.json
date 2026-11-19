@@ -1,0 +1,40 @@
+{
+  "name": "shop",
+  "services": {
+    "web": {
+      "build": {
+        "context": "C:\\repo\\web",
+        "dockerfile": "Dockerfile",
+        "target": "prod",
+        "args": {"NPM_TOKEN": "example-only-value"}
+      },
+      "depends_on": {"db": {"condition": "service_healthy", "required": true, "restart": false}},
+      "environment": {"API_TOKEN": "example-only-value", "NGINX_PORT": "80"},
+      "healthcheck": {"test": ["CMD", "curl", "-fs", "http://localhost/healthz"], "interval": "10s", "timeout": "2s", "retries": 3},
+      "networks": {"default": null},
+      "ports": [
+        {"mode": "ingress", "target": 80, "published": "8080", "protocol": "tcp"},
+        {"mode": "ingress", "host_ip": "127.0.0.1", "target": 443, "published": "8443", "protocol": "tcp"}
+      ],
+      "restart": "unless-stopped"
+    },
+    "db": {
+      "image": "postgres:16-alpine",
+      "environment": ["POSTGRES_PASSWORD=example-only-value", "POSTGRES_USER=shop"],
+      "healthcheck": {"test": ["CMD-SHELL", "pg_isready -U shop -d shop"], "interval": "5s", "retries": 5},
+      "volumes": [{"type": "volume", "source": "pgdata", "target": "/var/lib/postgresql/data"}]
+    },
+    "worker": {
+      "build": "C:\\repo\\worker",
+      "deploy": {"replicas": 2},
+      "depends_on": ["db"]
+    },
+    "migrate": {
+      "image": "shop-migrate",
+      "profiles": ["tools"],
+      "healthcheck": {"disable": true}
+    }
+  },
+  "networks": {"default": {"name": "shop_default"}},
+  "volumes": {"pgdata": {"name": "shop_pgdata"}}
+}
