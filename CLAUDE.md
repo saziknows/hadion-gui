@@ -1,6 +1,6 @@
 # Hadion — notes for Claude Code
 
-Native Git client (Rust + egui 0.37) focused on branch visualisation; see README.md for features.
+Native Git client (Rust + egui 0.37) focused on branch visualisation; see docs/features.md for features (README.md is the short tour).
 
 ## Commands
 

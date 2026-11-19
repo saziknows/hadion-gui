@@ -22,7 +22,7 @@ tests need `git` on `PATH` and a git identity (`user.name`, `user.email`).
 - `crates/hadion-core`: everything without UI (repository snapshots, graph layout, diffs,
   git operations, the exposure scanner, insights, the DevOps areas' requests and parsers).
 - `crates/hadion`: the egui app. Views only read state and push `Action`s; `app.rs` applies them.
-- [README.md](README.md#architecture) has the overview. [CLAUDE.md](CLAUDE.md) has detailed
+- [docs/development.md](docs/development.md#architecture) has the overview. [CLAUDE.md](CLAUDE.md) has detailed
   notes on every module, the DevOps area contract, egui pitfalls we have hit, and the scripted
   smoke tests; it is written for AI coding assistants but reads fine for people too.
 
