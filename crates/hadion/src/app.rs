@@ -3498,13 +3498,13 @@ impl Hadion {
                 self.settings.show_status_bar = !self.settings.show_status_bar
             }
             Action::ToggleRail => {
-                self.settings.rail = if views::rail::collapsed(ctx, &self.settings) {
+                self.settings.rail_mode = if views::rail::collapsed(ctx, &self.settings) {
                     RailMode::Expanded
                 } else {
                     RailMode::Collapsed
                 }
             }
-            Action::SetRail(m) => self.settings.rail = m,
+            Action::SetRail(m) => self.settings.rail_mode = m,
             Action::SetPull(p) => self.settings.pull = p,
             Action::SetDiffMode(m) => {
                 self.settings.diff_mode = m;

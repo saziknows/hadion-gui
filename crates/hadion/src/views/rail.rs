@@ -25,9 +25,9 @@ use crate::views::icons::{self, Icon};
 pub const EXPANDED: f32 = 152.0;
 /// Width of the collapsed rail (icons only).
 pub const COLLAPSED: f32 = 60.0;
-/// [`RailMode::Auto`] collapses the rail in windows narrower than this: at
-/// the default 1,440 the expanded rail leaves the History page's graph too
-/// little room for commit messages.
+/// [`RailMode::Auto`] collapses the rail in windows narrower than this, for
+/// people who want the room: at 1,440 the expanded rail leaves the History
+/// page's graph little room for commit messages.
 pub const AUTO_COLLAPSE_BELOW: f32 = 1600.0;
 /// Space between the rail's edges and its entries' tiles.
 const INSET: f32 = 8.0;
@@ -42,7 +42,7 @@ const _: () = assert!(ICON_X + 20.0 + 60.0 + 24.0 <= EXPANDED - INSET);
 
 /// Whether the rail shows icons only.
 pub fn collapsed(ctx: &egui::Context, settings: &Settings) -> bool {
-    match settings.rail {
+    match settings.rail_mode {
         RailMode::Auto => ctx.content_rect().width() < AUTO_COLLAPSE_BELOW,
         RailMode::Expanded => false,
         RailMode::Collapsed => true,

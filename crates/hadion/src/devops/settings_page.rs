@@ -247,14 +247,14 @@ fn appearance(ui: &mut Ui, settings: &Settings, actions: &mut Vec<Action>) {
     kit::section(ui, "Navigation", None);
     form::card(ui, Tone::Neutral, |ui| {
         for (mode, label) in [
-            (
-                RailMode::Auto,
-                "Automatic: page names beside the icons in windows at least 1,600 points wide",
-            ),
             (RailMode::Expanded, "Page names beside the icons"),
             (RailMode::Collapsed, "Icons only"),
+            (
+                RailMode::Auto,
+                "Automatic: icons only in windows narrower than 1,600 points",
+            ),
         ] {
-            if form::radio(ui, settings.rail == mode, label) {
+            if form::radio(ui, settings.rail_mode == mode, label) {
                 actions.push(Action::SetRail(mode));
             }
         }

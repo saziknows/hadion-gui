@@ -1002,13 +1002,13 @@ impl RepoState {
 /// How the navigation rail is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum RailMode {
+    /// Page names beside the icons.
+    #[default]
+    Expanded,
     /// Page names beside the icons in a window at least
     /// [`crate::views::rail::AUTO_COLLAPSE_BELOW`] wide, icons only in a
     /// narrower one.
-    #[default]
     Auto,
-    /// Page names beside the icons.
-    Expanded,
     /// Icons only.
     Collapsed,
 }
@@ -1085,8 +1085,9 @@ pub struct Settings {
     pub safe_mode: bool,
     /// The terminal panel is open.
     pub show_terminal: bool,
-    /// Page names beside the rail's icons, icons only, or by window width.
-    pub rail: RailMode,
+    /// Page names beside the rail's icons (the default), icons only, or by
+    /// window width. Not `rail`: a preview build saved `Auto` under that name.
+    pub rail_mode: RailMode,
     /// Preferences of the app-wide features (AI, terminal, palette,
     /// identities, notifications, integrations, updates).
     pub ext: crate::devops::ExtPrefs,
@@ -1113,7 +1114,7 @@ impl Default for Settings {
             home: Default::default(),
             safe_mode: false,
             show_terminal: false,
-            rail: RailMode::Auto,
+            rail_mode: RailMode::Expanded,
             ext: Default::default(),
         }
     }

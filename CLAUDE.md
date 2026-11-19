@@ -81,9 +81,9 @@ Linux); libgit2 is vendored and compiles from C.
   Shell: `views/rail.rs` (left navigation: Home, History, Review, Actions, Ship, Exposure, Insights,
   Govern, Tools; Activity, Terminal, Settings and the Collapse toggle at the bottom; a dot only when
   something needs attention, which each DevOps area reports through its `rail_badge`; expanded =
-  icon + label rows (152 pt), collapsed = icons (60 pt) with the name in the flyout; `Settings::rail`
-  is `RailMode::Auto` (collapsed below 1,600 pt: at 1,440 the expanded rail leaves the graph no room
-  for messages) / `Expanded` / `Collapsed`, Ctrl+B flips what is shown; `rail::width` eases the width
+  icon + label rows (152 pt), collapsed = icons (60 pt) with the name in the flyout; `Settings::rail_mode`
+  is `RailMode::Expanded` (default) / `Collapsed` / `Auto` (collapsed below 1,600 pt; not named `rail`
+  because a preview build saved `Auto` under that name), Ctrl+B flips what is shown; `rail::width` eases the width
   and toasts take it), `views/toolbar.rs` (repo tabs + git actions
   only), `views/statusbar.rs` (location, working tree, last activity). The refs sidebar shows on the
   History page only; Exposure and Insights use `kit::page_with_nav` (grouped section navigation).
@@ -468,7 +468,8 @@ then `ins-tab ci; ins-item 0`. A scripted window is a real window: clicks in it 
 while you work in your own Hadion instance on the same desktop) can change what it shows, so a
 screenshot may show a different tab than the script set. Scripted runs also restore the tabs
 saved by your own Hadion session; `HADION_NO_RESTORE=1` opens only the repository on the command
-line (README screenshots are taken that way).
+line (README screenshots are taken that way, with `HADION_STATE_DIR=<empty folder>` too: eframe then
+loads default settings and panel sizes instead of the user's own; see `scripts/readme-shots.ps1`).
 
 ## UI testing without a human
 

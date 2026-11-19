@@ -405,13 +405,13 @@ pub fn catalog(cx: &Cx) -> Catalog {
     c.push(
         Command::new(
             "app:rail",
-            match s.rail {
+            match s.rail_mode {
                 RailMode::Auto => "Collapse or expand the navigation",
                 RailMode::Expanded => "Collapse the navigation",
                 RailMode::Collapsed => "Expand the navigation",
             },
             APP,
-            if s.rail == RailMode::Collapsed {
+            if s.rail_mode == RailMode::Collapsed {
                 Icon::PanelLeftOpen
             } else {
                 Icon::PanelLeftClose
