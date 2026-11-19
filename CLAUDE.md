@@ -1,6 +1,6 @@
 # Hadion — notes for Claude Code
 
-Native Git client (Rust + egui 0.37) focused on branch visualisation; see README.md for features.
+Native Git client (Rust + egui 0.37) focused on branch visualisation; see docs/features.md for features (README.md is the short tour).
 
 ## Commands
 
@@ -79,8 +79,12 @@ Linux); libgit2 is vendored and compiles from C.
   page builds from (text, sections, cards, callouts, code blocks, key-value, stats, badges, bars, tables,
   virtualised two-line rows, search box, chips, segmented control, section nav, page frames, progress).
   Shell: `views/rail.rs` (left navigation: Home, History, Review, Actions, Ship, Exposure, Insights,
-  Govern, Tools; Activity and Settings at the bottom; a dot only when something needs attention, which
-  each DevOps area reports through its `rail_badge`), `views/toolbar.rs` (repo tabs + git actions
+  Govern, Tools; Activity, Terminal, Settings and the Collapse toggle at the bottom; a dot only when
+  something needs attention, which each DevOps area reports through its `rail_badge`; expanded =
+  icon + label rows (152 pt), collapsed = icons (60 pt) with the name in the flyout; `Settings::rail_mode`
+  is `RailMode::Expanded` (default) / `Collapsed` / `Auto` (collapsed below 1,600 pt; not named `rail`
+  because a preview build saved `Auto` under that name), Ctrl+B flips what is shown; `rail::width` eases the width
+  and toasts take it), `views/toolbar.rs` (repo tabs + git actions
   only), `views/statusbar.rs` (location, working tree, last activity). The refs sidebar shows on the
   History page only; Exposure and Insights use `kit::page_with_nav` (grouped section navigation).
 - Brand (2026-10-29): the product is **Hadion** (it was called gitvis until then; crates, binary, data
@@ -441,7 +445,9 @@ Commands: `wait S`, `shot PATH`, `window W H` (inner size in points; 900 × 560 
 `unified`, `select HUNK FROM TO`, `activity`, `reflog`, `collapse KEY`, `stage PATH`, `undo`,
 (scripted runs never save settings, window geometry or egui memory, so they cannot change your own
 session; run a copy of the exe under another name, e.g. `hadion-test.exe`, so the build is never locked),
-`theme`, `github` / `graph` (centre page), `filter TEXT` and `status failed|running|passed|all`
+`theme`, `rail` (collapse / expand the rail), `pointer X Y` / `pointer off` (hover at X Y in points,
+holding off the real mouse, so hover states and tooltips can be screenshotted without moving the
+user's pointer; real moves land on whatever window is on top), `github` / `graph` (centre page), `filter TEXT` and `status failed|running|passed|all`
 (run list), `run N` (open the N-th listed run), `job N` (show the N-th job's log), `verbose`,
 `security` / `scan` / `scan-history N` / `finding N` / `reveal` (Exposure page), `sec-tab NAME` /
 `osint` / `item N` / `unreachable` / `osv` / `dorks` / `pr-refs` (OSINT tabs), `insights` /
@@ -462,7 +468,8 @@ then `ins-tab ci; ins-item 0`. A scripted window is a real window: clicks in it 
 while you work in your own Hadion instance on the same desktop) can change what it shows, so a
 screenshot may show a different tab than the script set. Scripted runs also restore the tabs
 saved by your own Hadion session; `HADION_NO_RESTORE=1` opens only the repository on the command
-line (README screenshots are taken that way).
+line (README screenshots are taken that way, with `HADION_STATE_DIR=<empty folder>` too: eframe then
+loads default settings and panel sizes instead of the user's own; see `scripts/readme-shots.ps1`).
 
 ## UI testing without a human
 

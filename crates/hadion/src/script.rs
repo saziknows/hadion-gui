@@ -39,6 +39,12 @@ pub enum Cmd {
     Activity,
     Reflog,
     Theme,
+    /// Collapse or expand the navigation rail.
+    Rail,
+    /// `pointer X Y`: hover there (points), holding off the real pointer,
+    /// so hover states and tooltips can be screenshotted; `pointer off`
+    /// gives the pointer back.
+    Pointer(Option<egui::Pos2>),
     /// Toggle a sidebar section/folder, e.g. `collapse sec:remote`.
     Collapse(String),
     /// `git add PATH` through the normal operation path (fills the activity log).
@@ -176,6 +182,12 @@ fn parse(s: &str) -> Option<Cmd> {
         "activity" => Cmd::Activity,
         "reflog" => Cmd::Reflog,
         "theme" => Cmd::Theme,
+        "rail" => Cmd::Rail,
+        "pointer" if arg.trim() == "off" => Cmd::Pointer(None),
+        "pointer" => {
+            let mut n = arg.split_whitespace().map(|x| x.parse::<f32>().ok());
+            Cmd::Pointer(Some(egui::pos2(n.next()??, n.next()??)))
+        }
         "window" => {
             let mut n = arg.split_whitespace().map(|x| x.parse::<f32>().ok());
             Cmd::Window(n.next()??, n.next()??)

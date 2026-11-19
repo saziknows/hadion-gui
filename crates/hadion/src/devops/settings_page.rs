@@ -14,7 +14,7 @@ use egui::Ui;
 
 use crate::devops::global::{GlobalCx, Globals};
 use crate::devops::{Ctx, DevOpsAction, ai, automation, identity, packaging, terminal};
-use crate::state::{Action, PullPref, RepoState, Settings};
+use crate::state::{Action, PullPref, RailMode, RepoState, Settings};
 use crate::theme::{Tone, space};
 use crate::views::form;
 use crate::views::kit::{self, NavGroup, NavItem};
@@ -89,7 +89,7 @@ impl Section {
 
     pub fn hint(self) -> &'static str {
         match self {
-            Section::Appearance => "Theme, dates, columns",
+            Section::Appearance => "Theme, dates, columns, navigation",
             Section::Behaviour => "Pull strategy, scanning, the activity log",
             Section::Safety => "Safe mode: block every change outside this machine",
             Section::Terminal => "Shell, font size, scrollback",
@@ -242,6 +242,26 @@ fn appearance(ui: &mut Ui, settings: &Settings, actions: &mut Vec<Action>) {
         if form::checkbox(ui, &mut status_bar, "Status bar").clicked() {
             actions.push(Action::ToggleStatusBar);
         }
+    });
+    ui.add_space(space::L);
+    kit::section(ui, "Navigation", None);
+    form::card(ui, Tone::Neutral, |ui| {
+        for (mode, label) in [
+            (RailMode::Expanded, "Page names beside the icons"),
+            (RailMode::Collapsed, "Icons only"),
+            (
+                RailMode::Auto,
+                "Automatic: icons only in windows narrower than 1,600 points",
+            ),
+        ] {
+            if form::radio(ui, settings.rail_mode == mode, label) {
+                actions.push(Action::SetRail(mode));
+            }
+        }
+        help(
+            ui,
+            "Ctrl+B, or the button at the bottom of the rail, switches between names and icons.",
+        );
     });
 }
 

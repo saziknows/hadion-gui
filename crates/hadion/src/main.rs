@@ -45,6 +45,10 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         persist_window: !scripted,
         viewport,
+        // `HADION_STATE_DIR` keeps settings, open tabs and panel sizes in
+        // another folder: an empty one starts from the defaults (README
+        // screenshots), whatever the user's own session saved.
+        persistence_path: std::env::var_os("HADION_STATE_DIR").map(std::path::PathBuf::from),
         ..Default::default()
     };
     eframe::run_native(

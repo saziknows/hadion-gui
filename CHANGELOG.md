@@ -6,6 +6,18 @@ All notable changes to Hadion are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Navigation rail**: page names now sit beside the icons, with more padding, and the rail
+  collapses to icons (`Ctrl+B`, the Collapse button, or Settings › Appearance, which also
+  offers an automatic mode for narrow windows). Hover is a soft highlight over the whole
+  row instead of a block behind the icon, the current page has an accent bar, and
+  explanations open beside the rail once the pointer rests.
+- **README**: a short tour with a screenshot of each main page; the full feature list moved to
+  `docs/features.md`, building and architecture to `docs/development.md`.
+- The Containers tab's context bar splits into two rows sooner, so its checkbox no longer
+  runs off the edge at 1,440 points.
+
 ### Added
 
 - **Ship › Containers**: the compose projects and containers of the open repository on any
@@ -21,6 +33,14 @@ All notable changes to Hadion are listed here. The format follows
 - The terminal can open a tab running a program instead of a shell (`term-exec` in
   scripts).
 - `fake_docker` example: a docker test double for `HADION_DOCKER`.
+- `rail` and `pointer X Y` script commands (`pointer` hovers without moving the mouse),
+  `HADION_STATE_DIR` (start from default settings and panel sizes) and
+  `scripts/readme-shots.ps1`, which retakes the README screenshots.
+
+### Fixed
+
+- The tests that run the `fake_claude` and `fake_docker` examples find them under Cargo
+  1.100's new build folder layout.
 
 ## [0.1.1] - 2026-10-30
 

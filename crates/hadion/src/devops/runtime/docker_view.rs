@@ -530,7 +530,10 @@ fn toolbar(ui: &mut Ui, d: &DockerCx, st: &State, actions: &mut Vec<Action>) {
         })
         .show(ui, |ui| {
             let w = ui.available_width();
-            let wide = w >= 900.0;
+            // One row needs the picker, the endpoint (about 300 points for
+            // Docker Desktop's pipe), up to four badges and the checkbox; the
+            // truncating endpoint label cannot make room for what follows it.
+            let wide = w >= 1260.0;
             let row = |ui: &mut Ui, add: &mut dyn FnMut(&mut Ui)| {
                 ui.allocate_ui_with_layout(
                     vec2(w, 30.0),
