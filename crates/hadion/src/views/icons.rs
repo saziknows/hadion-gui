@@ -117,6 +117,10 @@ pub enum Icon {
     Hammer,
     /// A scroll of text: logs.
     Logs,
+    /// A panel with an arrow to the left: collapse the navigation rail.
+    PanelLeftClose,
+    /// A panel with an arrow to the right: expand the navigation rail.
+    PanelLeftOpen,
 }
 
 /// The Lucide icon font's family (`theme::install_fonts` registers it).
@@ -138,65 +142,67 @@ impl Icon {
     /// comment.
     pub fn glyph(self) -> char {
         let cp: u32 = match self {
-            Icon::Pull => 0xe455,        // arrow-down-to-line
-            Icon::Push => 0xe45a,        // arrow-up-from-line
-            Icon::Fetch => 0xe145,       // refresh-cw
-            Icon::Branch => 0xe0e2,      // git-branch
-            Icon::Stash => 0xe041,       // archive
-            Icon::Pop => 0xe2cd,         // archive-restore
-            Icon::Search => 0xe151,      // search
-            Icon::Gear => 0xe154,        // settings
-            Icon::Plus => 0xe13d,        // plus
-            Icon::Minus => 0xe11c,       // minus
-            Icon::Close => 0xe1b2,       // x
-            Icon::ChevronDown => 0xe06d, // chevron-down
-            Icon::ChevronUp => 0xe070,   // chevron-up
-            Icon::Undo => 0xe2a1,        // undo-2
-            Icon::Warning => 0xe193,     // triangle-alert
-            Icon::Info => 0xe0f9,        // info
-            Icon::Check => 0xe06c,       // check
-            Icon::Error => 0xe084,       // circle-x
-            Icon::List => 0xe106,        // list
-            Icon::External => 0xe0b9,    // external-link
-            Icon::Play => 0xe080,        // circle-play
-            Icon::Copy => 0xe09e,        // copy
-            Icon::Clock => 0xe087,       // clock
-            Icon::PullRequest => 0xe0e5, // git-pull-request
-            Icon::Stop => 0xe083,        // circle-stop
-            Icon::Rerun => 0xe149,       // rotate-cw
-            Icon::Shield => 0xe1ff,      // shield-check
-            Icon::Chart => 0xe2a3,       // chart-column
-            Icon::Graph => 0xe554,       // git-graph
-            Icon::Home => 0xe0f5,        // house
-            Icon::Rocket => 0xe286,      // rocket
-            Icon::Lock => 0xe10b,        // lock
-            Icon::Terminal => 0xe20a,    // square-terminal
-            Icon::Issue => 0xe345,       // circle-dot
-            Icon::Inbox => 0xe0f7,       // inbox
-            Icon::Package => 0xe129,     // package
-            Icon::Cloud => 0xe088,       // cloud
-            Icon::Tag => 0xe17f,         // tag
-            Icon::Bug => 0xe20c,         // bug
-            Icon::Folder => 0xe0d7,      // folder
-            Icon::Merge => 0xe0e4,       // git-merge
-            Icon::Comment => 0xe117,     // message-square
-            Icon::Key => 0xe4a3,         // key-round
-            Icon::Gauge => 0xe1bf,       // gauge
-            Icon::Eye => 0xe0ba,         // eye
-            Icon::Edit => 0xe1f9,        // pencil
-            Icon::Trash => 0xe18e,       // trash-2
-            Icon::Bell => 0xe059,        // bell
-            Icon::Link => 0xe102,        // link
-            Icon::Wheel => 0xe502,       // ship-wheel
-            Icon::Download => 0xe0b2,    // download
-            Icon::Star => 0xe176,        // star
-            Icon::Wrench => 0xe1b1,      // wrench
-            Icon::Activity => 0xe038,    // activity
-            Icon::Sparkles => 0xe412,    // sparkles
-            Icon::Container => 0xe4d5,   // container
-            Icon::Pause => 0xe07f,       // circle-pause
-            Icon::Hammer => 0xe0ec,      // hammer
-            Icon::Logs => 0xe45f,        // scroll-text
+            Icon::Pull => 0xe455,           // arrow-down-to-line
+            Icon::Push => 0xe45a,           // arrow-up-from-line
+            Icon::Fetch => 0xe145,          // refresh-cw
+            Icon::Branch => 0xe0e2,         // git-branch
+            Icon::Stash => 0xe041,          // archive
+            Icon::Pop => 0xe2cd,            // archive-restore
+            Icon::Search => 0xe151,         // search
+            Icon::Gear => 0xe154,           // settings
+            Icon::Plus => 0xe13d,           // plus
+            Icon::Minus => 0xe11c,          // minus
+            Icon::Close => 0xe1b2,          // x
+            Icon::ChevronDown => 0xe06d,    // chevron-down
+            Icon::ChevronUp => 0xe070,      // chevron-up
+            Icon::Undo => 0xe2a1,           // undo-2
+            Icon::Warning => 0xe193,        // triangle-alert
+            Icon::Info => 0xe0f9,           // info
+            Icon::Check => 0xe06c,          // check
+            Icon::Error => 0xe084,          // circle-x
+            Icon::List => 0xe106,           // list
+            Icon::External => 0xe0b9,       // external-link
+            Icon::Play => 0xe080,           // circle-play
+            Icon::Copy => 0xe09e,           // copy
+            Icon::Clock => 0xe087,          // clock
+            Icon::PullRequest => 0xe0e5,    // git-pull-request
+            Icon::Stop => 0xe083,           // circle-stop
+            Icon::Rerun => 0xe149,          // rotate-cw
+            Icon::Shield => 0xe1ff,         // shield-check
+            Icon::Chart => 0xe2a3,          // chart-column
+            Icon::Graph => 0xe554,          // git-graph
+            Icon::Home => 0xe0f5,           // house
+            Icon::Rocket => 0xe286,         // rocket
+            Icon::Lock => 0xe10b,           // lock
+            Icon::Terminal => 0xe20a,       // square-terminal
+            Icon::Issue => 0xe345,          // circle-dot
+            Icon::Inbox => 0xe0f7,          // inbox
+            Icon::Package => 0xe129,        // package
+            Icon::Cloud => 0xe088,          // cloud
+            Icon::Tag => 0xe17f,            // tag
+            Icon::Bug => 0xe20c,            // bug
+            Icon::Folder => 0xe0d7,         // folder
+            Icon::Merge => 0xe0e4,          // git-merge
+            Icon::Comment => 0xe117,        // message-square
+            Icon::Key => 0xe4a3,            // key-round
+            Icon::Gauge => 0xe1bf,          // gauge
+            Icon::Eye => 0xe0ba,            // eye
+            Icon::Edit => 0xe1f9,           // pencil
+            Icon::Trash => 0xe18e,          // trash-2
+            Icon::Bell => 0xe059,           // bell
+            Icon::Link => 0xe102,           // link
+            Icon::Wheel => 0xe502,          // ship-wheel
+            Icon::Download => 0xe0b2,       // download
+            Icon::Star => 0xe176,           // star
+            Icon::Wrench => 0xe1b1,         // wrench
+            Icon::Activity => 0xe038,       // activity
+            Icon::Sparkles => 0xe412,       // sparkles
+            Icon::Container => 0xe4d5,      // container
+            Icon::Pause => 0xe07f,          // circle-pause
+            Icon::Hammer => 0xe0ec,         // hammer
+            Icon::Logs => 0xe45f,           // scroll-text
+            Icon::PanelLeftClose => 0xe21c, // panel-left-close
+            Icon::PanelLeftOpen => 0xe21d,  // panel-left-open
         };
         char::from_u32(cp).unwrap_or('\u{fffd}')
     }

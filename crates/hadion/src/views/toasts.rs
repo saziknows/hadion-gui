@@ -20,7 +20,8 @@ const BOTTOM: f32 = 46.0;
 /// window.
 const VISIBLE: usize = 3;
 
-pub fn show(ctx: &egui::Context, toasts: &mut Vec<Toast>) {
+/// `rail` is the navigation rail's width this frame (it collapses).
+pub fn show(ctx: &egui::Context, toasts: &mut Vec<Toast>, rail: f32) {
     toasts.retain(|t| t.created.elapsed().as_secs_f32() < t.ttl_secs());
     if toasts.is_empty() {
         return;
@@ -32,10 +33,7 @@ pub fn show(ctx: &egui::Context, toasts: &mut Vec<Toast>) {
 
     let mut dismiss: Option<usize> = None;
     egui::Area::new(egui::Id::unique("toasts"))
-        .anchor(
-            Align2::LEFT_BOTTOM,
-            vec2(crate::views::rail::WIDTH + 12.0, -BOTTOM),
-        )
+        .anchor(Align2::LEFT_BOTTOM, vec2(rail + 12.0, -BOTTOM))
         .order(egui::Order::Foreground)
         .interactable(true)
         .show(ctx, |ui| {

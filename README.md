@@ -497,7 +497,10 @@ the multi-selection panel, or the palette's `>compare`)
 - A navigation rail for the pages of the open repository (Home, History, Review, Actions,
   Ship, Exposure, Insights, Govern, Tools), with the activity log and settings at the
   bottom; a dot marks a page that needs attention (failed runs, review requests, approvals
-  waiting for you, critical alerts, running tasks, a rebase or bisect in progress).
+  waiting for you, critical alerts, running tasks, a rebase or bisect in progress). It shows
+  the page names beside the icons in windows at least 1,600 points wide and icons only in
+  narrower ones; `Ctrl+B` or its Collapse button switches, and Settings › Appearance fixes
+  either.
 - Every change made outside git (GitHub, GitLab, Azure DevOps, kubectl, terraform) is
   confirmed first with the exact command or request, and logged with its request body;
   network calls only happen when you open a page or press a button.
@@ -522,6 +525,7 @@ the multi-selection panel, or the palette's `>compare`)
 | `Esc` | Clear diff selection, then close the diff view / search |
 | `Ctrl+Enter` | Commit (while writing the message) |
 | `Ctrl+L` | Activity log / reflog panel |
+| `Ctrl+B` | Collapse / expand the navigation rail |
 | `Ctrl+Z` | Undo the last HEAD movement |
 | `Ctrl+Shift+O` | Clone repository |
 | `Ctrl+K` / `Ctrl+Shift+P` | Command palette |

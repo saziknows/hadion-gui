@@ -79,8 +79,12 @@ Linux); libgit2 is vendored and compiles from C.
   page builds from (text, sections, cards, callouts, code blocks, key-value, stats, badges, bars, tables,
   virtualised two-line rows, search box, chips, segmented control, section nav, page frames, progress).
   Shell: `views/rail.rs` (left navigation: Home, History, Review, Actions, Ship, Exposure, Insights,
-  Govern, Tools; Activity and Settings at the bottom; a dot only when something needs attention, which
-  each DevOps area reports through its `rail_badge`), `views/toolbar.rs` (repo tabs + git actions
+  Govern, Tools; Activity, Terminal, Settings and the Collapse toggle at the bottom; a dot only when
+  something needs attention, which each DevOps area reports through its `rail_badge`; expanded =
+  icon + label rows (152 pt), collapsed = icons (60 pt) with the name in the flyout; `Settings::rail`
+  is `RailMode::Auto` (collapsed below 1,600 pt: at 1,440 the expanded rail leaves the graph no room
+  for messages) / `Expanded` / `Collapsed`, Ctrl+B flips what is shown; `rail::width` eases the width
+  and toasts take it), `views/toolbar.rs` (repo tabs + git actions
   only), `views/statusbar.rs` (location, working tree, last activity). The refs sidebar shows on the
   History page only; Exposure and Insights use `kit::page_with_nav` (grouped section navigation).
 - Brand (2026-10-29): the product is **Hadion** (it was called gitvis until then; crates, binary, data
@@ -441,7 +445,9 @@ Commands: `wait S`, `shot PATH`, `window W H` (inner size in points; 900 × 560 
 `unified`, `select HUNK FROM TO`, `activity`, `reflog`, `collapse KEY`, `stage PATH`, `undo`,
 (scripted runs never save settings, window geometry or egui memory, so they cannot change your own
 session; run a copy of the exe under another name, e.g. `hadion-test.exe`, so the build is never locked),
-`theme`, `github` / `graph` (centre page), `filter TEXT` and `status failed|running|passed|all`
+`theme`, `rail` (collapse / expand the rail), `pointer X Y` / `pointer off` (hover at X Y in points,
+holding off the real mouse, so hover states and tooltips can be screenshotted without moving the
+user's pointer; real moves land on whatever window is on top), `github` / `graph` (centre page), `filter TEXT` and `status failed|running|passed|all`
 (run list), `run N` (open the N-th listed run), `job N` (show the N-th job's log), `verbose`,
 `security` / `scan` / `scan-history N` / `finding N` / `reveal` (Exposure page), `sec-tab NAME` /
 `osint` / `item N` / `unreachable` / `osv` / `dorks` / `pr-refs` (OSINT tabs), `insights` /

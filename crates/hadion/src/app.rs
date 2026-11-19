@@ -20,7 +20,7 @@ use crate::state::{
     InsightsTab, LogDoc, LogState, Page, RepoId, RepoState, RunDetail, ScanRun, SecurityTab,
     Selection, Settings, Toast, ToastKind,
 };
-use crate::state::{DiffMode, DiffSelection};
+use crate::state::{DiffMode, DiffSelection, RailMode};
 use crate::theme;
 use crate::views;
 use crate::worker::{Event, GhRepo, Job, Worker};
@@ -50,6 +50,11 @@ pub struct Hadion {
     next_id: RepoId,
     focus_search: bool,
     window_title: String,
+    /// A pointer position set by the `pointer X Y` script command, and
+    /// whether it was sent yet: [`eframe::App::raw_input_hook`] sends it once
+    /// and drops the real pointer's moves meanwhile, so hover states can be
+    /// screenshotted without moving the mouse.
+    script_pointer: Option<(egui::Pos2, bool)>,
     /// Name of the repository being cloned, while a clone runs.
     cloning: Option<String>,
     activity: Vec<ActivityEntry>,
@@ -92,6 +97,7 @@ impl Hadion {
             next_id: 1,
             focus_search: false,
             window_title: String::new(),
+            script_pointer: None,
             cloning: None,
             activity: Vec::new(),
             activity_tab: ActivityTab::Log,
@@ -2703,6 +2709,9 @@ impl Hadion {
             if i.consume_key(Modifiers::COMMAND, Key::L) {
                 actions.push(Action::ToggleActivity);
             }
+            if i.consume_key(Modifiers::COMMAND, Key::B) {
+                actions.push(Action::ToggleRail);
+            }
             if has_repo && i.consume_key(Modifiers::COMMAND, Key::Z) {
                 actions.push(Action::Undo);
             }
@@ -2837,6 +2846,8 @@ impl Hadion {
                     self.activity_tab = ActivityTab::Reflog;
                 }
                 Cmd::Theme => self.apply(ctx, Action::ToggleTheme),
+                Cmd::Rail => self.apply(ctx, Action::ToggleRail),
+                Cmd::Pointer(at) => self.script_pointer = at.map(|p| (p, false)),
                 Cmd::Window(w, h) => {
                     // A maximised window ignores a new size: restore it first.
                     ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
@@ -3486,6 +3497,14 @@ impl Hadion {
             Action::ToggleStatusBar => {
                 self.settings.show_status_bar = !self.settings.show_status_bar
             }
+            Action::ToggleRail => {
+                self.settings.rail = if views::rail::collapsed(ctx, &self.settings) {
+                    RailMode::Expanded
+                } else {
+                    RailMode::Collapsed
+                }
+            }
+            Action::SetRail(m) => self.settings.rail = m,
             Action::SetPull(p) => self.settings.pull = p,
             Action::SetDiffMode(m) => {
                 self.settings.diff_mode = m;
@@ -4194,6 +4213,20 @@ impl eframe::App for Hadion {
         std::env::var_os("HADION_SCRIPT").is_none()
     }
 
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let Some((at, sent)) = &mut self.script_pointer else {
+            return;
+        };
+        // Every move restarts the tooltip delay, so the position is sent
+        // once; the real pointer must not move it away meanwhile.
+        raw.events
+            .retain(|e| !matches!(e, egui::Event::PointerMoved(_) | egui::Event::PointerGone));
+        if !*sent {
+            raw.events.push(egui::Event::PointerMoved(*at));
+            *sent = true;
+        }
+    }
+
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let mut events = Vec::new();
         while let Ok(ev) = self.worker.inbox.try_recv() {
@@ -4226,14 +4259,16 @@ impl eframe::App for Hadion {
         }
 
         let chrome = theme::pal(ui).chrome;
+        let rail_w = views::rail::width(&ctx, &self.settings);
         egui::Panel::left("rail")
             .resizable(false)
-            .exact_size(views::rail::WIDTH)
+            .exact_size(rail_w)
             .show_separator_line(false)
             .frame(Frame::NONE.fill(chrome))
             .show(ui, |ui| {
                 views::rail::show(
                     ui,
+                    rail_w,
                     self.repos.get(self.active),
                     &self.globals.home,
                     &self.console,
@@ -4488,7 +4523,7 @@ impl eframe::App for Hadion {
             devops::palette::show(&ctx, &mut self.globals.palette, &view, &mut actions);
         }
 
-        views::toasts::show(&ctx, &mut self.toasts);
+        views::toasts::show(&ctx, &mut self.toasts, rail_w);
         views::graph::drag_overlay(&ctx);
 
         let dropped: Vec<PathBuf> = ctx.input(|i| {

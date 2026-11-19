@@ -13,7 +13,7 @@ use hadion_core::ops::GitOp;
 use super::Cx;
 use crate::devops::settings_page::Section;
 use crate::devops::{DevOpsAction, ShipTab, ci, govern, home, review, ship, workbench};
-use crate::state::{Action, Dialog, InsightsTab, Page, PullPref, SecurityTab};
+use crate::state::{Action, Dialog, InsightsTab, Page, PullPref, RailMode, SecurityTab};
 use crate::views::icons::Icon;
 
 pub const GO: &str = "Go to";
@@ -401,6 +401,26 @@ pub fn catalog(cx: &Cx) -> Catalog {
         .key("Ctrl+`")
         .kw("toggle shell console panel")
         .run(vec![Action::ToggleTerminal]),
+    );
+    c.push(
+        Command::new(
+            "app:rail",
+            match s.rail {
+                RailMode::Auto => "Collapse or expand the navigation",
+                RailMode::Expanded => "Collapse the navigation",
+                RailMode::Collapsed => "Expand the navigation",
+            },
+            APP,
+            if s.rail == RailMode::Collapsed {
+                Icon::PanelLeftOpen
+            } else {
+                Icon::PanelLeftClose
+            },
+        )
+        .hint("The rail on the left: page names beside the icons, or icons only")
+        .key("Ctrl+B")
+        .kw("toggle sidebar rail labels icons collapse expand")
+        .run(vec![Action::ToggleRail]),
     );
     c.push(
         Command::new(
