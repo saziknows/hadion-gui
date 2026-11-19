@@ -7,7 +7,7 @@
 //! them; for this file alone: `cargo build -p hadion-core --example
 //! fake_claude` first).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
 use std::time::{Duration, Instant};
@@ -16,20 +16,24 @@ use hadion_core::devops::ai::cli::{self, CliCall, CliErrorKind, Install};
 use hadion_core::devops::ai::{CliModel, Effort, Failure, Live, Prompt, Via};
 
 fn fake() -> PathBuf {
-    let exe = std::env::current_exe().unwrap();
-    let debug = exe.parent().and_then(Path::parent).unwrap();
     let name = if cfg!(windows) {
         "fake_claude.exe"
     } else {
         "fake_claude"
     };
-    let p = debug.join("examples").join(name);
-    assert!(
-        p.is_file(),
-        "{} is missing: run `cargo build -p hadion-core --example fake_claude` first",
-        p.display()
-    );
-    p
+    // The examples are in `target/debug/examples`; the test runs from
+    // `target/debug/deps` (Cargo before 1.100) or from
+    // `target/debug/build/hadion-core/<hash>/out` (1.100 on), so look up.
+    std::env::current_exe()
+        .unwrap()
+        .ancestors()
+        .map(|d| d.join("examples").join(name))
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| {
+            panic!(
+                "{name} is missing: run `cargo build -p hadion-core --example fake_claude` first"
+            )
+        })
 }
 
 /// Variables a parent shell (or a parent Claude Code) may have set; the

@@ -23,20 +23,24 @@ use hadion_core::devops::runtime::docker::{self, endpoint};
 use hadion_core::devops::runtime::matching::RefIndex;
 
 fn fake() -> PathBuf {
-    let exe = std::env::current_exe().unwrap();
-    let debug = exe.parent().and_then(Path::parent).unwrap();
     let name = if cfg!(windows) {
         "fake_docker.exe"
     } else {
         "fake_docker"
     };
-    let p = debug.join("examples").join(name);
-    assert!(
-        p.is_file(),
-        "{} is missing: run `cargo build -p hadion-core --example fake_docker` first",
-        p.display()
-    );
-    p
+    // The examples are in `target/debug/examples`; the test runs from
+    // `target/debug/deps` (Cargo before 1.100) or from
+    // `target/debug/build/hadion-core/<hash>/out` (1.100 on), so look up.
+    std::env::current_exe()
+        .unwrap()
+        .ancestors()
+        .map(|d| d.join("examples").join(name))
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| {
+            panic!(
+                "{name} is missing: run `cargo build -p hadion-core --example fake_docker` first"
+            )
+        })
 }
 
 /// The temp folder by its real name (CI runners use an 8.3 short one).
