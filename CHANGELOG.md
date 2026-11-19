@@ -6,17 +6,9 @@ All notable changes to Hadion are listed here. The format follows
 
 ## [Unreleased]
 
-### Changed
+## [0.2.0] - 2026-11-19
 
-- **Navigation rail**: page names now sit beside the icons, with more padding, and the rail
-  collapses to icons (`Ctrl+B`, the Collapse button, or Settings › Appearance, which also
-  offers an automatic mode for narrow windows). Hover is a soft highlight over the whole
-  row instead of a block behind the icon, the current page has an accent bar, and
-  explanations open beside the rail once the pointer rests.
-- **README**: a short tour with a screenshot of each main page; the full feature list moved to
-  `docs/features.md`, building and architecture to `docs/development.md`.
-- The Containers tab's context bar splits into two rows sooner, so its checkbox no longer
-  runs off the edge at 1,440 points.
+Containers on the Ship page, a new navigation sidebar, and a shorter README with screenshots.
 
 ### Added
 
@@ -36,6 +28,16 @@ All notable changes to Hadion are listed here. The format follows
 - `rail` and `pointer X Y` script commands (`pointer` hovers without moving the mouse),
   `HADION_STATE_DIR` (start from default settings and panel sizes) and
   `scripts/readme-shots.ps1`, which retakes the README screenshots.
+
+### Changed
+
+- **Navigation rail**: page names now sit beside the icons, with more padding, and the rail
+  collapses to icons (`Ctrl+B`, the Collapse button, or Settings › Appearance, which also
+  offers an automatic mode for narrow windows). Hover is a soft highlight over the whole
+  row instead of a block behind the icon, the current page has an accent bar, and
+  explanations open beside the rail once the pointer rests.
+- **README**: a short tour with a screenshot of each main page; the full feature list moved to
+  `docs/features.md`, building and architecture to `docs/development.md`.
 
 ### Fixed
 
@@ -81,6 +83,7 @@ The first public release.
   mode, desktop notifications, repository groups, issue-tracker links, in-app updates and crash
   reports. Icons from the Lucide set; every page fits windows down to 900 × 560.
 
-[Unreleased]: https://github.com/saziknows/hadion-gui/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/saziknows/hadion-gui/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/saziknows/hadion-gui/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/saziknows/hadion-gui/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/saziknows/hadion-gui/releases/tag/v0.1.0
